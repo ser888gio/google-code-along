@@ -26,7 +26,7 @@ const STEPS: { sublabel: string }[] = [
   { sublabel: "DONE" },
 ];
 
-const RS_TABS = ["Input", "Preview", "ER", "BPMN", "Flow", "Data", "Gantt", "Quality", "Summary"] as const;
+const RS_TABS = ["Preview", "BPMN", "Data", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
 
 // ─── Progress Tracker ─────────────────────────────────────────────────────────
@@ -172,6 +172,18 @@ function RsDocumentPanel({
           <BpmnPanel sessionId={sessionId} />
         ) : activeTab === "Data" ? (
           <DataflowPanel sessionId={sessionId} />
+        ) : activeTab === "Summary" ? (
+          <div className="flex h-full flex-col items-center justify-center gap-4">
+            <button
+              className="flex items-center gap-2 rounded bg-[#4a6659] px-5 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M7 1v8M4 6l3 3 3-3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M1 10v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              Download Requirements Specification
+            </button>
+          </div>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
             {activeTab} — not yet available
@@ -198,11 +210,6 @@ export default function ChatPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Stale-response guard: discard extraction results from earlier turns
   const extractNonceRef = useRef(0);
-
-  // Clear partial data when the session resets
-  useEffect(() => {
-    if (!sessionId) setRsPartial(null);
-  }, [sessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
