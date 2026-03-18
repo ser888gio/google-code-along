@@ -1,0 +1,26 @@
+import type { Config } from "jest";
+
+const config: Config = {
+  preset: "ts-jest",
+  testEnvironment: "jsdom",
+  setupFilesAfterFramework: [],
+  moduleNameMapper: {
+    "^@/(.*)$": "<rootDir>/$1",
+    "\\.(css|less|scss|sass)$": "<rootDir>/__mocks__/styleMock.js",
+  },
+  transform: {
+    "^.+\\.(ts|tsx)$": [
+      "ts-jest",
+      {
+        tsconfig: {
+          jsx: "react-jsx",
+          esModuleInterop: true,
+        },
+      },
+    ],
+  },
+  testMatch: ["**/__tests__/**/*.test.{ts,tsx}"],
+  setupFilesAfterFramework: [],
+};
+
+export default config;
