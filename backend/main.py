@@ -13,6 +13,7 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 from agent import rs_agent
+from generation import compile_rs_from_session, markdown_to_pdf
 
 load_dotenv()
 
@@ -144,4 +145,69 @@ async def chat_stream(req: ChatRequest):
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
+    )
+
+
+# --- Document generation & export endpoints ---
+
+
+class SessionRef(BaseModel):
+    session_id: str
+    user_id: str = "default_user"
+
+
+class DocumentResponse(BaseModel):
+    markdown: str | None
+    ready: bool
+
+
+@app.post("/document", response_model=DocumentResponse)
+async def get_document(req: SessionRef):
+    """Extract the generated RS document from a session.
+
+    Returns the markdown if [GENERATE_RS] was found in the conversation,
+    otherwise returns ready=False.
+    """
+    markdown = await compile_rs_from_session(
+        session_service=session_service,
+        app_name=APP_NAME,
+        user_id=req.user_id,
+        session_id=req.session_id,
+    )
+    return DocumentResponse(
+        markdown=markdown,
+        ready=markdown is not None,
+    )
+
+
+@app.post("/document/pdf")
+async def download_pdf(req: SessionRef):
+    """Download the RS document as a PDF.
+
+    Extracts the RS markdown from the session and converts it to PDF.
+    Returns 404 if no document has been generated yet.
+    """
+    from fastapi.responses import Response
+
+    markdown = await compile_rs_from_session(
+        session_service=session_service,
+        app_name=APP_NAME,
+        user_id=req.user_id,
+        session_id=req.session_id,
+    )
+    if markdown is None:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=404,
+            detail="No RS document found. Complete the conversation first.",
+        )
+
+    pdf_bytes = markdown_to_pdf(markdown)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": "attachment; filename=requirement_specification.pdf"
+        },
     )
