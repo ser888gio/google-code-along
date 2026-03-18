@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { streamChat, extractContext, downloadPdf, RsPartialData } from "../lib/api";
 import FileUpload from "./components/FileUpload";
 import BpmnPanel from "./components/BpmnPanel";
+import DataflowPanel from "./components/DataflowPanel";
 import RsLiveTemplate from "./components/RsLiveTemplate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -169,6 +170,8 @@ function RsDocumentPanel({
           <RsLiveTemplate rsPartial={rsPartial} onGenerateFull={onGenerateFull} />
         ) : activeTab === "BPMN" ? (
           <BpmnPanel sessionId={sessionId} />
+        ) : activeTab === "Data" ? (
+          <DataflowPanel sessionId={sessionId} />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
             {activeTab} — not yet available
@@ -303,7 +306,7 @@ export default function ChatPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
       {/* ── Left panel ─────────────────────────────────── */}
-      <div className="flex w-105 shrink-0 flex-col border-r border-gray-200 bg-white">
+      <div className="flex w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
           <span className="text-sm font-bold text-gray-800">Document Preprocessor</span>
@@ -388,7 +391,7 @@ export default function ChatPage() {
       </div>
 
       {/* ── Right panel ────────────────────────────────── */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex w-1/2 flex-col overflow-hidden">
         <RsDocumentPanel
           activeTab={activeTab}
           onTabChange={setActiveTab}

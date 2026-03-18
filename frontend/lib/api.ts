@@ -156,6 +156,32 @@ export async function generateBpmn(sessionId: string): Promise<BpmnResponse> {
   return res.json();
 }
 
+// ─── DataFlow ─────────────────────────────────────────────────────────────────
+
+export interface DataflowResponse {
+  ready: boolean;
+  mermaid?: string;
+  score?: number;
+  missing?: string[];
+}
+
+/**
+ * Ask the backend to check DFD readiness and, if ≥ 70%, generate a
+ * Mermaid Data Flow Diagram from the current session.
+ */
+export async function generateDataflow(sessionId: string): Promise<DataflowResponse> {
+  const res = await fetch(`${API_URL}/dataflow/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
+  return res.json();
+}
+
 /**
  * Upload a file to GCS via the backend, scoped to the given session folder.
  */
