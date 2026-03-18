@@ -72,22 +72,35 @@ def test_pdf_starts_with_pdf_header():
 
 
 def test_pdf_contains_expected_section_headings():
-    """Key section names should appear as text in the raw PDF bytes."""
-    result = markdown_to_pdf(SAMPLE_RS)
+    """Key section names appear in the parsed flowables (PDF content is compressed)."""
+    from reportlab.platypus import Paragraph
+
+    styles = _build_styles()
+    flowables = _parse_markdown_to_flowables(SAMPLE_RS, styles)
+    # Collect all text from Paragraph flowables
+    texts = " ".join(
+        f.text for f in flowables if isinstance(f, Paragraph)
+    )
     for heading in [
-        b"Executive Summary",
-        b"Functional Requirements",
-        b"Non-Functional Requirements",
-        b"Open Questions",
+        "Executive Summary",
+        "Functional Requirements",
+        "Non-Functional Requirements",
+        "Open Questions",
     ]:
-        assert heading in result, f"'{heading}' not found in PDF bytes"
+        assert heading in texts, f"'{heading}' not found in flowable text"
 
 
 def test_pdf_contains_requirement_ids():
-    """Requirement IDs (FR-001, NFR-001) should appear in the PDF."""
-    result = markdown_to_pdf(SAMPLE_RS)
-    assert b"FR-001" in result
-    assert b"NFR-001" in result
+    """Requirement IDs (FR-001, NFR-001) appear in the parsed flowables."""
+    from reportlab.platypus import Paragraph
+
+    styles = _build_styles()
+    flowables = _parse_markdown_to_flowables(SAMPLE_RS, styles)
+    texts = " ".join(
+        f.text for f in flowables if isinstance(f, Paragraph)
+    )
+    assert "FR-001" in texts
+    assert "NFR-001" in texts
 
 
 # ---------------------------------------------------------------------------

@@ -12,86 +12,15 @@ a live GCP/Vertex AI connection. They verify that:
   - /document/pdf returns 404 when no document has been generated
 """
 
+"""
+google.adk stubs are installed by conftest.py before collection — no stubs needed here.
+"""
+
 import json
-import sys
-import types
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-# ---------------------------------------------------------------------------
-# Build a minimal stub for google.adk so we can import main.py without
-# a real GCP installation in CI / test environments.
-# ---------------------------------------------------------------------------
-
-def _build_adk_stubs():
-    """Create minimal stubs for all google.adk modules used by main.py."""
-    # google namespace
-    google_mod = types.ModuleType("google")
-    google_mod.__path__ = []
-
-    # google.adk
-    adk_mod = types.ModuleType("google.adk")
-    adk_mod.__path__ = []
-
-    # google.adk.runners
-    runners_mod = types.ModuleType("google.adk.runners")
-    Runner = MagicMock()
-    runners_mod.Runner = Runner
-
-    # google.adk.sessions
-    sessions_mod = types.ModuleType("google.adk.sessions")
-    InMemorySessionService = MagicMock()
-    sessions_mod.InMemorySessionService = InMemorySessionService
-
-    # google.adk.agents
-    agents_mod = types.ModuleType("google.adk.agents")
-    agents_mod.Agent = MagicMock()
-
-    # google.genai
-    genai_mod = types.ModuleType("google.genai")
-    genai_mod.__path__ = []
-    types_mod = types.ModuleType("google.genai.types")
-
-    class _FakePart:
-        def __init__(self, text=""):
-            self.text = text
-
-        @staticmethod
-        def from_text(text=""):
-            return _FakePart(text=text)
-
-    class _FakeContent:
-        def __init__(self, role="user", parts=None):
-            self.role = role
-            self.parts = parts or []
-
-    types_mod.Part = _FakePart
-    types_mod.Content = _FakeContent
-    genai_mod.types = types_mod
-
-    # google.cloud.aiplatform (imported transitively)
-    aiplatform_mod = types.ModuleType("google.cloud")
-    aiplatform_mod.__path__ = []
-    aiplatform_sub = types.ModuleType("google.cloud.aiplatform")
-
-    # Register all stubs
-    sys.modules.setdefault("google", google_mod)
-    sys.modules["google.adk"] = adk_mod
-    sys.modules["google.adk.runners"] = runners_mod
-    sys.modules["google.adk.sessions"] = sessions_mod
-    sys.modules["google.adk.agents"] = agents_mod
-    sys.modules["google.genai"] = genai_mod
-    sys.modules["google.genai.types"] = types_mod
-    sys.modules["google.cloud"] = aiplatform_mod
-    sys.modules["google.cloud.aiplatform"] = aiplatform_sub
-
-    return runners_mod, sessions_mod
-
-
-_runners_mod, _sessions_mod = _build_adk_stubs()
-
-# Now safe to import FastAPI app
-from httpx import AsyncClient, ASGITransport  # noqa: E402
+from httpx import AsyncClient, ASGITransport
 
 
 # ---------------------------------------------------------------------------
