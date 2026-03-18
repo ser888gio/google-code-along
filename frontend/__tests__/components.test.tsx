@@ -19,7 +19,13 @@ import "@testing-library/jest-dom";
 // Mock the api module before importing the page
 jest.mock("../lib/api", () => ({
   streamChat: jest.fn(),
+  extractContext: jest.fn().mockResolvedValue(null),
+  downloadPdf: jest.fn().mockResolvedValue(undefined),
 }));
+
+// Stub child components that have their own complex deps
+jest.mock("../app/components/FileUpload", () => () => <div data-testid="file-upload" />);
+jest.mock("../app/components/BpmnPanel", () => () => <div data-testid="bpmn-panel" />);
 
 // Mock next/navigation (Next.js may inject this)
 jest.mock("next/navigation", () => ({
@@ -39,9 +45,10 @@ jest.mock("@skodaflow/web-library", () => ({
 }));
 
 import ChatPage from "../app/page";
-import { streamChat } from "../lib/api";
+import { streamChat, extractContext } from "../lib/api";
 
 const mockStreamChat = streamChat as jest.Mock;
+const mockExtractContext = extractContext as jest.Mock;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -59,11 +66,11 @@ function resolveStream(chunk = "Hello! I am your AI consultant.", sessionId = "t
       _sessionId: string | null,
       onChunk: (text: string) => void,
       onSessionId: (id: string) => void,
-      onDone: () => void
+      onDone: () => Promise<void>
     ) => {
       onSessionId(sessionId);
       onChunk(chunk);
-      onDone();
+      await onDone();
     }
   );
 }
@@ -307,7 +314,7 @@ describe("ChatPage — error state", () => {
 // ---------------------------------------------------------------------------
 
 describe("ChatPage — tab bar", () => {
-  const TABS = ["Input", "Preview", "ER", "Flow", "Data", "Gantt", "Quality", "Summary"];
+  const TABS = ["Input", "Preview", "ER", "BPMN", "Flow", "Data", "Gantt", "Quality", "Summary"];
 
   it("renders all RS tabs", () => {
     renderPage();
@@ -332,7 +339,8 @@ describe("ChatPage — tab bar", () => {
     const previewTab = screen.getByRole("button", { name: "Preview" });
     await act(async () => { fireEvent.click(erTab); });
     await act(async () => { fireEvent.click(previewTab); });
-    expect(screen.getByText("Requirements Specification")).toBeInTheDocument();
+    // "Requirements Specification" appears in both the tab bar label and the live template header
+    expect(screen.getAllByText("Requirements Specification").length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -365,24 +373,70 @@ describe("ChatPage — progress tracker", () => {
 });
 
 // ---------------------------------------------------------------------------
-// RS preview content
+// RS live template
 // ---------------------------------------------------------------------------
 
-describe("ChatPage — RS preview", () => {
-  it("shows mock RS content in the Preview tab by default", () => {
-    renderPage();
-    // MOCK_RS data includes this title
-    expect(screen.getByText("Requirements Specification")).toBeInTheDocument();
+describe("ChatPage — RS live template", () => {
+  beforeEach(() => {
+    mockExtractContext.mockReset();
+    mockExtractContext.mockResolvedValue(null);
   });
 
-  it("shows mock RS project name", () => {
+  it("shows the Requirements Specification title in the Preview tab", () => {
     renderPage();
-    expect(screen.getByText(/Automated Sales Report System/i)).toBeInTheDocument();
+    // Appears in both the tab bar label and the live template header
+    expect(screen.getAllByText("Requirements Specification").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows section headings in the preview", () => {
+  it("shows all 8 section labels as placeholders before any conversation", () => {
     renderPage();
-    expect(screen.getByText("1. Project Overview")).toBeInTheDocument();
-    expect(screen.getByText("3. Functional Requirements")).toBeInTheDocument();
+    expect(screen.getByText("Executive Summary")).toBeInTheDocument();
+    expect(screen.getByText("Current State (As-Is)")).toBeInTheDocument();
+    expect(screen.getByText("Desired Future State (To-Be)")).toBeInTheDocument();
+    expect(screen.getByText("Scope")).toBeInTheDocument();
+    expect(screen.getByText("Functional Requirements")).toBeInTheDocument();
+    expect(screen.getByText("Non-Functional Requirements")).toBeInTheDocument();
+    expect(screen.getByText("Assumptions & Constraints")).toBeInTheDocument();
+    expect(screen.getByText("Open Questions")).toBeInTheDocument();
+  });
+
+  it("shows placeholder text when rsPartial is null", () => {
+    renderPage();
+    const placeholders = screen.getAllByText(/Gathering information/i);
+    expect(placeholders.length).toBe(8);
+  });
+
+  it("updates section content after a turn when extractContext returns data", async () => {
+    mockExtractContext.mockResolvedValue({
+      completeness: 35,
+      sections: {
+        executive_summary:           { filled: false, content: null },
+        current_state:               { filled: true,  content: "Team uses spreadsheets today." },
+        desired_future_state:        { filled: false, content: null },
+        scope:                       { filled: false, content: null },
+        functional_requirements:     { filled: false, content: null },
+        non_functional_requirements: { filled: false, content: null },
+        assumptions_and_constraints: { filled: false, content: null },
+        open_questions:              { filled: false, content: null },
+      },
+    });
+    resolveStream("Great, let me note that down.");
+    renderPage();
+
+    const textarea = screen.getByPlaceholderText(/Describe your project/i);
+    await userEvent.type(textarea, "We use spreadsheets today.");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Team uses spreadsheets today.")).toBeInTheDocument();
+    });
+  });
+
+  it("shows completeness progress bar", () => {
+    renderPage();
+    expect(screen.getAllByText(/0%/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/80% to generate/i)).toBeInTheDocument();
   });
 });

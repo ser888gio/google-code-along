@@ -7,7 +7,7 @@ from google.adk.agents import Agent
 from .prompt import SYSTEM_PROMPT
 
 # ADK model string for Gemini 1.5 Pro on Vertex AI
-MODEL = "gemini-1.5-pro"
+MODEL = "gemini-3-pro"
 
 rs_agent = Agent(
     name="rs_consultant",

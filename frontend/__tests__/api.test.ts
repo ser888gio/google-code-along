@@ -5,7 +5,7 @@
  * HTTP calls and correctly parse SSE events / responses.
  */
 
-import { streamChat, downloadPdf, getDocument } from "../lib/api";
+import { streamChat, downloadPdf, getDocument, extractContext } from "../lib/api";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -199,6 +199,65 @@ describe("getDocument", () => {
     global.fetch = jest.fn().mockResolvedValue(mockRes);
 
     await expect(getDocument("s1")).rejects.toThrow("Error 500");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractContext
+// ---------------------------------------------------------------------------
+
+describe("extractContext", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("calls /context/extract with the session_id", async () => {
+    const payload = {
+      completeness: 40,
+      sections: {
+        executive_summary:           { filled: false, content: null },
+        current_state:               { filled: true,  content: "Some current state." },
+        desired_future_state:        { filled: false, content: null },
+        scope:                       { filled: false, content: null },
+        functional_requirements:     { filled: false, content: null },
+        non_functional_requirements: { filled: false, content: null },
+        assumptions_and_constraints: { filled: false, content: null },
+        open_questions:              { filled: false, content: null },
+      },
+    };
+    const fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue(payload),
+    });
+    global.fetch = fetch;
+
+    const result = await extractContext("session-abc");
+
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/context/extract"),
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"session_id":"session-abc"'),
+      })
+    );
+    expect(result?.completeness).toBe(40);
+    expect(result?.sections.current_state.filled).toBe(true);
+  });
+
+  it("returns null when the server responds with a non-OK status", async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 404 });
+
+    const result = await extractContext("bad-session");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null on network error", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("Network failure"));
+
+    const result = await extractContext("any-session");
+
+    expect(result).toBeNull();
   });
 });
 

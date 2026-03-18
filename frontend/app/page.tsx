@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat } from "../lib/api";
+import { streamChat, extractContext, downloadPdf, RsPartialData } from "../lib/api";
+import FileUpload from "./components/FileUpload";
+import BpmnPanel from "./components/BpmnPanel";
+import RsLiveTemplate from "./components/RsLiveTemplate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,91 +25,51 @@ const STEPS: { sublabel: string }[] = [
   { sublabel: "DONE" },
 ];
 
-const RS_TABS = ["Input", "Preview", "ER", "Flow", "Data", "Gantt", "Quality", "Summary"] as const;
+const RS_TABS = ["Input", "Preview", "ER", "BPMN", "Flow", "Data", "Gantt", "Quality", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
-
-// ─── Hardcoded RS preview data ─────────────────────────────────────────────────
-
-const MOCK_RS = {
-  title: "Requirements Specification",
-  project: "Automated Sales Report System",
-  version: "0.1 — Draft",
-  date: "2026-03-18",
-  sections: [
-    {
-      heading: "1. Project Overview",
-      body: `The client requires an automated system that collects daily sales data from the existing CRM (Salesforce) and generates a consolidated PDF report distributed via email every morning at 07:00 CET.\n\nThe current process is entirely manual — a sales analyst spends approximately 2 hours each morning pulling data from multiple spreadsheets. The primary pain point is error-prone copy-paste and delayed delivery to management.`,
-    },
-    {
-      heading: "2. Stakeholders",
-      body: `• Product Owner: Head of Sales Operations\n• Primary Users: Sales Analysts (×3), Regional Managers (×8)\n• IT Contact: Infrastructure Team Lead\n• Sponsor: VP of Sales`,
-    },
-    {
-      heading: "3. Functional Requirements",
-      body: `FR-01  The system SHALL connect to Salesforce via REST API and extract the previous day's closed deals.\nFR-02  The system SHALL aggregate data by region, product line, and sales rep.\nFR-03  The system SHALL generate a PDF report using a predefined template.\nFR-04  The system SHALL deliver the report by email to a configurable recipient list by 07:00 CET.\nFR-05  The system SHALL send an alert email if the pipeline fails or data is unavailable.`,
-    },
-    {
-      heading: "4. Non-Functional Requirements",
-      body: `NFR-01  Performance: Report generation must complete within 3 minutes.\nNFR-02  Availability: The pipeline must succeed on ≥ 99% of business days.\nNFR-03  Security: Salesforce credentials must be stored in a secrets manager; no plain-text config.\nNFR-04  Maintainability: A non-developer must be able to update the recipient list without code changes.`,
-    },
-    {
-      heading: "5. Out of Scope (MVP)",
-      body: `• Real-time dashboards\n• Integration with ERP systems\n• Mobile application\n• Historical trend analysis beyond 90 days`,
-    },
-    {
-      heading: "6. Open Questions",
-      body: `[ ] Who approves the PDF template design?\n[ ] Is the Salesforce sandbox available for integration testing?\n[ ] What is the fallback if the 07:00 CET deadline is missed?`,
-    },
-  ],
-};
 
 // ─── Progress Tracker ─────────────────────────────────────────────────────────
 
 function ProgressTracker({ currentStep }: { currentStep: Step }) {
   return (
-    <div className="flex items-center justify-between px-6 pt-5 pb-3">
+    <div className="flex px-6 pt-5 pb-3">
       {STEPS.map((step, i) => {
         const stepNum = (i + 1) as Step;
         const isActive = stepNum === currentStep;
         const isDone = stepNum < currentStep;
         return (
-          <div key={step.sublabel} className="flex flex-1 items-start">
-            {/* connector line (before every step except first) */}
-            {i > 0 && (
+          <div key={step.sublabel} className="relative flex flex-1 flex-col items-center">
+            {i < STEPS.length - 1 && (
               <div
-                className={`mt-4 h-px flex-1 shrink-0 transition-colors ${
-                  isDone ? "bg-[#4caf50]" : "bg-gray-200"
+                className={`absolute left-1/2 top-4 h-px w-full -translate-y-1/2 transition-colors ${
+                  stepNum < currentStep ? "bg-[#4caf50]" : "bg-gray-200"
                 }`}
               />
             )}
-            <div className="flex flex-col items-center gap-1">
-              <div
-                className={`flex h-8 w-8 items-center justify-center rounded border-2 text-sm font-semibold transition-all ${
-                  isActive
-                    ? "border-[#4caf50] bg-white text-[#4caf50]"
-                    : isDone
-                    ? "border-[#4caf50] bg-[#4caf50] text-white"
-                    : "border-gray-300 bg-white text-gray-400"
-                }`}
-              >
-                {isDone ? (
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M2 7l3.5 3.5L12 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                ) : (
-                  stepNum
-                )}
-              </div>
-              <span
-                className={`text-[9px] font-semibold tracking-wide ${
-                  isActive || isDone ? "text-[#4caf50]" : "text-gray-400"
-                }`}
-              >
-                {step.sublabel}
-              </span>
+            <div
+              className={`relative z-10 flex h-8 w-8 items-center justify-center bg-white rounded border-2 text-sm font-semibold transition-all ${
+                isActive
+                  ? "border-[#4caf50] text-[#4caf50]"
+                  : isDone
+                  ? "border-[#4caf50] bg-[#4caf50] text-white"
+                  : "border-gray-300 text-gray-400"
+              }`}
+            >
+              {isDone ? (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M2 7l3.5 3.5L12 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                stepNum
+              )}
             </div>
-            {/* connector line (after last step — invisible spacer) */}
-            {i === STEPS.length - 1 && <div className="flex-1" />}
+            <span
+              className={`mt-1 text-[9px] font-semibold tracking-wide ${
+                isActive || isDone ? "text-[#4caf50]" : "text-gray-400"
+              }`}
+            >
+              {step.sublabel}
+            </span>
           </div>
         );
       })}
@@ -161,57 +124,20 @@ function ErrorCard({ message, onDismiss }: { message: string; onDismiss: () => v
   );
 }
 
-// ─── RS Preview ───────────────────────────────────────────────────────────────
-
-function RsPreview({ content }: { content: typeof MOCK_RS | null }) {
-  if (!content) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-        <div className="h-px w-16 bg-gray-300" />
-        <p className="text-base font-medium text-gray-400">Requirements Specification</p>
-        <p className="text-sm text-gray-400">
-          The document fills in automatically<br />during the conversation
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="h-full overflow-y-auto p-6">
-      <div className="mx-auto max-w-3xl rounded bg-white p-8 shadow-sm">
-        {/* Document header */}
-        <div className="mb-6 border-b border-gray-100 pb-6">
-          <h1 className="text-2xl font-bold text-gray-900">{content.title}</h1>
-          <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-500">
-            <span><span className="font-medium text-gray-700">Project:</span> {content.project}</span>
-            <span><span className="font-medium text-gray-700">Version:</span> {content.version}</span>
-            <span><span className="font-medium text-gray-700">Date:</span> {content.date}</span>
-          </div>
-        </div>
-        {/* Sections */}
-        <div className="space-y-6">
-          {content.sections.map((s) => (
-            <div key={s.heading}>
-              <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-[#1a3a2a]">{s.heading}</h2>
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{s.body}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── RS Document Panel ────────────────────────────────────────────────────────
 
 function RsDocumentPanel({
   activeTab,
   onTabChange,
-  rsContent,
+  rsPartial,
+  sessionId,
+  onGenerateFull,
 }: {
   activeTab: RsTab;
   onTabChange: (t: RsTab) => void;
-  rsContent: typeof MOCK_RS | null;
+  rsPartial: RsPartialData | null;
+  sessionId: string | null;
+  onGenerateFull: () => void;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -220,12 +146,12 @@ function RsDocumentPanel({
         <span className="mr-4 border-r border-gray-200 py-3 pr-4 text-sm font-semibold text-gray-800">
           Requirements Specification
         </span>
-        <div className="flex">
+        <div className="flex overflow-x-auto">
           {RS_TABS.map((tab) => (
             <button
               key={tab}
               onClick={() => onTabChange(tab)}
-              className={`px-3 py-3 text-sm transition-colors ${
+              className={`whitespace-nowrap px-3 py-3 text-sm transition-colors ${
                 activeTab === tab
                   ? "border-b-2 border-[#1a3a2a] bg-[#1a3a2a] text-white"
                   : "text-gray-500 hover:text-gray-800"
@@ -240,7 +166,9 @@ function RsDocumentPanel({
       {/* Content area */}
       <div className="flex-1 overflow-hidden bg-gray-50">
         {activeTab === "Preview" ? (
-          <RsPreview content={rsContent} />
+          <RsLiveTemplate rsPartial={rsPartial} onGenerateFull={onGenerateFull} />
+        ) : activeTab === "BPMN" ? (
+          <BpmnPanel sessionId={sessionId} />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
             {activeTab} — not yet available
@@ -261,11 +189,17 @@ export default function ChatPage() {
   const [currentStep, setCurrentStep] = useState<Step>(1);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RsTab>("Preview");
-  // Start with mock data visible so the right panel is populated
-  const [rsContent, setRsContent] = useState<typeof MOCK_RS | null>(MOCK_RS);
+  const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Stale-response guard: discard extraction results from earlier turns
+  const extractNonceRef = useRef(0);
+
+  // Clear partial data when the session resets
+  useEffect(() => {
+    if (!sessionId) setRsPartial(null);
+  }, [sessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -309,6 +243,9 @@ export default function ChatPage() {
     const assistantId = addMessage("assistant", "", true);
 
     let fullText = "";
+    // Capture the session ID synchronously from the SSE stream.
+    // React's sessionId state may still be null on the first turn when onDone fires.
+    let capturedSessionId = sessionId;
 
     await streamChat(
       text,
@@ -317,16 +254,26 @@ export default function ChatPage() {
         fullText += chunk;
         appendToMessage(assistantId, chunk);
       },
-      (id) => setSessionId(id),
-      () => {
+      (id) => {
+        capturedSessionId = id;
+        setSessionId(id);
+      },
+      async () => {
         finalizeMessage(assistantId);
         setIsStreaming(false);
 
-        const rsMatch = fullText.match(/```rs\n([\s\S]*?)```/);
-        if (rsMatch || fullText.includes("[GENERATE_RS]")) {
+        if (fullText.includes("[GENERATE_RS]")) {
           setCurrentStep(3);
-          // In production, replace MOCK_RS with parsed content from the agent
-          setRsContent(MOCK_RS);
+        }
+
+        // Progressive RS fill — fire and forget; chat never blocks on this
+        if (capturedSessionId) {
+          const nonce = ++extractNonceRef.current;
+          const partial = await extractContext(capturedSessionId);
+          // Only apply if a newer turn hasn't already superseded this one
+          if (partial && nonce === extractNonceRef.current) {
+            setRsPartial(partial);
+          }
         }
       },
       (err) => {
@@ -341,6 +288,15 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+  }
+
+  async function handleGenerateFull() {
+    if (!sessionId) return;
+    try {
+      await downloadPdf(sessionId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate document");
     }
   }
 
@@ -387,6 +343,14 @@ export default function ChatPage() {
           <div ref={bottomRef} />
         </div>
 
+        {/* File upload */}
+        <div className="shrink-0 border-t border-gray-100 px-4 pb-2 pt-3">
+          <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+            Attach a file
+          </p>
+          <FileUpload sessionId={sessionId} />
+        </div>
+
         {/* Input area */}
         <div className="shrink-0 border-t border-gray-200 p-3">
           <div className="flex items-end gap-2">
@@ -428,7 +392,9 @@ export default function ChatPage() {
         <RsDocumentPanel
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          rsContent={rsContent}
+          rsPartial={rsPartial}
+          sessionId={sessionId}
+          onGenerateFull={handleGenerateFull}
         />
       </div>
     </div>

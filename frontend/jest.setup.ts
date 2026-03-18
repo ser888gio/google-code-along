@@ -16,3 +16,8 @@ if (typeof globalThis.ReadableStream === "undefined") {
   const { ReadableStream } = require("stream/web");
   globalThis.ReadableStream = ReadableStream;
 }
+
+// JSDOM does not implement scrollIntoView — stub it globally
+if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
