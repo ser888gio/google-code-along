@@ -1,0 +1,7 @@
+google-adk
+google-cloud-aiplatform
+google-cloud-storage
+fastapi
+uvicorn[standard]
+python-dotenv
+reportlab
