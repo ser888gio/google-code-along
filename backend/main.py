@@ -17,6 +17,7 @@ from agent import rs_agent
 from generation import compile_rs_from_session, markdown_to_pdf
 from bpmn import check_completeness, generate_bpmn_diagram
 from context import extract_rs_context
+from dataflow import check_dfd_completeness, generate_dataflow_diagram
 
 load_dotenv()
 
@@ -298,6 +299,46 @@ async def bpmn_generate(req: BpmnRequest):
 
     mermaid = await generate_bpmn_diagram(conversation_text)
     return BpmnResponse(ready=True, mermaid=mermaid, score=score)
+
+
+# --- DataFlow diagram generation ---
+
+
+class DataflowRequest(BaseModel):
+    session_id: str
+    user_id: str = "default_user"
+
+
+class DataflowResponse(BaseModel):
+    ready: bool
+    mermaid: str | None = None
+    score: int | None = None
+    missing: list[str] | None = None
+
+
+@app.post("/dataflow/generate", response_model=DataflowResponse)
+async def dataflow_generate(req: DataflowRequest):
+    """Check DFD readiness and generate a Mermaid Data Flow Diagram if score ≥ 70%."""
+    session = await session_service.get_session(
+        app_name=APP_NAME,
+        user_id=req.user_id,
+        session_id=req.session_id,
+    )
+    if session is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    conversation_text = _extract_conversation_text(session)
+
+    completeness = await check_dfd_completeness(conversation_text)
+    score: int = completeness.get("score", 0)
+    missing: list[str] = completeness.get("missing", [])
+
+    if score < 70:
+        return DataflowResponse(ready=False, score=score, missing=missing)
+
+    mermaid = await generate_dataflow_diagram(conversation_text)
+    return DataflowResponse(ready=True, mermaid=mermaid, score=score)
 
 
 # --- Live RS context extraction ---
