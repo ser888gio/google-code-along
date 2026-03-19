@@ -22,7 +22,8 @@ _COLLECTION = os.getenv("FIRESTORE_COLLECTION", "srs_sessions")
 
 def _client() -> firestore.Client:
     project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    return firestore.Client(project=project)
+    database = os.getenv("FIRESTORE_DATABASE", "businesspersona")
+    return firestore.Client(project=project, database=database)
 
 
 def _srs_to_doc(session_id: str, srs: dict[str, Any]) -> dict[str, Any]:
