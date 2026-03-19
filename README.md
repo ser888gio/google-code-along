@@ -1,20 +1,25 @@
-# Introduction 
-TODO: Give a short introduction of your project. Let this section explain the objectives or the motivation behind this project. 
+# Agentic Spark Code Along with Google
+# Business Analyst AI Guide
 
-# Getting Started
-TODO: Guide users through getting your code up and running on their own system. In this section you can talk about:
-1.	Installation process
-2.	Software dependencies
-3.	Latest releases
-4.	API references
+### Project Team
+| Name | Email |
+| :--- | :--- |
+| Petr Kaiser | petr.kaiser@skoda-auto.cz |
+| Tetiana Lukanieva | Tetiana.Lukanieva@skoda-auto.cz |
+| Sergiu Nica | sergiu.nica@skoda-auto.cz |
+| Luboš Polák | lubos.polak@greencode.cz |
+| Jan Prokeš | jan.prokes@skoda-auto.cz |
+| David Schwarz | David.Schwarz@volkswagen.de |
+| Jaroslav Štěpán | Jaroslav.Stepan3@skoda-auto.cz |
+| Igor Votintsev | Igor.Votintsev@skoda-auto.cz |
+| Lukáš Zendel | lukas.zendel@skoda-auto.cz |
 
-# Build and Test
-TODO: Describe and show how to build your code and run the tests. 
+---
 
-# Contribute
-TODO: Explain how other users and developers can contribute to make your code better. 
+### Shrnutí projektu
+Projekt se zaměřuje na vytvoření „Business Analytics AI Persony“, která bude interaktivně pomáhat business uživatelům popsat jejich požadavky a tvořit funkční specifikace bez nutnosti složité manuální práce. Cílem je, aby AI průvodce kladl správné otázky, zpracoval vstupy z chatu, meetingů či dokumentů a následně automaticky sestavil ucelenou a kvalitní Requirement Specification.
 
-If you want to learn more about creating good readme files then refer the following [guidelines](https://docs.microsoft.com/en-us/azure/devops/repos/git/create-a-readme?view=azure-devops). You can also seek inspiration from the below readme files:
-- [ASP.NET Core](https://github.com/aspnet/Home)
-- [Visual Studio Code](https://github.com/Microsoft/vscode)
-- [Chakra Core](https://github.com/Microsoft/ChakraCore)
+### Project Summary
+This project focuses on creating a "Business Analytics AI Persona" that will interactively help business users describe their requirements and generate functional specifications without the need for complex manual work. The goal is for the AI guide to ask the right questions, process inputs from chats, meetings, or documents, and then automatically compile a comprehensive and high-quality Requirement Specification.
+
+---
