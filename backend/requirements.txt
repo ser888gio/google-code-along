@@ -1,6 +1,7 @@
 google-adk
 google-cloud-aiplatform
 google-cloud-storage
+google-cloud-firestore
 fastapi
 uvicorn[standard]
 python-dotenv

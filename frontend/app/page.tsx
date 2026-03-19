@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, downloadPdf, RsPartialData } from "../lib/api";
+import { streamChat, extractContext, downloadPdf, getFirestoreData, RsPartialData, SrsData } from "../lib/api";
 import FileUpload from "./components/FileUpload";
 import BpmnPanel from "./components/BpmnPanel";
 import DataflowPanel from "./components/DataflowPanel";
 import RsLiveTemplate from "./components/RsLiveTemplate";
+import FirestoreSrsPanel from "./components/FirestoreSrsPanel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ interface Message {
   streaming?: boolean;
 }
 
-const RS_TABS = ["Preview", "BPMN", "Data", "Summary"] as const;
+const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
@@ -76,12 +77,14 @@ function RsDocumentPanel({
   rsPartial,
   sessionId,
   onGenerateFull,
+  srsData,
 }: {
   activeTab: RsTab;
   onTabChange: (t: RsTab) => void;
   rsPartial: RsPartialData | null;
   sessionId: string | null;
   onGenerateFull: () => void;
+  srsData: SrsData | null;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -115,6 +118,8 @@ function RsDocumentPanel({
           <BpmnPanel sessionId={sessionId} />
         ) : activeTab === "Data" ? (
           <DataflowPanel sessionId={sessionId} />
+        ) : activeTab === "Database" ? (
+          <FirestoreSrsPanel data={srsData} />
         ) : activeTab === "Summary" ? (
           <div className="flex h-full flex-col items-center justify-center gap-4">
             <button
@@ -147,6 +152,7 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RsTab>("Preview");
   const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
+  const [srsData, setSrsData] = useState<SrsData | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -214,10 +220,14 @@ export default function ChatPage() {
         // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
           const nonce = ++extractNonceRef.current;
-          const partial = await extractContext(capturedSessionId);
+          const [partial, fsData] = await Promise.all([
+            extractContext(capturedSessionId),
+            getFirestoreData(capturedSessionId),
+          ]);
           // Only apply if a newer turn hasn't already superseded this one
-          if (partial && nonce === extractNonceRef.current) {
-            setRsPartial(partial);
+          if (nonce === extractNonceRef.current) {
+            if (partial) setRsPartial(partial);
+            if (fsData) setSrsData(fsData);
           }
         }
       },
@@ -336,6 +346,7 @@ export default function ChatPage() {
           rsPartial={rsPartial}
           sessionId={sessionId}
           onGenerateFull={handleGenerateFull}
+          srsData={srsData}
         />
       </div>
     </div>

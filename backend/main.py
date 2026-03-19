@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import uuid
@@ -18,6 +19,7 @@ from generation import compile_rs_from_session, markdown_to_pdf, compile_srs_jso
 from bpmn import check_completeness, generate_bpmn_diagram
 from context import extract_rs_context
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
+from firestore import upsert_srs_fields, get_srs_fields
 
 load_dotenv()
 
@@ -412,4 +414,52 @@ async def context_extract(req: ContextRequest):
 
     conversation_text = _extract_conversation_text(session)
     result = await extract_rs_context(conversation_text)
+
+    # Fire-and-forget: persist full SRS to Firestore without blocking the response
+    asyncio.create_task(
+        _persist_srs_to_firestore(
+            session_id=req.session_id,
+            user_id=req.user_id,
+        )
+    )
+
     return result
+
+
+async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
+    """Compile the full SRS JSON and upsert it into Firestore.
+
+    Runs in the background — failures are logged and never surface to the user.
+    """
+    try:
+        srs_json = await compile_srs_json_from_session(
+            session_service=session_service,
+            app_name=APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        if srs_json:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, upsert_srs_fields, session_id, srs_json)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[Firestore] upsert failed for session {session_id}: {exc}")
+
+
+# --- Firestore data retrieval ---
+
+
+class FirestoreDataResponse(BaseModel):
+    session_id: str
+    data: dict | None = None
+
+
+@app.get("/firestore/data/{session_id}", response_model=FirestoreDataResponse)
+async def firestore_data(session_id: str):
+    """Return the latest SRS data stored in Firestore for *session_id*.
+
+    The frontend polls this endpoint after each turn to refresh the right panel.
+    Returns data=null if no document has been written yet.
+    """
+    loop = asyncio.get_event_loop()
+    doc = await loop.run_in_executor(None, get_srs_fields, session_id)
+    return FirestoreDataResponse(session_id=session_id, data=doc)
