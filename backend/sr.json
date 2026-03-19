@@ -1,0 +1,29 @@
+{
+  "document": "Discovery Session Agenda",
+  "blocks": {
+    "1. Context & Business Problem": {
+      "questions": {
+        "1.1 Context": "How does it work today? (high-level process, where it hurts). What triggered the request (audit, legislation, deadline, efficiency...)",
+        "1.2 Business Problem": "Who is affected? (users, teams, number of people / units — roughly)"
+      }
+    },
+    "2. Target State & Success": {
+      "questions": {
+        "2.1 Target State": "What exactly should be different?",
+        "2.2 Success": "Define 3–5 success criteria (measurable or observable). Priority: must-have / should-have / nice-to-have"
+      }
+    },
+    "3. Scope — In/Out + Boundaries": {
+      "questions": {
+        "3.1 Scope — In/Out": "In-scope: features / processes / reports / automations. Out-of-scope (what we are consciously not doing now)",
+        "3.2 Boundaries": "Dependencies: other teams, ongoing projects, SME availability"
+      }
+    },
+    "4. Data, Systems, Integrations & Access": {
+      "questions": {
+        "4.1 Data & Systems": "What data is needed, where does it come from, and who owns it? Data sensitivity (personal data, financial sensitivity, contracts)",
+        "4.2 Integrations & Access": "Integration needs (SAP, data marts, SharePoint, email, documents...)"
+      }
+    }
+  }
+}
