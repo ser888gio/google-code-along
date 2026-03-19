@@ -153,6 +153,7 @@ export default function ChatPage() {
   const [activeTab, setActiveTab] = useState<RsTab>("Preview");
   const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
   const [srsData, setSrsData] = useState<SrsData | null>(null);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -287,17 +288,19 @@ export default function ChatPage() {
           <div ref={bottomRef} />
         </div>
 
-        {/* File upload */}
-        <div className="shrink-0 border-t border-gray-100 px-4 pb-2 pt-3">
-          <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-            Attach a file
-          </p>
-          <FileUpload sessionId={sessionId} />
-        </div>
-
         {/* Input area */}
         <div className="shrink-0 border-t border-gray-200 p-3">
           <div className="flex items-end gap-2">
+            <button
+              onClick={() => setUploadOpen(true)}
+              title="Attach a file"
+              className="flex shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 hover:border-[#4caf50] hover:text-[#4caf50] transition-colors"
+              style={{ width: 40, height: 40 }}
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M9 4v10M4 9h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
             <textarea
               ref={textareaRef}
               value={input}
@@ -329,6 +332,30 @@ export default function ChatPage() {
             </button>
           </div>
         </div>
+
+        {/* File upload modal */}
+        {uploadOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={() => setUploadOpen(false)}
+          >
+            <div
+              className="w-80 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-800">Attach a file</span>
+                <button
+                  onClick={() => setUploadOpen(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+              <FileUpload sessionId={sessionId} onUploaded={() => { setUploadOpen(false); }} />
+            </div>
+          </div>
+        )}
 
         {/* Disclaimer */}
         <div className="shrink-0 px-4 py-1.5 text-center">
