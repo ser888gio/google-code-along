@@ -351,6 +351,7 @@ export default function ChatPage() {
     if (analysisResult.status === "complete" && analysisResult.analysis) {
       setFinalAnalysis(analysisResult.analysis);
       setFinalizingStatus("complete");
+      setActiveTab("Analysis");
     }
   }
 

@@ -243,6 +243,10 @@ async def chat_stream(req: ChatRequest):
                 logger.debug(
                     f"Discovery fields extracted: session_id={session_id} completeness={discovery_fields.get('completeness')}%"
                 )
+                # Persist the latest discovery state so history restore reflects it
+                loop.run_in_executor(
+                    None, upsert_discovery_state, session_id, discovery_fields
+                )
             except Exception as exc:
                 logger.warning(
                     f"extract_discovery_fields failed for session_id={session_id}: {exc}"
