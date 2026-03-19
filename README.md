@@ -24,3 +24,29 @@ This project focuses on creating a "Business Analytics AI Persona" that will int
 
 ---
  Miro link https://miro.com/app/board/uXjVGvPUWIc=/?share_link_id=717213042622
+
+ ### Business basic questions
+
+ Discovery session agenda questions:
+ 
+**1) Context & Business Problem** _(15 min)_
+- "How does it work today?" (high-level process, where it hurts)
+- What triggered the request (audit, legislation, deadline, efficiency...)
+- Who is affected (users, teams, number of people / units – roughly)
+ 
+**2) Target State & Success** _(15 min)_
+- What exactly should be different?
+- Define 3–5 success criteria (measurable or observable)
+- Priority: must-have / should-have / nice-to-have
+ 
+**3) Scope – in/out + boundaries** _(10 min)_
+- In-scope: features / processes / reports / automations
+- Out-of-scope (what we are consciously not doing now)
+- Dependencies: other teams, ongoing projects, SME availability
+ 
+**4) Data, Systems, Integrations & Access** _(10 min)_
+- What data is needed, where does it come from, and who owns it?
+- Integration needs (SAP, data marts, SharePoint, email, documents...)
+- Data sensitivity (personal data, financial sensitivity, contracts)
+
+### 
