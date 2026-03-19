@@ -1,9 +1,9 @@
 """
-Structured SRS context extraction using Gemini via Vertex AI.
+Structured discovery context extraction using Gemini via Vertex AI.
 
 Reads the current conversation and maps what has been discussed into
-subsection-level fields of the IEEE 830 SRS structure, returning a
-completeness score and per-subsection { filled, content } data.
+the 8 fields of the Discovery Session agenda, returning a
+completeness score and per-field { filled, content } data.
 """
 
 import json
@@ -16,34 +16,16 @@ from .prompts import RS_EXTRACTION_PROMPT
 
 _MODEL_NAME = "gemini-2.0-flash-001"
 
-# All 26 SRS subsection keys in document order.
+# All 8 discovery session fields.
 EMPTY_SECTIONS: dict = {
-    "1_1_purpose":                   {"filled": False, "content": None},
-    "1_2_project_scope":             {"filled": False, "content": None},
-    "1_3_requester":                 {"filled": False, "content": None},
-    "1_4_product_owner":             {"filled": False, "content": None},
-    "1_5_sponsor":                   {"filled": False, "content": None},
-    "1_6_delivery_responsibility":   {"filled": False, "content": None},
-    "2_1_product_perspective":       {"filled": False, "content": None},
-    "2_2_product_features":          {"filled": False, "content": None},
-    "2_3_user_classes":              {"filled": False, "content": None},
-    "2_4_operating_environment":     {"filled": False, "content": None},
-    "2_5_design_constraints":        {"filled": False, "content": None},
-    "2_6_user_documentation":        {"filled": False, "content": None},
-    "2_7_assumptions_dependencies":  {"filled": False, "content": None},
-    "3_system_features":             {"filled": False, "content": None},
-    "4_1_user_interfaces":           {"filled": False, "content": None},
-    "4_2_hardware_interfaces":       {"filled": False, "content": None},
-    "4_3_software_interfaces":       {"filled": False, "content": None},
-    "4_4_communications_interfaces": {"filled": False, "content": None},
-    "5_1_performance":               {"filled": False, "content": None},
-    "5_2_safety":                    {"filled": False, "content": None},
-    "5_3_security":                  {"filled": False, "content": None},
-    "5_4_quality_attributes":        {"filled": False, "content": None},
-    "6_other_requirements":          {"filled": False, "content": None},
-    "appendix_a_glossary":           {"filled": False, "content": None},
-    "appendix_b_models":             {"filled": False, "content": None},
-    "appendix_c_issues":             {"filled": False, "content": None},
+    "1_context":             {"filled": False, "content": None},
+    "1_business_problem":    {"filled": False, "content": None},
+    "2_target_state":        {"filled": False, "content": None},
+    "2_success":             {"filled": False, "content": None},
+    "3_scope_in_out":        {"filled": False, "content": None},
+    "3_boundaries":          {"filled": False, "content": None},
+    "4_data_systems":        {"filled": False, "content": None},
+    "4_integrations_access": {"filled": False, "content": None},
 }
 
 
@@ -57,14 +39,14 @@ def _get_model() -> GenerativeModel:
 
 
 async def extract_rs_context(conversation_text: str) -> dict:
-    """Extract SRS subsection data from the conversation.
+    """Extract discovery session data from the conversation.
 
     Returns:
         {
             "completeness": int (0-100),
             "sections": {
-                "<subsection_key>": {"filled": bool, "content": str | None},
-                ...  (always all 26 keys)
+                "<field_key>": {"filled": bool, "content": str | None},
+                ...  (always all 8 keys)
             }
         }
 

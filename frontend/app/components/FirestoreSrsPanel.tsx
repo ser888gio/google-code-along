@@ -18,70 +18,34 @@ interface SectionDef {
 const SECTIONS: SectionDef[] = [
   {
     number: "1",
-    title: "Introduction",
+    title: "Context & Business Problem",
     fields: [
-      { key: "s1_1_purpose",                 label: "1.1 Purpose" },
-      { key: "s1_2_project_scope",           label: "1.2 Project Scope" },
-      { key: "s1_3_requester",               label: "1.3 Requester" },
-      { key: "s1_4_product_owner",           label: "1.4 Product Owner" },
-      { key: "s1_5_sponsor",                 label: "1.5 Sponsor" },
-      { key: "s1_6_delivery_responsibility", label: "1.6 Delivery Responsibility" },
+      { key: "s1_context",          label: "1.1 Context" },
+      { key: "s1_business_problem", label: "1.2 Business Problem" },
     ],
   },
   {
     number: "2",
-    title: "Overall Description",
+    title: "Target State & Success",
     fields: [
-      { key: "s2_1_product_perspective",      label: "2.1 Product Perspective" },
-      { key: "s2_2_product_features",         label: "2.2 Product Features" },
-      { key: "s2_3_user_classes",             label: "2.3 User Classes and Characteristics" },
-      { key: "s2_4_operating_environment",    label: "2.4 Operating Environment" },
-      { key: "s2_5_design_constraints",       label: "2.5 Design and Implementation Constraints" },
-      { key: "s2_6_user_documentation",       label: "2.6 User Documentation" },
-      { key: "s2_7_assumptions_dependencies", label: "2.7 Assumptions and Dependencies" },
+      { key: "s2_target_state", label: "2.1 Target State" },
+      { key: "s2_success",      label: "2.2 Success" },
     ],
   },
   {
     number: "3",
-    title: "System Features",
+    title: "Scope & Boundaries",
     fields: [
-      { key: "s3_system_features", label: "3 System Features" },
+      { key: "s3_scope_in_out", label: "3.1 Scope — In/Out" },
+      { key: "s3_boundaries",   label: "3.2 Boundaries" },
     ],
   },
   {
     number: "4",
-    title: "External Interface Requirements",
+    title: "Data, Systems, Integrations & Access",
     fields: [
-      { key: "s4_1_user_interfaces",           label: "4.1 User Interfaces" },
-      { key: "s4_2_hardware_interfaces",       label: "4.2 Hardware Interfaces" },
-      { key: "s4_3_software_interfaces",       label: "4.3 Software Interfaces" },
-      { key: "s4_4_communications_interfaces", label: "4.4 Communications Interfaces" },
-    ],
-  },
-  {
-    number: "5",
-    title: "Other Nonfunctional Requirements",
-    fields: [
-      { key: "s5_1_performance",        label: "5.1 Performance Requirements" },
-      { key: "s5_2_safety",             label: "5.2 Safety Requirements" },
-      { key: "s5_3_security",           label: "5.3 Security Requirements" },
-      { key: "s5_4_quality_attributes", label: "5.4 Software Quality Attributes" },
-    ],
-  },
-  {
-    number: "6",
-    title: "Other Requirements",
-    fields: [
-      { key: "s6_other_requirements", label: "6 Other Requirements" },
-    ],
-  },
-  {
-    number: "A",
-    title: "Appendices",
-    fields: [
-      { key: "appendix_a_glossary",        label: "Appendix A: Glossary" },
-      { key: "appendix_b_analysis_models", label: "Appendix B: Analysis Models" },
-      { key: "appendix_c_issues_list",     label: "Appendix C: Issues List" },
+      { key: "s4_data_systems",        label: "4.1 Data & Systems" },
+      { key: "s4_integrations_access", label: "4.2 Integrations & Access" },
     ],
   },
 ];

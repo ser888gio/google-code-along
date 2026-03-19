@@ -1,17 +1,16 @@
 """
-Firestore persistence for the SRS data collected during a session.
+Firestore persistence for the discovery session data collected during a session.
 
 Each session is stored as a single Firestore document at:
   Collection : srs_sessions
   Document ID: <session_id>
 
-The document structure mirrors the full SRS JSON schema so the frontend
+The document structure mirrors the Discovery Session schema so the frontend
 can display every field in real-time.  `upsert_srs_fields` uses
 `set(..., merge=True)` so repeated calls overwrite only the fields that
 have a value — previously filled fields are never erased.
 """
 
-import json
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -28,14 +27,10 @@ def _client() -> firestore.Client:
 
 def _srs_to_doc(session_id: str, srs: dict[str, Any]) -> dict[str, Any]:
     """Flatten the nested SRS JSON dict into a Firestore-compatible document."""
-    sections = srs.get("sections", {})
-    intro = sections.get("1. Introduction", {})
-    overall = sections.get("2. Overall Description", {})
-    features = sections.get("3. System Features", {})
-    interfaces = sections.get("4. External Interface Requirements", {})
-    nonfunc = sections.get("5. Other Nonfunctional Requirements", {})
-    other = sections.get("6. Other Requirements", {})
-    appendices = sections.get("Appendices", {})
+    block1 = srs.get("context_and_business_problem", {})
+    block2 = srs.get("target_state_and_success", {})
+    block3 = srs.get("scope_and_boundaries", {})
+    block4 = srs.get("data_systems_integrations_access", {})
 
     doc: dict[str, Any] = {
         "session_id": session_id,
@@ -47,46 +42,21 @@ def _srs_to_doc(session_id: str, srs: dict[str, Any]) -> dict[str, Any]:
         if value is not None and str(value).strip():
             doc[key] = value
 
-    # 1. Introduction
-    _set("s1_1_purpose",                 intro.get("1.1 Purpose"))
-    _set("s1_2_project_scope",           intro.get("1.2 Project Scope"))
-    _set("s1_3_requester",               intro.get("1.3 Requester"))
-    _set("s1_4_product_owner",           intro.get("1.4 Product Owner"))
-    _set("s1_5_sponsor",                 intro.get("1.5 Sponsor"))
-    _set("s1_6_delivery_responsibility", intro.get("1.6 Delivery Responsibility"))
+    # Block 1 — Context & Business Problem
+    _set("s1_context",          block1.get("context"))
+    _set("s1_business_problem", block1.get("business_problem"))
 
-    # 2. Overall Description
-    _set("s2_1_product_perspective",      overall.get("2.1 Product Perspective"))
-    _set("s2_2_product_features",         overall.get("2.2 Product Features"))
-    _set("s2_3_user_classes",             overall.get("2.3 User Classes and Characteristics"))
-    _set("s2_4_operating_environment",    overall.get("2.4 Operating Environment"))
-    _set("s2_5_design_constraints",       overall.get("2.5 Design and Implementation Constraints"))
-    _set("s2_6_user_documentation",       overall.get("2.6 User Documentation"))
-    _set("s2_7_assumptions_dependencies", overall.get("2.7 Assumptions and Dependencies"))
+    # Block 2 — Target State & Success
+    _set("s2_target_state", block2.get("target_state"))
+    _set("s2_success",      block2.get("success"))
 
-    # 3. System Features — store as JSON string (nested structure)
-    if features:
-        _set("s3_system_features", json.dumps(features, ensure_ascii=False))
+    # Block 3 — Scope & Boundaries
+    _set("s3_scope_in_out", block3.get("scope_in_out"))
+    _set("s3_boundaries",   block3.get("boundaries"))
 
-    # 4. External Interface Requirements
-    _set("s4_1_user_interfaces",           interfaces.get("4.1 User Interfaces"))
-    _set("s4_2_hardware_interfaces",       interfaces.get("4.2 Hardware Interfaces"))
-    _set("s4_3_software_interfaces",       interfaces.get("4.3 Software Interfaces"))
-    _set("s4_4_communications_interfaces", interfaces.get("4.4 Communications Interfaces"))
-
-    # 5. Nonfunctional Requirements
-    _set("s5_1_performance",        nonfunc.get("5.1 Performance Requirements"))
-    _set("s5_2_safety",             nonfunc.get("5.2 Safety Requirements"))
-    _set("s5_3_security",           nonfunc.get("5.3 Security Requirements"))
-    _set("s5_4_quality_attributes", nonfunc.get("5.4 Software Quality Attributes"))
-
-    # 6. Other Requirements
-    _set("s6_other_requirements", other.get("description"))
-
-    # Appendices
-    _set("appendix_a_glossary",        appendices.get("Appendix A: Glossary"))
-    _set("appendix_b_analysis_models", appendices.get("Appendix B: Analysis Models"))
-    _set("appendix_c_issues_list",     appendices.get("Appendix C: Issues List"))
+    # Block 4 — Data, Systems, Integrations & Access
+    _set("s4_data_systems",        block4.get("data_systems"))
+    _set("s4_integrations_access", block4.get("integrations_access"))
 
     return doc
 

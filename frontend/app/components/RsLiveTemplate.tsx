@@ -21,70 +21,34 @@ interface Chapter {
 const CHAPTERS: Chapter[] = [
   {
     number: "1",
-    title: "Introduction",
+    title: "Context & Business Problem",
     subsections: [
-      { key: "1_1_purpose",                 number: "1.1", label: "Purpose" },
-      { key: "1_2_project_scope",           number: "1.2", label: "Project Scope" },
-      { key: "1_3_requester",               number: "1.3", label: "Requester" },
-      { key: "1_4_product_owner",           number: "1.4", label: "Product Owner" },
-      { key: "1_5_sponsor",                 number: "1.5", label: "Sponsor" },
-      { key: "1_6_delivery_responsibility", number: "1.6", label: "Delivery Responsibility" },
+      { key: "1_context",          number: "1.1", label: "Context" },
+      { key: "1_business_problem", number: "1.2", label: "Business Problem" },
     ],
   },
   {
     number: "2",
-    title: "Overall Description",
+    title: "Target State & Success",
     subsections: [
-      { key: "2_1_product_perspective",      number: "2.1", label: "Product Perspective" },
-      { key: "2_2_product_features",         number: "2.2", label: "Product Features" },
-      { key: "2_3_user_classes",             number: "2.3", label: "User Classes and Characteristics" },
-      { key: "2_4_operating_environment",    number: "2.4", label: "Operating Environment" },
-      { key: "2_5_design_constraints",       number: "2.5", label: "Design and Implementation Constraints" },
-      { key: "2_6_user_documentation",       number: "2.6", label: "User Documentation" },
-      { key: "2_7_assumptions_dependencies", number: "2.7", label: "Assumptions and Dependencies" },
+      { key: "2_target_state",   number: "2.1", label: "Target State" },
+      { key: "2_success",        number: "2.2", label: "Success" },
     ],
   },
   {
     number: "3",
-    title: "System Features",
+    title: "Scope & Boundaries",
     subsections: [
-      { key: "3_system_features", number: "3", label: "System Features" },
+      { key: "3_scope_in_out",  number: "3.1", label: "Scope — In/Out" },
+      { key: "3_boundaries",    number: "3.2", label: "Boundaries" },
     ],
   },
   {
     number: "4",
-    title: "External Interface Requirements",
+    title: "Data, Systems, Integrations & Access",
     subsections: [
-      { key: "4_1_user_interfaces",           number: "4.1", label: "User Interfaces" },
-      { key: "4_2_hardware_interfaces",       number: "4.2", label: "Hardware Interfaces" },
-      { key: "4_3_software_interfaces",       number: "4.3", label: "Software Interfaces" },
-      { key: "4_4_communications_interfaces", number: "4.4", label: "Communications Interfaces" },
-    ],
-  },
-  {
-    number: "5",
-    title: "Other Nonfunctional Requirements",
-    subsections: [
-      { key: "5_1_performance",       number: "5.1", label: "Performance Requirements" },
-      { key: "5_2_safety",            number: "5.2", label: "Safety Requirements" },
-      { key: "5_3_security",          number: "5.3", label: "Security Requirements" },
-      { key: "5_4_quality_attributes", number: "5.4", label: "Software Quality Attributes" },
-    ],
-  },
-  {
-    number: "6",
-    title: "Other Requirements",
-    subsections: [
-      { key: "6_other_requirements", number: "6", label: "Other Requirements" },
-    ],
-  },
-  {
-    number: "A",
-    title: "Appendices",
-    subsections: [
-      { key: "appendix_a_glossary", number: "A", label: "Glossary" },
-      { key: "appendix_b_models",   number: "B", label: "Analysis Models" },
-      { key: "appendix_c_issues",   number: "C", label: "Issues List" },
+      { key: "4_data_systems",       number: "4.1", label: "Data & Systems" },
+      { key: "4_integrations_access", number: "4.2", label: "Integrations & Access" },
     ],
   },
 ];
