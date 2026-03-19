@@ -246,6 +246,41 @@ export interface SrsData {
   s4_integrations_access: string | null;
 }
 
+// ─── Conversation history ─────────────────────────────────────────────────────
+
+export interface SessionSummary {
+  session_id: string;
+  updated_at: string | null;
+  preview: string | null;
+}
+
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  text: string;
+  ts: string;
+}
+
+export async function getSessions(): Promise<SessionSummary[]> {
+  try {
+    const res = await fetch(`${API_URL}/sessions`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getHistory(sessionId: string): Promise<HistoryMessage[]> {
+  try {
+    const res = await fetch(`${API_URL}/history/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return [];
+    const body: { session_id: string; messages: HistoryMessage[] } = await res.json();
+    return body.messages;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Fetch the latest SRS data stored in Firestore for this session.
  * Returns null on any failure so callers can keep the previous state.

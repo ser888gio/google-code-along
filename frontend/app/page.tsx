@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, downloadPdf, getFirestoreData, RsPartialData, SrsData } from "../lib/api";
+import { streamChat, extractContext, downloadPdf, getFirestoreData, getSessions, getHistory, RsPartialData, SrsData, SessionSummary } from "../lib/api";
 import FileUpload from "./components/FileUpload";
 import BpmnPanel from "./components/BpmnPanel";
 import DataflowPanel from "./components/DataflowPanel";
@@ -154,6 +154,9 @@ export default function ChatPage() {
   const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
   const [srsData, setSrsData] = useState<SrsData | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -256,19 +259,95 @@ export default function ChatPage() {
     }
   }
 
+  async function openHistory() {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    const sessions = await getSessions();
+    setHistorySessions(sessions);
+    setHistoryLoading(false);
+  }
+
+  async function loadSession(sid: string) {
+    const msgs = await getHistory(sid);
+    setMessages(
+      msgs.map((m) => ({ id: crypto.randomUUID(), role: m.role, text: m.text }))
+    );
+    setSessionId(sid);
+    setRsPartial(null);
+    setSrsData(null);
+    setHistoryOpen(false);
+  }
+
+  function newConversation() {
+    setMessages([]);
+    setSessionId(null);
+    setRsPartial(null);
+    setSrsData(null);
+    setHistoryOpen(false);
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
       {/* ── Left panel ─────────────────────────────────── */}
       <div className="flex w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
+        {/* History sidebar */}
+        {historyOpen && (
+          <div className="absolute inset-0 z-40 flex">
+            <div className="flex w-72 flex-col border-r border-gray-200 bg-white shadow-xl">
+              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
+                <span className="text-sm font-bold text-gray-800">Conversations</span>
+                <button onClick={() => setHistoryOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+              <div className="shrink-0 border-b border-gray-200 p-3">
+                <button
+                  onClick={newConversation}
+                  className="w-full rounded border border-dashed border-gray-300 py-2 text-xs font-semibold text-gray-500 hover:border-[#4caf50] hover:text-[#4a6659] transition-colors"
+                >
+                  + New conversation
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {historyLoading ? (
+                  <p className="p-4 text-center text-xs text-gray-400">Loading…</p>
+                ) : historySessions.length === 0 ? (
+                  <p className="p-4 text-center text-xs text-gray-400">No past conversations found.</p>
+                ) : (
+                  historySessions.map((s) => (
+                    <button
+                      key={s.session_id}
+                      onClick={() => loadSession(s.session_id)}
+                      className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${s.session_id === sessionId ? "bg-[#f5fdf5]" : ""}`}
+                    >
+                      <p className="truncate text-xs font-medium text-gray-700">
+                        {s.preview ?? s.session_id}
+                      </p>
+                      {s.updated_at && (
+                        <p className="mt-0.5 text-[10px] text-gray-400">
+                          {new Date(s.updated_at).toLocaleString()}
+                        </p>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="flex-1 bg-black/20" onClick={() => setHistoryOpen(false)} />
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
           <span className="text-sm font-bold text-gray-800">Document Preprocessor</span>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100">
+            <button
+              onClick={openHistory}
+              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+            >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1l-6 5v7h4v-4h4v4h4V6z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Home
+              History
             </button>
             <div className={`h-3 w-3 rounded-full ${isStreaming ? "animate-pulse bg-yellow-400" : "bg-[#4caf50]"}`} />
           </div>

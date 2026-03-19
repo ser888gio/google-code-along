@@ -8,7 +8,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from google.cloud import storage
+from gcs import write_file, list_files, read_text, file_exists
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -19,7 +19,7 @@ from generation import compile_rs_from_session, markdown_to_pdf, compile_srs_jso
 from bpmn import check_completeness, generate_bpmn_diagram
 from context import extract_rs_context
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
-from firestore import upsert_srs_fields, get_srs_fields
+from firestore import upsert_srs_fields, get_srs_fields, append_conversation_turn, get_conversation_history, list_sessions
 
 load_dotenv()
 
@@ -81,20 +81,14 @@ async def upload_file(
     session_id: str = Form(...),
 ):
     """Upload a file to GCS under sessions/{session_id}/{filename}."""
-    bucket_name = os.getenv("GCS_BUCKET_NAME", "hackathon-skoda")
     destination = f"sessions/{session_id}/{file.filename}"
-
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(destination)
-
     contents = await file.read()
-    blob.upload_from_string(contents, content_type=file.content_type or "application/octet-stream")
-
-    return UploadResponse(
-        gcs_path=f"gs://{bucket_name}/{destination}",
-        filename=file.filename,
+    gcs_path = write_file(
+        path=destination,
+        data=contents,
+        content_type=file.content_type or "application/octet-stream",
     )
+    return UploadResponse(gcs_path=gcs_path, filename=file.filename)
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -133,10 +127,14 @@ async def chat(req: ChatRequest):
                 if part.text:
                     reply_parts.append(part.text)
 
-    return ChatResponse(
-        reply="".join(reply_parts),
-        session_id=session_id,
+    reply = "".join(reply_parts)
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        None, append_conversation_turn, session_id, req.message, reply
     )
+
+    return ChatResponse(reply=reply, session_id=session_id)
 
 
 @app.post("/chat/stream")
@@ -166,6 +164,7 @@ async def chat_stream(req: ChatRequest):
         # First, send the session_id so the client can track it
         yield f"data: {{\"session_id\": \"{session_id}\"}}\n\n"
 
+        reply_parts: list[str] = []
         async for event in runner.run_async(
             user_id=req.user_id,
             session_id=session_id,
@@ -174,7 +173,14 @@ async def chat_stream(req: ChatRequest):
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
+                        reply_parts.append(part.text)
                         yield f"data: {json.dumps({'text': part.text})}\n\n"
+
+        full_reply = "".join(reply_parts)
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(
+            None, append_conversation_turn, session_id, req.message, full_reply
+        )
 
         yield "data: [DONE]\n\n"
 
@@ -451,6 +457,33 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
 class FirestoreDataResponse(BaseModel):
     session_id: str
     data: dict | None = None
+
+
+class SessionSummary(BaseModel):
+    session_id: str
+    updated_at: str | None = None
+    preview: str | None = None
+
+
+@app.get("/sessions", response_model=list[SessionSummary])
+async def sessions_list():
+    """Return a summary list of all stored sessions."""
+    loop = asyncio.get_event_loop()
+    items = await loop.run_in_executor(None, list_sessions)
+    return items
+
+
+class HistoryResponse(BaseModel):
+    session_id: str
+    messages: list[dict]
+
+
+@app.get("/history/{session_id}", response_model=HistoryResponse)
+async def get_history(session_id: str):
+    """Return the full conversation history for *session_id*."""
+    loop = asyncio.get_event_loop()
+    messages = await loop.run_in_executor(None, get_conversation_history, session_id)
+    return HistoryResponse(session_id=session_id, messages=messages)
 
 
 @app.get("/firestore/data/{session_id}", response_model=FirestoreDataResponse)

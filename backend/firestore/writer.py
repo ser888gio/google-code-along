@@ -82,3 +82,55 @@ def get_srs_fields(session_id: str) -> dict[str, Any] | None:
     if not snap.exists:
         return None
     return snap.to_dict()
+
+
+def append_conversation_turn(
+    session_id: str, user_text: str, assistant_text: str
+) -> None:
+    """Append one user+assistant turn to the messages array for *session_id*.
+
+    Uses ArrayUnion so each call safely appends without overwriting prior turns.
+    Creates the document if it does not exist yet.
+    """
+    ts = datetime.now(timezone.utc).isoformat()
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    ref.set(
+        {
+            "session_id": session_id,
+            "messages": firestore.ArrayUnion(
+                [
+                    {"role": "user", "text": user_text, "ts": ts},
+                    {"role": "assistant", "text": assistant_text, "ts": ts},
+                ]
+            ),
+        },
+        merge=True,
+    )
+
+
+def get_conversation_history(session_id: str) -> list[dict[str, Any]]:
+    """Return the messages list for *session_id*, or [] if not found."""
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    if not snap.exists:
+        return []
+    return snap.to_dict().get("messages", [])
+
+
+def list_sessions() -> list[dict[str, Any]]:
+    """Return a summary of all sessions ordered by updated_at descending."""
+    client = _client()
+    results = []
+    for doc in client.collection(_COLLECTION).stream():
+        data = doc.to_dict()
+        messages = data.get("messages", [])
+        preview = next((m["text"] for m in messages if m.get("role") == "user"), None)
+        results.append({
+            "session_id": data.get("session_id") or doc.id,
+            "updated_at": data.get("updated_at"),
+            "preview": preview,
+        })
+    results.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+    return results
