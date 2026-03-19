@@ -23,3 +23,4 @@ Projekt se zaměřuje na vytvoření „Business Analytics AI Persony“, která
 This project focuses on creating a "Business Analytics AI Persona" that will interactively help business users describe their requirements and generate functional specifications without the need for complex manual work. The goal is for the AI guide to ask the right questions, process inputs from chats, meetings, or documents, and then automatically compile a comprehensive and high-quality Requirement Specification.
 
 ---
+ Miro link https://miro.com/app/board/uXjVGvPUWIc=/?share_link_id=717213042622
