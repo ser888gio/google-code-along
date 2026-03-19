@@ -6,8 +6,12 @@ from google.adk.agents import Agent
 
 from .prompt import SYSTEM_PROMPT
 
-# ADK model string for Gemini 1.5 Pro on Vertex AI
-MODEL = "gemini-3-pro"
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ADK model string for Gemini 3.1. Pro Pro on Vertex AI
+MODEL = "gemini-3.1-pro-preview"
 
 rs_agent = Agent(
     name="rs_consultant",

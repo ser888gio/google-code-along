@@ -67,10 +67,10 @@ export async function streamChat(
 }
 
 /**
- * Trigger PDF download by posting to /document/pdf and saving the blob.
+ * Trigger Word document download by posting to /document/docx and saving the blob.
  */
 export async function downloadPdf(sessionId: string): Promise<void> {
-  const res = await fetch(`${API_URL}/document/pdf`, {
+  const res = await fetch(`${API_URL}/document/docx`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId }),
@@ -85,7 +85,7 @@ export async function downloadPdf(sessionId: string): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "requirement_specification.pdf";
+  a.download = "requirement_specification.docx";
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -98,18 +98,17 @@ export interface RsSectionData {
 }
 
 export type RsSectionKey =
-  | "executive_summary"
-  | "current_state"
-  | "desired_future_state"
-  | "scope"
-  | "functional_requirements"
-  | "non_functional_requirements"
-  | "assumptions_and_constraints"
-  | "open_questions";
+  | "introduction"
+  | "overall_description"
+  | "system_features"
+  | "external_interface_requirements"
+  | "nonfunctional_requirements"
+  | "other_requirements"
+  | "appendices";
 
 export interface RsPartialData {
   completeness: number;
-  sections: Record<RsSectionKey, RsSectionData>;
+  sections: Record<string, RsSectionData>;
 }
 
 /**

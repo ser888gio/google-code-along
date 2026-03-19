@@ -18,65 +18,8 @@ interface Message {
   streaming?: boolean;
 }
 
-type Step = 1 | 2 | 3;
-
-const STEPS: { sublabel: string }[] = [
-  { sublabel: "COMPLETION" },
-  { sublabel: "VALIDATION" },
-  { sublabel: "DONE" },
-];
-
 const RS_TABS = ["Preview", "BPMN", "Data", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
-
-// ─── Progress Tracker ─────────────────────────────────────────────────────────
-
-function ProgressTracker({ currentStep }: { currentStep: Step }) {
-  return (
-    <div className="flex px-6 pt-5 pb-3">
-      {STEPS.map((step, i) => {
-        const stepNum = (i + 1) as Step;
-        const isActive = stepNum === currentStep;
-        const isDone = stepNum < currentStep;
-        return (
-          <div key={step.sublabel} className="relative flex flex-1 flex-col items-center">
-            {i < STEPS.length - 1 && (
-              <div
-                className={`absolute left-1/2 top-4 h-px w-full -translate-y-1/2 transition-colors ${
-                  stepNum < currentStep ? "bg-[#4caf50]" : "bg-gray-200"
-                }`}
-              />
-            )}
-            <div
-              className={`relative z-10 flex h-8 w-8 items-center justify-center bg-white rounded border-2 text-sm font-semibold transition-all ${
-                isActive
-                  ? "border-[#4caf50] text-[#4caf50]"
-                  : isDone
-                  ? "border-[#4caf50] bg-[#4caf50] text-white"
-                  : "border-gray-300 text-gray-400"
-              }`}
-            >
-              {isDone ? (
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M2 7l3.5 3.5L12 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              ) : (
-                stepNum
-              )}
-            </div>
-            <span
-              className={`mt-1 text-[9px] font-semibold tracking-wide ${
-                isActive || isDone ? "text-[#4caf50]" : "text-gray-400"
-              }`}
-            >
-              {step.sublabel}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
@@ -201,7 +144,6 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [currentStep, setCurrentStep] = useState<Step>(1);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RsTab>("Preview");
   const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
@@ -246,13 +188,11 @@ export default function ChatPage() {
 
     setInput("");
     setError(null);
-    setCurrentStep((s) => (s < 2 ? 2 : s));
 
     addMessage("user", text);
     setIsStreaming(true);
     const assistantId = addMessage("assistant", "", true);
 
-    let fullText = "";
     // Capture the session ID synchronously from the SSE stream.
     // React's sessionId state may still be null on the first turn when onDone fires.
     let capturedSessionId = sessionId;
@@ -261,7 +201,6 @@ export default function ChatPage() {
       text,
       sessionId,
       (chunk) => {
-        fullText += chunk;
         appendToMessage(assistantId, chunk);
       },
       (id) => {
@@ -271,10 +210,6 @@ export default function ChatPage() {
       async () => {
         finalizeMessage(assistantId);
         setIsStreaming(false);
-
-        if (fullText.includes("[GENERATE_RS]")) {
-          setCurrentStep(3);
-        }
 
         // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
@@ -325,17 +260,6 @@ export default function ChatPage() {
               Home
             </button>
             <div className={`h-3 w-3 rounded-full ${isStreaming ? "animate-pulse bg-yellow-400" : "bg-[#4caf50]"}`} />
-          </div>
-        </div>
-
-        {/* Progress tracker */}
-        <div className="shrink-0 border-b border-gray-100">
-          <ProgressTracker currentStep={currentStep} />
-          <div className="mx-6 mb-3 h-1 rounded-full bg-gray-100">
-            <div
-              className="h-1 rounded-full bg-[#4caf50] transition-all duration-500"
-              style={{ width: `${((currentStep - 1) / 2) * 100}%` }}
-            />
           </div>
         </div>
 
@@ -394,6 +318,13 @@ export default function ChatPage() {
               )}
             </button>
           </div>
+        </div>
+
+        {/* Disclaimer */}
+        <div className="shrink-0 px-4 py-1.5 text-center">
+          <p className="text-[10px] text-gray-400">
+            This is an AI system and cannot always be accurate. Please review outputs.
+          </p>
         </div>
       </div>
 

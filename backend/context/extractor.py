@@ -1,9 +1,9 @@
 """
-Structured RS context extraction using Gemini via Vertex AI.
+Structured SRS context extraction using Gemini via Vertex AI.
 
-Reads the current conversation from a session and maps what has been
-discussed so far into the 8 RS document sections, returning a completeness
-score and per-section { filled, content } data.
+Reads the current conversation and maps what has been discussed into
+subsection-level fields of the IEEE 830 SRS structure, returning a
+completeness score and per-subsection { filled, content } data.
 """
 
 import json
@@ -14,19 +14,36 @@ from vertexai.generative_models import GenerativeModel
 
 from .prompts import RS_EXTRACTION_PROMPT
 
-_MODEL_NAME = "gemini-3-pro"
+_MODEL_NAME = "gemini-2.0-flash-001"
 
-# Single source of truth for all 8 RS section keys.
-# Used as the default/fallback so the frontend always receives all keys.
+# All 26 SRS subsection keys in document order.
 EMPTY_SECTIONS: dict = {
-    "executive_summary":           {"filled": False, "content": None},
-    "current_state":               {"filled": False, "content": None},
-    "desired_future_state":        {"filled": False, "content": None},
-    "scope":                       {"filled": False, "content": None},
-    "functional_requirements":     {"filled": False, "content": None},
-    "non_functional_requirements": {"filled": False, "content": None},
-    "assumptions_and_constraints": {"filled": False, "content": None},
-    "open_questions":              {"filled": False, "content": None},
+    "1_1_purpose":                   {"filled": False, "content": None},
+    "1_2_project_scope":             {"filled": False, "content": None},
+    "1_3_requester":                 {"filled": False, "content": None},
+    "1_4_product_owner":             {"filled": False, "content": None},
+    "1_5_sponsor":                   {"filled": False, "content": None},
+    "1_6_delivery_responsibility":   {"filled": False, "content": None},
+    "2_1_product_perspective":       {"filled": False, "content": None},
+    "2_2_product_features":          {"filled": False, "content": None},
+    "2_3_user_classes":              {"filled": False, "content": None},
+    "2_4_operating_environment":     {"filled": False, "content": None},
+    "2_5_design_constraints":        {"filled": False, "content": None},
+    "2_6_user_documentation":        {"filled": False, "content": None},
+    "2_7_assumptions_dependencies":  {"filled": False, "content": None},
+    "3_system_features":             {"filled": False, "content": None},
+    "4_1_user_interfaces":           {"filled": False, "content": None},
+    "4_2_hardware_interfaces":       {"filled": False, "content": None},
+    "4_3_software_interfaces":       {"filled": False, "content": None},
+    "4_4_communications_interfaces": {"filled": False, "content": None},
+    "5_1_performance":               {"filled": False, "content": None},
+    "5_2_safety":                    {"filled": False, "content": None},
+    "5_3_security":                  {"filled": False, "content": None},
+    "5_4_quality_attributes":        {"filled": False, "content": None},
+    "6_other_requirements":          {"filled": False, "content": None},
+    "appendix_a_glossary":           {"filled": False, "content": None},
+    "appendix_b_models":             {"filled": False, "content": None},
+    "appendix_c_issues":             {"filled": False, "content": None},
 }
 
 
@@ -40,14 +57,14 @@ def _get_model() -> GenerativeModel:
 
 
 async def extract_rs_context(conversation_text: str) -> dict:
-    """Extract structured RS section data from the conversation.
+    """Extract SRS subsection data from the conversation.
 
     Returns:
         {
             "completeness": int (0-100),
             "sections": {
-                "<section_key>": {"filled": bool, "content": str | None},
-                ...  (always all 8 keys)
+                "<subsection_key>": {"filled": bool, "content": str | None},
+                ...  (always all 26 keys)
             }
         }
 
@@ -72,12 +89,11 @@ async def extract_rs_context(conversation_text: str) -> dict:
         parsed = json.loads(raw)
         sections = parsed.get("sections", {})
 
-        # Ensure all 8 keys are present — fill any missing with defaults
+        # Ensure all keys are present and enforce null for unfilled entries
         for key, default in EMPTY_SECTIONS.items():
             if key not in sections:
                 sections[key] = dict(default)
             else:
-                # Enforce null (not "") for unfilled content
                 entry = sections[key]
                 if not entry.get("filled", False):
                     entry["content"] = None

@@ -14,7 +14,7 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
 from agent import rs_agent
-from generation import compile_rs_from_session, markdown_to_pdf
+from generation import compile_rs_from_session, markdown_to_pdf, compile_srs_json_from_session, srs_json_to_docx
 from bpmn import check_completeness, generate_bpmn_diagram
 from context import extract_rs_context
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
@@ -243,6 +243,40 @@ async def download_pdf(req: SessionRef):
         media_type="application/pdf",
         headers={
             "Content-Disposition": "attachment; filename=requirement_specification.pdf"
+        },
+    )
+
+
+@app.post("/document/docx")
+async def download_docx(req: SessionRef):
+    """Generate and download the SRS as a populated Word (.docx) document.
+
+    Uses Gemini to compile the full SRS structure from the conversation,
+    then writes it into a Word document using the SRS template structure.
+    Returns 404 if the session is not found, 422 if compilation fails.
+    """
+    from fastapi.responses import Response
+    from fastapi import HTTPException
+
+    srs_json = await compile_srs_json_from_session(
+        session_service=session_service,
+        app_name=APP_NAME,
+        user_id=req.user_id,
+        session_id=req.session_id,
+    )
+    if srs_json is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Could not compile SRS from the conversation. Keep chatting to provide more details.",
+        )
+
+    docx_bytes = srs_json_to_docx(srs_json)
+
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": "attachment; filename=requirement_specification.docx"
         },
     )
 
