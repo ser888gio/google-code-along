@@ -20,6 +20,7 @@ Model: Gemini Flash — extraction only, no deep reasoning needed, needs to be f
 
 import asyncio
 import json
+import time
 
 from config import MODEL_DISCOVERY, init_vertex_ai
 from google.adk.agents import Agent
@@ -85,7 +86,14 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
         prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
             "{conversation}", conversation_text
         )
+        logger.info(
+            f"Model call started: model={MODEL_DISCOVERY} caller=extract_discovery_fields"
+        )
+        _t0 = time.perf_counter()
         response = await asyncio.to_thread(model.generate_content, prompt)
+        logger.info(
+            f"Model call completed: model={MODEL_DISCOVERY} elapsed={time.perf_counter() - _t0:.2f}s"
+        )
         raw = response.text.strip()
 
         # Strip markdown fences the model sometimes adds despite instructions

@@ -7,6 +7,7 @@ completeness score and per-field { filled, content } data.
 """
 
 import json
+import time
 
 from config import MODEL_CONTEXT, init_vertex_ai
 from logger import get_logger
@@ -54,7 +55,14 @@ async def extract_rs_context(conversation_text: str) -> dict:
     try:
         model = _get_model()
         prompt = RS_EXTRACTION_PROMPT.format(conversation=conversation_text)
+        logger.info(
+            f"Model call started: model={MODEL_CONTEXT} caller=extract_rs_context"
+        )
+        _t0 = time.perf_counter()
         response = model.generate_content(prompt)
+        logger.info(
+            f"Model call completed: model={MODEL_CONTEXT} elapsed={time.perf_counter() - _t0:.2f}s"
+        )
         raw = response.text.strip()
 
         # Strip markdown fences the model may add despite instructions

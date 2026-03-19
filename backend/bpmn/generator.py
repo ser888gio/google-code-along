@@ -7,10 +7,14 @@ Two functions:
 """
 
 import json
+import time
 
 from config import MODEL_BPMN, init_vertex_ai
+from logger import get_logger
 from prompts.bpmn import BPMN_GENERATION_PROMPT, COMPLETENESS_PROMPT
 from vertexai.generative_models import GenerativeModel
+
+logger = get_logger(__name__)
 
 
 def _get_model() -> GenerativeModel:
@@ -28,7 +32,12 @@ async def check_completeness(conversation_text: str) -> dict:
     prompt = COMPLETENESS_PROMPT.format(conversation=conversation_text)
 
     try:
+        logger.info(f"Model call started: model={MODEL_BPMN} caller=check_completeness")
+        _t0 = time.perf_counter()
         response = model.generate_content(prompt)
+        logger.info(
+            f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s"
+        )
         raw = response.text.strip()
         # Strip accidental markdown fences
         if raw.startswith("```"):
@@ -45,7 +54,12 @@ async def generate_bpmn_diagram(conversation_text: str) -> str:
     model = _get_model()
     prompt = BPMN_GENERATION_PROMPT.format(conversation=conversation_text)
 
+    logger.info(f"Model call started: model={MODEL_BPMN} caller=generate_bpmn_diagram")
+    _t0 = time.perf_counter()
     response = model.generate_content(prompt)
+    logger.info(
+        f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s"
+    )
     mermaid = response.text.strip()
 
     # Strip markdown fences if the model wrapped the output anyway

@@ -7,10 +7,14 @@ Two functions:
 """
 
 import json
+import time
 
 from config import MODEL_DATAFLOW, init_vertex_ai
+from logger import get_logger
 from prompts.dataflow import DATAFLOW_COMPLETENESS_PROMPT, DATAFLOW_GENERATION_PROMPT
 from vertexai.generative_models import GenerativeModel
+
+logger = get_logger(__name__)
 
 
 def _get_model() -> GenerativeModel:
@@ -28,7 +32,14 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
     prompt = DATAFLOW_COMPLETENESS_PROMPT.format(conversation=conversation_text)
 
     try:
+        logger.info(
+            f"Model call started: model={MODEL_DATAFLOW} caller=check_dfd_completeness"
+        )
+        _t0 = time.perf_counter()
         response = model.generate_content(prompt)
+        logger.info(
+            f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
+        )
         raw = response.text.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -44,7 +55,14 @@ async def generate_dataflow_diagram(conversation_text: str) -> str:
     model = _get_model()
     prompt = DATAFLOW_GENERATION_PROMPT.format(conversation=conversation_text)
 
+    logger.info(
+        f"Model call started: model={MODEL_DATAFLOW} caller=generate_dataflow_diagram"
+    )
+    _t0 = time.perf_counter()
     response = model.generate_content(prompt)
+    logger.info(
+        f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
+    )
     mermaid = response.text.strip()
 
     # Strip markdown fences if the model wrapped the output

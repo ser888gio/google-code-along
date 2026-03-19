@@ -33,6 +33,7 @@ import asyncio
 import datetime
 import json
 import os
+import time
 
 from config import MODEL_FINALIZER, TEXT_EXTENSIONS, init_vertex_ai
 from firestore.writer import (
@@ -143,7 +144,14 @@ async def run_finalizer(
         model = GenerativeModel(MODEL_FINALIZER)
 
         # Run blocking generate_content() in a thread so we don't freeze the event loop
+        logger.info(
+            f"Model call started: model={MODEL_FINALIZER} caller=run_finalizer session_id={session_id}"
+        )
+        _t0 = time.perf_counter()
         response = await asyncio.to_thread(model.generate_content, prompt)
+        logger.info(
+            f"Model call completed: model={MODEL_FINALIZER} elapsed={time.perf_counter() - _t0:.2f}s session_id={session_id}"
+        )
 
         # 4. Parse JSON output
         raw = response.text.strip()

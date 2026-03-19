@@ -31,20 +31,20 @@ MODEL_ORCHESTRATOR = "gemini-3.1-pro-preview"
 MODEL_FINALIZER = "gemini-3.1-pro-preview"
 
 # Discovery tracker: fast extraction after every user message
-MODEL_DISCOVERY = "gemini-2.0-flash-001"
+MODEL_DISCOVERY = "gemini-3.1-pro-preview"
 
 # Research agent: retrieval + summarisation, no deep reasoning needed
-MODEL_RESEARCH = "gemini-2.0-flash-001"
+MODEL_RESEARCH = "gemini-3.1-pro-preview"
 
 # Legacy 8-field RS context extractor
-MODEL_CONTEXT = "gemini-2.0-flash-001"
+MODEL_CONTEXT = "gemini-3.1-pro-preview"
 
 # BPMN / DataFlow diagram generation
 MODEL_BPMN = "gemini-3.1-pro-preview"
 MODEL_DATAFLOW = "gemini-3.1-pro-preview"
 
 # SRS document compiler (legacy Word export pipeline)
-MODEL_SRS_COMPILER = "gemini-2.0-flash-001"
+MODEL_SRS_COMPILER = "gemini-3.1-pro-preview"
 
 # ADK runner app name — used in InMemorySessionService calls
 APP_NAME = "rs_generator"
@@ -68,4 +68,4 @@ def init_vertex_ai() -> None:
     """
     import vertexai  # local import to avoid pulling vertexai into pure-config tests
 
-    vertexai.init(project=GCP_PROJECT, location=GCP_REGION)
+    vertexai.init(project=GCP_PROJECT, location="global")

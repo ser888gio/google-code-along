@@ -6,11 +6,15 @@ Discovery Session structure, ready to be rendered into a Word document.
 """
 
 import json
+import time
 
 from config import MODEL_SRS_COMPILER, init_vertex_ai
 from google.adk.sessions import InMemorySessionService, Session
+from logger import get_logger
 from prompts.srs import SRS_EXTRACTION_PROMPT
 from vertexai.generative_models import GenerativeModel
+
+logger = get_logger(__name__)
 
 
 def _get_model() -> GenerativeModel:
@@ -57,7 +61,14 @@ async def compile_srs_json_from_session(
     try:
         model = _get_model()
         prompt = SRS_EXTRACTION_PROMPT.format(conversation=conversation_text)
+        logger.info(
+            f"Model call started: model={MODEL_SRS_COMPILER} caller=compile_srs_json_from_session"
+        )
+        _t0 = time.perf_counter()
         response = model.generate_content(prompt)
+        logger.info(
+            f"Model call completed: model={MODEL_SRS_COMPILER} elapsed={time.perf_counter() - _t0:.2f}s"
+        )
         raw = response.text.strip()
 
         # Strip markdown fences if present
