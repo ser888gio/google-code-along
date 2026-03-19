@@ -12,8 +12,14 @@ export interface DocumentResponse {
 
 /**
  * Send a message and stream the response via SSE.
- * Calls onChunk for each text piece, onSessionId once with the session ID,
- * and onDone when the stream ends.
+ *
+ * Callbacks:
+ *   onChunk      — each text piece from the assistant
+ *   onSessionId  — fires once with the session ID (first SSE event)
+ *   onFinalizing — fires when the backend detects ≥ 90% completeness and starts
+ *                  the finalizer pipeline; the UI should show a "finalizing" state
+ *   onDone       — stream ended normally
+ *   onError      — network or server error
  */
 export async function streamChat(
   message: string,
@@ -21,7 +27,9 @@ export async function streamChat(
   onChunk: (text: string) => void,
   onSessionId: (id: string) => void,
   onDone: () => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  // TODO: wire onFinalizing in page.tsx once backend emits {"event": "finalizing"}
+  onFinalizing?: () => void,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
@@ -57,6 +65,9 @@ export async function streamChat(
         const parsed = JSON.parse(payload);
         if (parsed.session_id) onSessionId(parsed.session_id);
         if (parsed.text) onChunk(parsed.text);
+        // TODO: handle finalizing event from backend
+        // Backend emits: data: {"event": "finalizing"}
+        if (parsed.event === "finalizing") onFinalizing?.();
       } catch {
         // ignore malformed lines
       }
@@ -293,5 +304,75 @@ export async function getFirestoreData(sessionId: string): Promise<SrsData | nul
     return body.data;
   } catch {
     return null;
+  }
+}
+
+// ─── Final Analysis (Finalizer Agent output) ──────────────────────────────────
+// TODO: align these types with FINAL_ANALYSIS_SCHEMA in backend/agent/finalizer_agent.py
+//       and generate them automatically once the schema is stable.
+
+export interface TechnologyRecommendation {
+  primary: string;
+  rationale: string;
+  alternatives: string[];
+  constraints: string[];
+}
+
+export interface TeamProfile {
+  recommended_team_type: "internal" | "partner" | "vendor" | "mixed";
+  skills_required: string[];
+  rationale: string;
+}
+
+export interface PriorityTier {
+  tier: "strategic" | "tactical" | "operational";
+  score: number;           // 0–100
+  scoring_rationale: string;
+  priority_drivers: string[];
+}
+
+export interface RiskAndDependencies {
+  risks: string[];
+  dependencies: string[];
+  open_questions: string[];
+}
+
+export interface FinalAnalysisMeta {
+  session_id: string;
+  finalized_at: string;
+  model: string;
+  discovery_completeness: number;
+}
+
+export interface FinalAnalysis {
+  // All 22 form fields as collected and cleaned up by the finalizer
+  // TODO: replace Record<string,string> with a typed interface once field names are locked
+  use_case_form: Record<string, string | null>;
+  technology_recommendation: TechnologyRecommendation;
+  team_profile: TeamProfile;
+  priority_tier: PriorityTier;
+  risk_and_dependencies: RiskAndDependencies;
+  _meta: FinalAnalysisMeta;
+}
+
+export type AnalysisStatus = "not_found" | "pending" | "complete";
+
+export interface AnalysisResponse {
+  status: AnalysisStatus;
+  analysis?: FinalAnalysis;
+}
+
+/**
+ * Poll GET /analyses/{sessionId} to check finalization status.
+ * Returns the status and the analysis if complete.
+ * Always resolves (never throws) so callers can poll safely.
+ */
+export async function getAnalysis(sessionId: string): Promise<AnalysisResponse> {
+  try {
+    const res = await fetch(`${API_URL}/analyses/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return { status: "not_found" };
+    return res.json();
+  } catch {
+    return { status: "not_found" };
   }
 }

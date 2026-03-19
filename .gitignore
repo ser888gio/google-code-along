@@ -5,3 +5,8 @@ TASKS.md
 .claude
 
 gcp-key.json
+
+*/*.pdf
+*/*.docx
+
+.vscode

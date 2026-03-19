@@ -1,4 +1,119 @@
-"""Prompt for structured SRS context extraction from a conversation."""
+"""
+Extraction prompts for the discovery pipeline.
+
+RS_EXTRACTION_PROMPT       — legacy 8-field extractor (keep until frontend is updated)
+DISCOVERY_EXTRACTION_PROMPT — new 22-field extractor used by discovery_agent
+"""
+
+
+# ---------------------------------------------------------------------------
+# NEW — 22-field discovery extraction prompt (used by discovery_agent.py)
+# ---------------------------------------------------------------------------
+# TODO: finalize field descriptions below once the exact PDF form field labels
+#       are confirmed with the business team.
+# TODO: tune the completeness scoring rules once we know which fields are truly
+#       blocking vs. nice-to-have (see FIELD_SCHEMA in discovery_agent.py).
+
+DISCOVERY_EXTRACTION_PROMPT = """\
+You are analyzing a business requirements conversation between a user and an AI Business Analyst.
+
+Your task is to extract all information that has been confirmed by the user and map it to
+the 22 required IT use case form fields listed below.
+
+Return ONLY valid JSON — no markdown fences, no commentary, no explanation.
+
+JSON structure:
+
+{
+  "completeness": <integer 0-100>,
+  "fields": {
+    "use_case_title":               { "filled": <bool>, "value": <string or null> },
+    "department":                   { "filled": <bool>, "value": <string or null> },
+    "requestor":                    { "filled": <bool>, "value": <string or null> },
+    "product_owner":                { "filled": <bool>, "value": <string or null> },
+    "purpose_to_be":                { "filled": <bool>, "value": <string or null> },
+    "process_as_is":                { "filled": <bool>, "value": <string or null> },
+    "process_context":              { "filled": <bool>, "value": <string or null> },
+    "trigger":                      { "filled": <bool>, "value": <string or null> },
+    "systems_and_tools":            { "filled": <bool>, "value": <string or null> },
+    "document_types":               { "filled": <bool>, "value": <string or null> },
+    "saved_time_hours_per_year":    { "filled": <bool>, "value": <string or null> },
+    "cost_saving":                  { "filled": <bool>, "value": <string or null> },
+    "revenue_increase":             { "filled": <bool>, "value": <string or null> },
+    "time_criticality":             { "filled": <bool>, "value": <string or null> },
+    "impacted_users":               { "filled": <bool>, "value": <string or null> },
+    "strategic_impact":             { "filled": <bool>, "value": <string or null> },
+    "risk_avoidance":               { "filled": <bool>, "value": <string or null> },
+    "add_value":                    { "filled": <bool>, "value": <string or null> },
+    "data_security_classification": { "filled": <bool>, "value": <string or null> },
+    "solution_type":                { "filled": <bool>, "value": <string or null> },
+    "comments":                     { "filled": <bool>, "value": <string or null> },
+    "attachments":                  { "filled": <bool>, "value": <string or null> }
+  },
+  "missing_priority": [<up to 3 field key strings that are most important to collect next>]
+}
+
+What each field maps to:
+
+Section 1 — Identity & Current State:
+- use_case_title: Short English name for the use case (must be in English).
+- department: The main department or business unit requesting this.
+- requestor: Name or email of the person making the request.
+- product_owner: Name of the designated product owner.
+- process_as_is: Description of the current process before any improvement.
+- process_context: What happens before and after this process; how it connects to other processes.
+- trigger: What event or condition starts this process (deadline, regulation, manual request, etc.).
+
+Section 2 — Target State:
+- purpose_to_be: The desired state after the improvement. What should be different?
+
+Section 3 — Value & ROI:
+- saved_time_hours_per_year: Estimated hours saved per year across all affected users. Approximate is fine.
+- cost_saving: Estimated cost reduction in money terms. Approximate or "unknown" is fine.
+- revenue_increase: Estimated revenue increase. Approximate or "unknown" is fine.
+- impacted_users: Number of users affected and how much time each saves.
+- add_value: Description of qualitative or strategic value added beyond pure cost savings.
+
+Section 4 — Priority & Risk:
+- time_criticality: Is there a regulatory, legislative, or business deadline? How urgent?
+- strategic_impact: Is this strategically important to the organization? In what way?
+- risk_avoidance: Does this address a specific financial or operational risk? Estimated amount?
+
+Section 5 — Technical Context:
+- systems_and_tools: Which systems and tools are involved in the current process (SAP, SharePoint, Excel, etc.).
+- document_types: Types of documents involved (PDF, Word, Excel, contracts, invoices, etc.).
+- data_security_classification: Data sensitivity level (personal data, financial, contractual, public, etc.).
+- solution_type: Probable solution category (Power Platform, custom app, SharePoint, SAP extension, etc.).
+
+Optional:
+- comments: Any additional useful information.
+- attachments: Any files the user mentioned uploading (list GCS paths if known).
+
+Completeness scoring rules:
+- Score reflects how much of the REQUIRED fields have been meaningfully filled.
+- Required fields (count toward score): all except saved_time_hours_per_year, cost_saving,
+  revenue_increase, risk_avoidance, comments, attachments.
+- Each required field is worth approximately 5-6 points (17 required fields total).
+- Only mark "filled": true when the user has provided SPECIFIC information — not just
+  acknowledged the question or given a vague non-answer.
+- value must be null (not "") when filled is false.
+- Do NOT invent or infer information not explicitly stated by the user.
+
+missing_priority rules:
+- List up to 3 field keys that are (a) not yet filled and (b) most important to collect next.
+- Prioritize: use_case_title first if missing, then process_as_is, then purpose_to_be,
+  then impacted_users and time_criticality.
+
+Conversation:
+---
+{conversation}
+---
+"""
+
+
+# ---------------------------------------------------------------------------
+# LEGACY — 8-field extractor (keep until frontend RsLiveTemplate is updated)
+# ---------------------------------------------------------------------------
 
 RS_EXTRACTION_PROMPT = """\
 You are analyzing a business requirements conversation between a user and an AI consultant.

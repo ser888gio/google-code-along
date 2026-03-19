@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, downloadPdf, getFirestoreData, getSessions, getHistory, RsPartialData, SrsData, SessionSummary } from "../lib/api";
+import { streamChat, extractContext, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, RsPartialData, SrsData, SessionSummary, FinalAnalysis } from "../lib/api";
+import AnalysisPanel, { FinalizingOverlay } from "./components/AnalysisPanel";
 import FileUpload from "./components/FileUpload";
 import BpmnPanel from "./components/BpmnPanel";
 import DataflowPanel from "./components/DataflowPanel";
@@ -19,8 +20,14 @@ interface Message {
   streaming?: boolean;
 }
 
-const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Summary"] as const;
+const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Analysis", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
+
+// Finalization can be in one of three states:
+//   idle       — not yet triggered
+//   finalizing — backend is running the finalizer pipeline; frontend is polling
+//   complete   — final analysis is ready and stored in state
+type FinalizingStatus = "idle" | "finalizing" | "complete";
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
@@ -78,6 +85,8 @@ function RsDocumentPanel({
   sessionId,
   onGenerateFull,
   srsData,
+  finalizingStatus,
+  finalAnalysis,
 }: {
   activeTab: RsTab;
   onTabChange: (t: RsTab) => void;
@@ -85,6 +94,8 @@ function RsDocumentPanel({
   sessionId: string | null;
   onGenerateFull: () => void;
   srsData: SrsData | null;
+  finalizingStatus: FinalizingStatus;
+  finalAnalysis: FinalAnalysis | null;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -98,13 +109,19 @@ function RsDocumentPanel({
             <button
               key={tab}
               onClick={() => onTabChange(tab)}
-              className={`whitespace-nowrap px-3 py-3 text-sm transition-colors ${
+              className={`relative whitespace-nowrap px-3 py-3 text-sm transition-colors ${
                 activeTab === tab
                   ? "border-b-2 border-[#1a3a2a] bg-[#1a3a2a] text-white"
                   : "text-gray-500 hover:text-gray-800"
               }`}
             >
               {tab}
+              {tab === "Analysis" && finalizingStatus === "finalizing" && (
+                <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 align-middle" />
+              )}
+              {tab === "Analysis" && finalizingStatus === "complete" && (
+                <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#4caf50] align-middle" />
+              )}
             </button>
           ))}
         </div>
@@ -120,6 +137,16 @@ function RsDocumentPanel({
           <DataflowPanel sessionId={sessionId} />
         ) : activeTab === "Database" ? (
           <FirestoreSrsPanel data={srsData} />
+        ) : activeTab === "Analysis" ? (
+          finalizingStatus === "complete" && finalAnalysis ? (
+            <AnalysisPanel analysis={finalAnalysis} />
+          ) : finalizingStatus === "finalizing" ? (
+            <FinalizingOverlay />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-gray-400">
+              Analysis will appear here once the discovery is complete (≥ 90%).
+            </div>
+          )
         ) : activeTab === "Summary" ? (
           <div className="flex h-full flex-col items-center justify-center gap-4">
             <button
@@ -157,11 +184,35 @@ export default function ChatPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [finalizingStatus, setFinalizingStatus] = useState<FinalizingStatus>("idle");
+  const [finalAnalysis, setFinalAnalysis] = useState<FinalAnalysis | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Stale-response guard: discard extraction results from earlier turns
   const extractNonceRef = useRef(0);
+  // Polling interval ref — cleared when finalization completes or component unmounts
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll GET /analyses/{sessionId} every 5 s while the finalizer is running
+  useEffect(() => {
+    if (finalizingStatus !== "finalizing" || !sessionId) return;
+
+    pollingRef.current = setInterval(async () => {
+      const result = await getAnalysis(sessionId);
+      if (result.status === "complete" && result.analysis) {
+        clearInterval(pollingRef.current!);
+        pollingRef.current = null;
+        setFinalAnalysis(result.analysis);
+        setFinalizingStatus("complete");
+        setActiveTab("Analysis");
+      }
+    }, 5000);
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [finalizingStatus, sessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -239,7 +290,12 @@ export default function ChatPage() {
         finalizeMessage(assistantId);
         setError(err);
         setIsStreaming(false);
-      }
+      },
+      // onFinalizing — backend has detected ≥ 90% completeness and started the pipeline
+      () => {
+        setFinalizingStatus("finalizing");
+        setActiveTab("Analysis");
+      },
     );
   }
 
@@ -275,7 +331,15 @@ export default function ChatPage() {
     setSessionId(sid);
     setRsPartial(null);
     setSrsData(null);
+    setFinalizingStatus("idle");
+    setFinalAnalysis(null);
     setHistoryOpen(false);
+    // Check if this session already has a completed analysis
+    const result = await getAnalysis(sid);
+    if (result.status === "complete" && result.analysis) {
+      setFinalAnalysis(result.analysis);
+      setFinalizingStatus("complete");
+    }
   }
 
   function newConversation() {
@@ -283,6 +347,8 @@ export default function ChatPage() {
     setSessionId(null);
     setRsPartial(null);
     setSrsData(null);
+    setFinalizingStatus("idle");
+    setFinalAnalysis(null);
     setHistoryOpen(false);
   }
 
@@ -453,6 +519,8 @@ export default function ChatPage() {
           sessionId={sessionId}
           onGenerateFull={handleGenerateFull}
           srsData={srsData}
+          finalizingStatus={finalizingStatus}
+          finalAnalysis={finalAnalysis}
         />
       </div>
     </div>

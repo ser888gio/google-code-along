@@ -1,0 +1,171 @@
+"""
+Discovery Agent — Form Field Tracker.
+
+Responsibility: analyze the conversation transcript after every user message and
+return a structured JSON object showing which of the 22 required IT use case fields
+have been collected, their current values, and what still needs to be asked.
+
+Used by the orchestrator as an AgentTool:
+  - Called after every user turn
+  - Returns completeness score (0-100), all 22 field values, and a prioritized list
+    of the most important missing fields so the orchestrator knows what to ask next
+
+Why a dedicated agent (not just a function):
+  - ADK AgentTool lets the orchestrator invoke it naturally within the conversation loop
+  - Field definitions and extraction logic stay encapsulated here, easy to update
+  - Can be tested and improved independently
+
+Model: Gemini Flash — extraction only, no deep reasoning needed, needs to be fast
+"""
+
+from google.adk.agents import Agent
+
+from .prompt import DISCOVERY_SYSTEM_PROMPT
+
+# Gemini Flash — fast and cheap, runs after every single user message
+DISCOVERY_MODEL = "gemini-2.0-flash-001"
+
+discovery_agent = Agent(
+    name="discovery_agent",
+    description=(
+        "Analyzes a conversation transcript and extracts all 22 IT use case form fields. "
+        "Returns a JSON object with field values, completeness score (0-100), and the "
+        "top 3 missing fields to prioritize next."
+    ),
+    model=DISCOVERY_MODEL,
+    instruction=DISCOVERY_SYSTEM_PROMPT,
+    tools=[],  # Pure text-in / JSON-out — no external tools needed
+)
+
+
+# ---------------------------------------------------------------------------
+# Standalone extraction helper (for use outside ADK context, e.g. REST endpoints)
+# ---------------------------------------------------------------------------
+# TODO: replace the existing extract_rs_context() in context/extractor.py
+#       with this function once the 22-field schema is finalized.
+#       The old 8-field extractor can be kept temporarily for frontend backwards compat.
+
+
+async def extract_discovery_fields(conversation_text: str) -> dict:
+    """Extract all 22 form fields from a conversation transcript.
+
+    This is a thin wrapper that calls the same Gemini Flash model used by the
+    discovery_agent, but as a direct API call (for use in REST endpoints that
+    don't go through the ADK runner).
+
+    Returns:
+        {
+            "completeness": int (0-100),
+            "fields": {
+                "<field_key>": {"filled": bool, "value": str | null},
+                ...  (always all 22 keys, see FIELD_SCHEMA below)
+            },
+            "missing_priority": [str, ...]  (up to 3 highest-priority missing fields)
+        }
+
+    Never raises — returns empty fields on any failure.
+
+    TODO: implement this function body once DISCOVERY_EXTRACTION_PROMPT is finalized
+          in context/prompts.py (see FIELD_SCHEMA below for the expected JSON shape).
+    TODO: reuse the existing _get_model() pattern from context/extractor.py to avoid
+          duplicating the Vertex AI init logic.
+    TODO: apply the same markdown fence stripping that extractor.py already does.
+    """
+    # TODO: implement — skeleton below
+    #
+    # if not conversation_text.strip():
+    #     return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
+    # try:
+    #     model = _get_model()  # TODO: import or duplicate from context/extractor.py
+    #     prompt = DISCOVERY_EXTRACTION_PROMPT.format(conversation=conversation_text)
+    #     response = model.generate_content(prompt)
+    #     raw = _strip_fences(response.text)
+    #     parsed = json.loads(raw)
+    #     return _normalize(parsed)
+    # except Exception:
+    #     return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
+    raise NotImplementedError("TODO: implement extract_discovery_fields()")
+
+
+# ---------------------------------------------------------------------------
+# Field schema — single source of truth for all 22 fields
+# ---------------------------------------------------------------------------
+# TODO: verify these key names align exactly with what the finalizer and frontend expect.
+#       If the frontend RsLiveTemplate component uses different keys, update one side only.
+
+FIELD_SCHEMA: dict[str, dict] = {
+    # Section 1 — Identity & Current State
+    "use_case_title": {"label": "Use Case Title (EN)", "required": True, "section": 1},
+    "department": {"label": "Customer Department", "required": True, "section": 1},
+    "requestor": {"label": "Requestor", "required": True, "section": 1},
+    "product_owner": {"label": "Product Owner", "required": True, "section": 1},
+    "process_as_is": {
+        "label": "Process Description / As-Is",
+        "required": True,
+        "section": 1,
+    },
+    "process_context": {"label": "Process Context", "required": True, "section": 1},
+    "trigger": {"label": "Trigger", "required": True, "section": 1},
+    # Section 2 — Target State
+    "purpose_to_be": {"label": "Purpose / To-Be", "required": True, "section": 2},
+    # Section 3 — Value & ROI
+    "saved_time_hours_per_year": {
+        "label": "Saved Time (hours/year)",
+        "required": False,
+        "section": 3,
+    },  # approximate OK
+    "cost_saving": {
+        "label": "Cost Saving",
+        "required": False,
+        "section": 3,
+    },  # approximate OK
+    "revenue_increase": {
+        "label": "Revenue Increase",
+        "required": False,
+        "section": 3,
+    },  # approximate OK
+    "impacted_users": {"label": "Impacted Users", "required": True, "section": 3},
+    "add_value": {"label": "Added Value", "required": True, "section": 3},
+    # Section 4 — Priority & Risk
+    "time_criticality": {"label": "Time Criticality", "required": True, "section": 4},
+    "strategic_impact": {"label": "Strategic Impact", "required": True, "section": 4},
+    "risk_avoidance": {
+        "label": "Risk Avoidance",
+        "required": False,
+        "section": 4,
+    },  # approximate OK
+    # Section 5 — Technical Context
+    "systems_and_tools": {
+        "label": "Systems & Tools Involved",
+        "required": True,
+        "section": 5,
+    },
+    "document_types": {
+        "label": "Types of Documents Involved",
+        "required": True,
+        "section": 5,
+    },
+    "data_security_classification": {
+        "label": "Data Security Classification",
+        "required": True,
+        "section": 5,
+    },
+    "solution_type": {"label": "Solution Type", "required": True, "section": 5},
+    # Free-form (optional — not counted toward completeness score)
+    "comments": {"label": "Comments", "required": False, "section": 6},
+    "attachments": {
+        "label": "Attachments (GCS paths)",
+        "required": False,
+        "section": 6,
+    },
+}
+
+# Pre-built empty state — used as fallback and as the initial state in the frontend
+# TODO: frontend RsLiveTemplate should switch from its current hardcoded 8-section
+#       structure to rendering this FIELD_SCHEMA dynamically grouped by section number
+EMPTY_FIELDS: dict = {key: {"filled": False, "value": None} for key in FIELD_SCHEMA}
+
+# Fields that count toward the completeness score (required=True, not optional)
+# TODO: confirm with team whether ROI fields (cost_saving, saved_time, revenue_increase)
+#       should be required or optional for the completeness gate (currently optional)
+REQUIRED_FIELDS = [k for k, v in FIELD_SCHEMA.items() if v["required"]]
