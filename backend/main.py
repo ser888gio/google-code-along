@@ -7,7 +7,6 @@ from agent.discovery_agent import extract_discovery_fields
 from agent.finalizer_agent import run_finalizer
 from bpmn import check_completeness, generate_bpmn_diagram
 from config import APP_NAME, FINALIZING_MARKER
-from context import extract_rs_context
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +14,12 @@ from fastapi.responses import Response, StreamingResponse
 from firestore import (
     append_conversation_turn,
     get_conversation_history,
+    get_discovery_state,
     get_final_analysis,
     get_srs_fields,
     list_sessions,
     set_finalization_pending,
+    upsert_discovery_state,
     upsert_srs_fields,
 )
 from gcs import write_file
@@ -348,8 +349,6 @@ async def download_docx(req: SessionRef):
     then writes it into a Word document using the SRS template structure.
     Returns 404 if the session is not found, 422 if compilation fails.
     """
-    from fastapi import HTTPException
-    from fastapi.responses import Response
 
     srs_json = await compile_srs_json_from_session(
         session_service=session_service,
@@ -490,42 +489,59 @@ class ContextRequest(BaseModel):
     user_id: str = "default_user"
 
 
-class SectionData(BaseModel):
+class FieldData(BaseModel):
     filled: bool
-    content: str | None
+    value: str | None
 
 
 class ContextResponse(BaseModel):
     completeness: int
-    sections: dict[str, SectionData]
+    fields: dict[str, FieldData]
 
 
 @app.post("/context/extract", response_model=ContextResponse)
 async def context_extract(req: ContextRequest):
-    """Extract structured RS section data from the current conversation.
+    """Extract all 22 discovery form fields from the current conversation.
 
-    Calls Gemini to map what has been discussed so far into the 8 RS sections.
-    Always returns all 8 section keys. Returns completeness=0 with empty sections
-    if the session is not found or Gemini fails.
+    Calls Gemini Flash to map what has been discussed into the 22-field schema.
+    Always returns all 22 field keys.
+
+    Fallback order when the ADK session is missing (e.g. after a backend restart
+    or when loading a historical session that was never replayed in ADK):
+      1. Try the ADK InMemorySessionService — extract fresh from live events.
+      2. If not found, return the last saved discovery state from Firestore.
+      3. If nothing saved yet, return empty state (completeness=0).
     """
     session = await session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=req.session_id,
     )
-    if session is None:
-        from fastapi import HTTPException
 
-        raise HTTPException(status_code=404, detail="Session not found.")
+    if session is None:
+        # ADK session gone — return last persisted discovery state if available
+        loop = asyncio.get_event_loop()
+        saved = await loop.run_in_executor(None, get_discovery_state, req.session_id)
+        if saved:
+            logger.info(
+                f"ADK session missing, returning saved discovery state: session_id={req.session_id} completeness={saved.get('completeness')}%"
+            )
+            return {"completeness": saved["completeness"], "fields": saved["fields"]}
+        logger.info(
+            f"No ADK session and no saved state for session_id={req.session_id}"
+        )
+        return {"completeness": 0, "fields": {}}
 
     conversation_text = _extract_conversation_text(session)
-    logger.debug(f"Extracting RS context: session_id={req.session_id}")
-    result = await extract_rs_context(conversation_text)
+    logger.debug(f"Extracting discovery fields: session_id={req.session_id}")
+    result = await extract_discovery_fields(conversation_text)
     logger.info(
-        f"RS context extracted: session_id={req.session_id} completeness={result.get('completeness')}%"
+        f"Discovery fields extracted: session_id={req.session_id} completeness={result.get('completeness')}%"
     )
 
-    # Fire-and-forget: persist full SRS to Firestore without blocking the response
+    # Fire-and-forget: persist discovery state + full SRS to Firestore
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, upsert_discovery_state, req.session_id, result)
     asyncio.create_task(
         _persist_srs_to_firestore(
             session_id=req.session_id,
@@ -533,7 +549,26 @@ async def context_extract(req: ContextRequest):
         )
     )
 
-    return result
+    return {"completeness": result["completeness"], "fields": result["fields"]}
+
+
+@app.get("/discovery/{session_id}", response_model=ContextResponse)
+async def discovery_state(session_id: str):
+    """Return the last saved 22-field discovery state for *session_id*.
+
+    Used by the frontend when loading a historical session to restore the
+    Preview panel without re-running Gemini extraction.
+    Returns completeness=0 with empty fields if nothing has been saved yet.
+    """
+    loop = asyncio.get_event_loop()
+    saved = await loop.run_in_executor(None, get_discovery_state, session_id)
+    if saved:
+        logger.debug(
+            f"Discovery state retrieved: session_id={session_id} completeness={saved.get('completeness')}%"
+        )
+        return {"completeness": saved["completeness"], "fields": saved["fields"]}
+    logger.debug(f"No saved discovery state for session_id={session_id}")
+    return {"completeness": 0, "fields": {}}
 
 
 async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:

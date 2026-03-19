@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, RsPartialData, SrsData, SessionSummary, FinalAnalysis } from "../lib/api";
+import { streamChat, extractContext, getDiscoveryState, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, RsPartialData, SrsData, SessionSummary, FinalAnalysis } from "../lib/api";
 import AnalysisPanel, { FinalizingOverlay } from "./components/AnalysisPanel";
 import FileUpload from "./components/FileUpload";
 import BpmnPanel from "./components/BpmnPanel";
@@ -87,6 +87,7 @@ function RsDocumentPanel({
   srsData,
   finalizingStatus,
   finalAnalysis,
+  isExtracting,
 }: {
   activeTab: RsTab;
   onTabChange: (t: RsTab) => void;
@@ -96,6 +97,7 @@ function RsDocumentPanel({
   srsData: SrsData | null;
   finalizingStatus: FinalizingStatus;
   finalAnalysis: FinalAnalysis | null;
+  isExtracting: boolean;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -130,7 +132,7 @@ function RsDocumentPanel({
       {/* Content area */}
       <div className="flex-1 overflow-hidden bg-gray-50">
         {activeTab === "Preview" ? (
-          <RsLiveTemplate rsPartial={rsPartial} onGenerateFull={onGenerateFull} />
+          <RsLiveTemplate rsPartial={rsPartial} onGenerateFull={onGenerateFull} isExtracting={isExtracting} />
         ) : activeTab === "BPMN" ? (
           <BpmnPanel sessionId={sessionId} />
         ) : activeTab === "Data" ? (
@@ -186,6 +188,7 @@ export default function ChatPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [finalizingStatus, setFinalizingStatus] = useState<FinalizingStatus>("idle");
   const [finalAnalysis, setFinalAnalysis] = useState<FinalAnalysis | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -275,6 +278,7 @@ export default function ChatPage() {
         // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
           const nonce = ++extractNonceRef.current;
+          setIsExtracting(true);
           const [partial, fsData] = await Promise.all([
             extractContext(capturedSessionId),
             getFirestoreData(capturedSessionId),
@@ -283,6 +287,7 @@ export default function ChatPage() {
           if (nonce === extractNonceRef.current) {
             if (partial) setRsPartial(partial);
             if (fsData) setSrsData(fsData);
+            setIsExtracting(false);
           }
         }
       },
@@ -334,10 +339,17 @@ export default function ChatPage() {
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
     setHistoryOpen(false);
-    // Check if this session already has a completed analysis
-    const result = await getAnalysis(sid);
-    if (result.status === "complete" && result.analysis) {
-      setFinalAnalysis(result.analysis);
+
+    // Restore Preview panel and check for completed analysis in parallel
+    const [savedDiscovery, analysisResult, fsData] = await Promise.all([
+      getDiscoveryState(sid),
+      getAnalysis(sid),
+      getFirestoreData(sid),
+    ]);
+    if (savedDiscovery) setRsPartial(savedDiscovery);
+    if (fsData) setSrsData(fsData);
+    if (analysisResult.status === "complete" && analysisResult.analysis) {
+      setFinalAnalysis(analysisResult.analysis);
       setFinalizingStatus("complete");
     }
   }
@@ -521,6 +533,7 @@ export default function ChatPage() {
           srsData={srsData}
           finalizingStatus={finalizingStatus}
           finalAnalysis={finalAnalysis}
+          isExtracting={isExtracting}
         />
       </div>
     </div>

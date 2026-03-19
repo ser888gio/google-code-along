@@ -18,6 +18,7 @@ Why a dedicated agent (not just a function):
 Model: Gemini Flash — extraction only, no deep reasoning needed, needs to be fast
 """
 
+import asyncio
 import json
 
 from config import MODEL_DISCOVERY, init_vertex_ai
@@ -74,8 +75,6 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
 
     Never raises — returns empty state on any failure.
     """
-    # Import here to avoid circular imports at module load time
-    # noqa: PLC0415
 
     if not conversation_text.strip():
         return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
@@ -83,8 +82,10 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
     logger.debug("Extracting discovery fields from conversation transcript")
     try:
         model = _get_discovery_model()
-        prompt = DISCOVERY_EXTRACTION_PROMPT.format(conversation=conversation_text)
-        response = model.generate_content(prompt)
+        prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
+            "{conversation}", conversation_text
+        )
+        response = await asyncio.to_thread(model.generate_content, prompt)
         raw = response.text.strip()
 
         # Strip markdown fences the model sometimes adds despite instructions

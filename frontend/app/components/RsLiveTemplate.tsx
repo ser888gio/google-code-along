@@ -2,66 +2,87 @@
 
 import { RsPartialData } from "../../lib/api";
 
-// ─── Subsection registry ──────────────────────────────────────────────────────
+// ─── Field schema (mirrors FIELD_SCHEMA in backend/agent/discovery_agent.py) ──
 
-type SubsectionKey = string;
-
-interface Subsection {
-  key: SubsectionKey;
-  number: string;
+interface FieldDef {
+  key: string;
   label: string;
+  required: boolean;
 }
 
-interface Chapter {
-  number: string;
+interface Section {
+  number: number;
   title: string;
-  subsections: Subsection[];
+  fields: FieldDef[];
 }
 
-const CHAPTERS: Chapter[] = [
+const SECTIONS: Section[] = [
   {
-    number: "1",
-    title: "Context & Business Problem",
-    subsections: [
-      { key: "1_context",          number: "1.1", label: "Context" },
-      { key: "1_business_problem", number: "1.2", label: "Business Problem" },
+    number: 1,
+    title: "Identity & Current State",
+    fields: [
+      { key: "use_case_title",  label: "Use Case Title",             required: true },
+      { key: "department",      label: "Customer Department",         required: true },
+      { key: "requestor",       label: "Requestor",                   required: true },
+      { key: "product_owner",   label: "Product Owner",               required: true },
+      { key: "process_as_is",   label: "Process Description / As-Is", required: true },
+      { key: "process_context", label: "Process Context",             required: true },
+      { key: "trigger",         label: "Trigger",                     required: true },
     ],
   },
   {
-    number: "2",
-    title: "Target State & Success",
-    subsections: [
-      { key: "2_target_state",   number: "2.1", label: "Target State" },
-      { key: "2_success",        number: "2.2", label: "Success" },
+    number: 2,
+    title: "Target State",
+    fields: [
+      { key: "purpose_to_be", label: "Purpose / To-Be", required: true },
     ],
   },
   {
-    number: "3",
-    title: "Scope & Boundaries",
-    subsections: [
-      { key: "3_scope_in_out",  number: "3.1", label: "Scope — In/Out" },
-      { key: "3_boundaries",    number: "3.2", label: "Boundaries" },
+    number: 3,
+    title: "Value & ROI",
+    fields: [
+      { key: "saved_time_hours_per_year", label: "Saved Time (hours/year)", required: false },
+      { key: "cost_saving",               label: "Cost Saving",              required: false },
+      { key: "revenue_increase",          label: "Revenue Increase",         required: false },
+      { key: "impacted_users",            label: "Impacted Users",           required: true  },
+      { key: "add_value",                 label: "Added Value",              required: true  },
     ],
   },
   {
-    number: "4",
-    title: "Data, Systems, Integrations & Access",
-    subsections: [
-      { key: "4_data_systems",       number: "4.1", label: "Data & Systems" },
-      { key: "4_integrations_access", number: "4.2", label: "Integrations & Access" },
+    number: 4,
+    title: "Priority & Risk",
+    fields: [
+      { key: "time_criticality",  label: "Time Criticality",  required: true  },
+      { key: "strategic_impact",  label: "Strategic Impact",  required: true  },
+      { key: "risk_avoidance",    label: "Risk Avoidance",    required: false },
+    ],
+  },
+  {
+    number: 5,
+    title: "Technical Context",
+    fields: [
+      { key: "systems_and_tools",            label: "Systems & Tools Involved",       required: true },
+      { key: "document_types",               label: "Types of Documents Involved",    required: true },
+      { key: "data_security_classification", label: "Data Security Classification",   required: true },
+      { key: "solution_type",                label: "Solution Type",                  required: true },
+    ],
+  },
+  {
+    number: 6,
+    title: "Additional",
+    fields: [
+      { key: "comments",    label: "Comments",    required: false },
+      { key: "attachments", label: "Attachments", required: false },
     ],
   },
 ];
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
-function PlaceholderCard({ number, label }: { number: string; label: string }) {
+function PlaceholderCard({ label }: { label: string }) {
   return (
     <div className="rounded border-2 border-dashed border-gray-200 bg-gray-50 px-3 py-2.5">
       <div className="flex items-center gap-2">
-        <span className="shrink-0 rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-gray-400">
-          {number}
-        </span>
         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
           {label}
         </span>
@@ -71,21 +92,10 @@ function PlaceholderCard({ number, label }: { number: string; label: string }) {
   );
 }
 
-function FilledCard({
-  number,
-  label,
-  content,
-}: {
-  number: string;
-  label: string;
-  content: string;
-}) {
+function FilledCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="animate-fadeIn rounded border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
       <div className="mb-1.5 flex items-center gap-2">
-        <span className="shrink-0 rounded border border-[#c8e6c9] bg-[#e8f5e9] px-1.5 py-0.5 text-[10px] font-bold text-[#2e7d32]">
-          {number}
-        </span>
         <span className="text-[11px] font-semibold uppercase tracking-wide text-[#1a3a2a]">
           {label}
         </span>
@@ -93,59 +103,52 @@ function FilledCard({
           AI
         </span>
       </div>
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{content}</p>
+      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{value}</p>
     </div>
   );
 }
 
-// ─── Chapter group ────────────────────────────────────────────────────────────
+// ─── Section group ────────────────────────────────────────────────────────────
 
-function ChapterGroup({
-  chapter,
-  sections,
+function SectionGroup({
+  section,
+  fields,
 }: {
-  chapter: Chapter;
-  sections: RsPartialData["sections"] | undefined;
+  section: Section;
+  fields: RsPartialData["fields"] | undefined;
 }) {
-  const filledCount = chapter.subsections.filter((s) => {
-    const sec = sections?.[s.key];
-    return sec?.filled === true && sec.content != null && sec.content.trim() !== "";
+  const filledCount = section.fields.filter((f) => {
+    const entry = fields?.[f.key];
+    return entry?.filled === true && entry.value != null && entry.value.trim() !== "";
   }).length;
-  const total = chapter.subsections.length;
+  const total = section.fields.length;
 
   return (
     <div>
-      {/* Chapter header */}
       <div className="mb-2 flex items-center gap-2">
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#1a3a2a] text-[11px] font-bold text-white">
-          {chapter.number}
+          {section.number}
         </span>
         <span className="text-xs font-bold uppercase tracking-wide text-[#1a3a2a]">
-          {chapter.title}
+          {section.title}
         </span>
         <span className="ml-auto text-[10px] text-gray-400">
           {filledCount}/{total}
         </span>
       </div>
 
-      {/* Subsection cards */}
       <div className="space-y-1.5 pl-2">
-        {chapter.subsections.map((sub) => {
-          const sec = sections?.[sub.key];
+        {section.fields.map((f) => {
+          const entry = fields?.[f.key];
           const isFilled =
-            sec?.filled === true &&
-            sec.content != null &&
-            sec.content.trim() !== "";
+            entry?.filled === true &&
+            entry.value != null &&
+            entry.value.trim() !== "";
 
           return isFilled ? (
-            <FilledCard
-              key={sub.key}
-              number={sub.number}
-              label={sub.label}
-              content={sec!.content!}
-            />
+            <FilledCard key={f.key} label={f.label} value={entry!.value!} />
           ) : (
-            <PlaceholderCard key={sub.key} number={sub.number} label={sub.label} />
+            <PlaceholderCard key={f.key} label={f.label} />
           );
         })}
       </div>
@@ -236,22 +239,29 @@ function CompletenessHeader({
 export default function RsLiveTemplate({
   rsPartial,
   onGenerateFull,
+  isExtracting = false,
 }: {
   rsPartial: RsPartialData | null;
   onGenerateFull: () => void;
+  isExtracting?: boolean;
 }) {
   const completeness = rsPartial?.completeness ?? 0;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <CompletenessHeader completeness={completeness} onGenerateFull={onGenerateFull} />
+      {isExtracting && (
+        <div className="shrink-0 bg-amber-50 px-4 py-1.5 text-center text-[11px] text-amber-700 border-b border-amber-100">
+          Processing…
+        </div>
+      )}
 
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
-        {CHAPTERS.map((chapter) => (
-          <ChapterGroup
-            key={chapter.number}
-            chapter={chapter}
-            sections={rsPartial?.sections}
+        {SECTIONS.map((section) => (
+          <SectionGroup
+            key={section.number}
+            section={section}
+            fields={rsPartial?.fields}
           />
         ))}
       </div>

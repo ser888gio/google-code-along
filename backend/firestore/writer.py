@@ -216,6 +216,45 @@ def get_final_analysis(session_id: str) -> dict | None:
     return data
 
 
+def upsert_discovery_state(session_id: str, discovery: dict) -> None:
+    """Persist the latest 22-field discovery extraction for *session_id*.
+
+    Stored as a JSON string so the nested field schema doesn't need a
+    Firestore schema change.  Uses merge=True so conversation/SRS data
+    already on the document is never erased.
+    """
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    ref.set(
+        {
+            "session_id": session_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "discovery_state_json": json.dumps(discovery, ensure_ascii=False),
+        },
+        merge=True,
+    )
+
+
+def get_discovery_state(session_id: str) -> dict | None:
+    """Return the last saved discovery state for *session_id*, or None.
+
+    Returns the parsed dict: {completeness, fields, missing_priority},
+    or None if nothing has been saved yet.
+    """
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    if not snap.exists:
+        return None
+    json_str = snap.to_dict().get("discovery_state_json")
+    if not json_str:
+        return None
+    try:
+        return json.loads(json_str)
+    except Exception:
+        return None
+
+
 def set_finalization_error(session_id: str) -> None:
     """Mark a session finalizer run as failed so the frontend can stop polling."""
     client = _client()

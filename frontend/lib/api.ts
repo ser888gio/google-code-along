@@ -105,18 +105,31 @@ export async function downloadPdf(sessionId: string): Promise<void> {
 
 export interface RsSectionData {
   filled: boolean;
-  content: string | null;
+  value: string | null;
 }
-
-export type RsSectionKey =
-  | "context_business_problem"
-  | "target_state_success"
-  | "scope_boundaries"
-  | "data_systems_integrations_access";
 
 export interface RsPartialData {
   completeness: number;
-  sections: Record<string, RsSectionData>;
+  fields: Record<string, RsSectionData>;
+}
+
+/**
+ * Fetch the last persisted 22-field discovery state for a session.
+ * Used when loading a historical session to restore the Preview panel instantly
+ * without re-running Gemini extraction.
+ * Returns null on any failure so the caller keeps its current state.
+ */
+export async function getDiscoveryState(sessionId: string): Promise<RsPartialData | null> {
+  try {
+    const res = await fetch(`${API_URL}/discovery/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return null;
+    const data: RsPartialData = await res.json();
+    // Treat completeness=0 with no fields as "nothing saved yet"
+    if (data.completeness === 0 && Object.keys(data.fields).length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 /**
