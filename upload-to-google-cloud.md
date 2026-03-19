@@ -78,7 +78,7 @@ API key: Your .env has a GEMINI_API_KEY. For Cloud Run, you should use Secret Ma
 
 
 # Create the secret
-echo -n "AIzaSy..." | gcloud secrets create gemini-api-key --data-file=-
+echo -n "(the gemini api key)" | gcloud secrets create gemini-api-key --data-file=-
 
 # Grant Cloud Run access
 gcloud secrets add-iam-policy-binding gemini-api-key \
