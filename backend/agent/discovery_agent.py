@@ -18,12 +18,16 @@ Why a dedicated agent (not just a function):
 Model: Gemini Flash — extraction only, no deep reasoning needed, needs to be fast
 """
 
+import json
+
+from config import MODEL_DISCOVERY, init_vertex_ai
 from google.adk.agents import Agent
+from logger import get_logger
+from prompts.agent import DISCOVERY_SYSTEM_PROMPT
+from prompts.context import DISCOVERY_EXTRACTION_PROMPT
+from vertexai.generative_models import GenerativeModel
 
-from .prompt import DISCOVERY_SYSTEM_PROMPT
-
-# Gemini Flash — fast and cheap, runs after every single user message
-DISCOVERY_MODEL = "gemini-2.0-flash-001"
+logger = get_logger(__name__)
 
 discovery_agent = Agent(
     name="discovery_agent",
@@ -32,7 +36,7 @@ discovery_agent = Agent(
         "Returns a JSON object with field values, completeness score (0-100), and the "
         "top 3 missing fields to prioritize next."
     ),
-    model=DISCOVERY_MODEL,
+    model=MODEL_DISCOVERY,
     instruction=DISCOVERY_SYSTEM_PROMPT,
     tools=[],  # Pure text-in / JSON-out — no external tools needed
 )
@@ -46,45 +50,74 @@ discovery_agent = Agent(
 #       The old 8-field extractor can be kept temporarily for frontend backwards compat.
 
 
+def _get_discovery_model() -> GenerativeModel:
+    """Initialise Vertex AI and return a Gemini Flash model instance."""
+    init_vertex_ai()
+    return GenerativeModel(MODEL_DISCOVERY)
+
+
 async def extract_discovery_fields(conversation_text: str) -> dict:
     """Extract all 22 form fields from a conversation transcript.
 
-    This is a thin wrapper that calls the same Gemini Flash model used by the
-    discovery_agent, but as a direct API call (for use in REST endpoints that
-    don't go through the ADK runner).
+    Calls Gemini Flash directly (not via ADK runner) so it can be used as
+    a fire-and-forget task from main.py after every chat turn.
 
     Returns:
         {
             "completeness": int (0-100),
             "fields": {
                 "<field_key>": {"filled": bool, "value": str | null},
-                ...  (always all 22 keys, see FIELD_SCHEMA below)
+                ...  (always all 22 keys)
             },
             "missing_priority": [str, ...]  (up to 3 highest-priority missing fields)
         }
 
-    Never raises — returns empty fields on any failure.
-
-    TODO: implement this function body once DISCOVERY_EXTRACTION_PROMPT is finalized
-          in context/prompts.py (see FIELD_SCHEMA below for the expected JSON shape).
-    TODO: reuse the existing _get_model() pattern from context/extractor.py to avoid
-          duplicating the Vertex AI init logic.
-    TODO: apply the same markdown fence stripping that extractor.py already does.
+    Never raises — returns empty state on any failure.
     """
-    # TODO: implement — skeleton below
-    #
-    # if not conversation_text.strip():
-    #     return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
-    # try:
-    #     model = _get_model()  # TODO: import or duplicate from context/extractor.py
-    #     prompt = DISCOVERY_EXTRACTION_PROMPT.format(conversation=conversation_text)
-    #     response = model.generate_content(prompt)
-    #     raw = _strip_fences(response.text)
-    #     parsed = json.loads(raw)
-    #     return _normalize(parsed)
-    # except Exception:
-    #     return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
-    raise NotImplementedError("TODO: implement extract_discovery_fields()")
+    # Import here to avoid circular imports at module load time
+    # noqa: PLC0415
+
+    if not conversation_text.strip():
+        return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
+
+    logger.debug("Extracting discovery fields from conversation transcript")
+    try:
+        model = _get_discovery_model()
+        prompt = DISCOVERY_EXTRACTION_PROMPT.format(conversation=conversation_text)
+        response = model.generate_content(prompt)
+        raw = response.text.strip()
+
+        # Strip markdown fences the model sometimes adds despite instructions
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        parsed = json.loads(raw)
+        fields = parsed.get("fields", {})
+
+        # Ensure all 22 keys are always present and nulls are consistent
+        for key in FIELD_SCHEMA:
+            if key not in fields:
+                fields[key] = {"filled": False, "value": None}
+            else:
+                if not fields[key].get("filled", False):
+                    fields[key]["value"] = None
+
+        result = {
+            "completeness": max(0, min(100, int(parsed.get("completeness", 0)))),
+            "fields": fields,
+            "missing_priority": parsed.get("missing_priority", [])[:3],
+        }
+        logger.info(
+            f"Discovery extraction done: completeness={result['completeness']}% missing_priority={result['missing_priority']}"
+        )
+        return result
+
+    except Exception as exc:
+        logger.warning(f"extract_discovery_fields failed: {exc}")
+        return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
 
 
 # ---------------------------------------------------------------------------

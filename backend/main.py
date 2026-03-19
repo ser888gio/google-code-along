@@ -3,18 +3,22 @@ import json
 import uuid
 
 from agent import rs_agent
+from agent.discovery_agent import extract_discovery_fields
+from agent.finalizer_agent import run_finalizer
 from bpmn import check_completeness, generate_bpmn_diagram
+from config import APP_NAME, FINALIZING_MARKER
 from context import extract_rs_context
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from firestore import (
     append_conversation_turn,
     get_conversation_history,
+    get_final_analysis,
     get_srs_fields,
     list_sessions,
+    set_finalization_pending,
     upsert_srs_fields,
 )
 from gcs import write_file
@@ -27,11 +31,14 @@ from generation import (
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from logger import get_logger, setup_logging
 from pydantic import BaseModel
 
-load_dotenv()
+setup_logging()
+logger = get_logger(__name__)
 
 app = FastAPI(title="RS Generator API")
+logger.info(f"RS Generator API initializing (app_name={APP_NAME})")
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,8 +50,6 @@ app.add_middleware(
 # --- ADK runner setup ---
 
 session_service = InMemorySessionService()
-
-APP_NAME = "rs_generator"
 
 runner = Runner(
     app_name=APP_NAME,
@@ -91,11 +96,15 @@ async def upload_file(
     """Upload a file to GCS under sessions/{session_id}/{filename}."""
     destination = f"sessions/{session_id}/{file.filename}"
     contents = await file.read()
+    logger.info(
+        f"Upload received: file={file.filename} size={len(contents)}B session_id={session_id}"
+    )
     gcs_path = write_file(
         path=destination,
         data=contents,
         content_type=file.content_type or "application/octet-stream",
     )
+    logger.debug(f"File uploaded to GCS: {gcs_path}")
     return UploadResponse(gcs_path=gcs_path, filename=file.filename)
 
 
@@ -104,6 +113,7 @@ async def chat(req: ChatRequest):
     """Send a message to the RS consultant agent and get a response."""
 
     session_id = req.session_id or str(uuid.uuid4())
+    logger.debug(f"Chat request: session_id={session_id} user_id={req.user_id}")
 
     # Ensure session exists
     session = await session_service.get_session(
@@ -117,6 +127,9 @@ async def chat(req: ChatRequest):
             user_id=req.user_id,
             session_id=session_id,
         )
+        logger.info(f"New session created: {session_id}")
+    else:
+        logger.debug(f"Resumed existing session: {session_id}")
 
     user_content = types.Content(
         role="user",
@@ -136,6 +149,7 @@ async def chat(req: ChatRequest):
                     reply_parts.append(part.text)
 
     reply = "".join(reply_parts)
+    logger.info(f"Agent reply ready: session_id={session_id} reply_chars={len(reply)}")
 
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, append_conversation_turn, session_id, req.message, reply)
@@ -148,6 +162,7 @@ async def chat_stream(req: ChatRequest):
     """Stream the agent's response as Server-Sent Events."""
 
     session_id = req.session_id or str(uuid.uuid4())
+    logger.debug(f"Stream chat request: session_id={session_id} user_id={req.user_id}")
 
     session = await session_service.get_session(
         app_name="rs_generator",
@@ -160,6 +175,9 @@ async def chat_stream(req: ChatRequest):
             user_id=req.user_id,
             session_id=session_id,
         )
+        logger.info(f"New session created: {session_id}")
+    else:
+        logger.debug(f"Resumed existing session: {session_id}")
 
     user_content = types.Content(
         role="user",
@@ -180,44 +198,72 @@ async def chat_stream(req: ChatRequest):
                 for part in event.content.parts:
                     if part.text:
                         reply_parts.append(part.text)
-                        # TODO: strip [FINALIZING] marker before yielding to client
-                        #       so the user never sees the raw signal token.
-                        #       Check: if "[FINALIZING]" in part.text, split it out.
-                        yield f"data: {json.dumps({'text': part.text})}\n\n"
+                        # Strip [FINALIZING] marker before sending to the client
+                        # so the user never sees the raw signal token.
+                        clean = part.text.replace(FINALIZING_MARKER, "").strip()
+                        if clean:
+                            yield f"data: {json.dumps({'text': clean})}\n\n"
 
         full_reply = "".join(reply_parts)
+        logger.info(
+            f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}"
+        )
+
+        # Persist conversation turn to Firestore (fire-and-forget)
         loop = asyncio.get_event_loop()
         loop.run_in_executor(
             None, append_conversation_turn, session_id, req.message, full_reply
         )
 
         # --- Finalization trigger ---
-        # TODO: detect [FINALIZING] marker in full_reply and fire the finalizer pipeline:
-        #
-        #   if "[FINALIZING]" in full_reply:
-        #       # 1. Signal frontend immediately — show "Finalizing your analysis..."
-        #       yield f"data: {json.dumps({'event': 'finalizing'})}\n\n"
-        #
-        #       # 2. Collect current discovery fields for the finalizer
-        #       #    TODO: call extract_discovery_fields(conversation_text) here
-        #       #          or read them from the session state if discovery_agent stored them
-        #
-        #       # 3. Fire background task — does NOT block the SSE stream
-        #       #    from agent.finalizer_agent import run_finalizer
-        #       #    asyncio.create_task(run_finalizer(
-        #       #        session_id=session_id,
-        #       #        user_id=req.user_id,
-        #       #        conversation_text=_extract_conversation_text(session),
-        #       #        discovery_fields=discovery_fields,
-        #       #    ))
-        #
-        #       # 4. When run_finalizer() completes it updates Firestore with
-        #       #    finalization_status="complete". The frontend polls
-        #       #    GET /analyses/{session_id} to detect completion.
-        #       #    Alternatively: keep the SSE connection open and yield a
-        #       #    "finalizing_complete" event when the background task finishes —
-        #       #    but this requires holding the generator alive, which is complex.
-        #       #    Recommended: Firestore polling from the frontend (simpler).
+        if FINALIZING_MARKER in full_reply:
+            logger.info(
+                f"[FINALIZING] detected for session_id={session_id} — launching finalizer pipeline"
+            )
+            # 1. Signal frontend immediately — it shows FinalizingOverlay + switches to Analysis tab
+            yield f"data: {json.dumps({'event': 'finalizing'})}\n\n"
+
+            # 2. Mark Firestore as pending so frontend polls know state
+            loop.run_in_executor(None, set_finalization_pending, session_id)
+
+            # 3. Build full conversation transcript from the ADK session events
+            session_snap = await session_service.get_session(
+                app_name=APP_NAME,
+                user_id=req.user_id,
+                session_id=session_id,
+            )
+            conversation_text = (
+                _extract_conversation_text(session_snap) if session_snap else full_reply
+            )
+
+            # 4. Extract current 22-field state for the finalizer (async, may take a few seconds)
+            try:
+                discovery_fields = await extract_discovery_fields(conversation_text)
+                logger.debug(
+                    f"Discovery fields extracted: session_id={session_id} completeness={discovery_fields.get('completeness')}%"
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"extract_discovery_fields failed for session_id={session_id}: {exc}"
+                )
+                discovery_fields = {
+                    "completeness": 0,
+                    "fields": {},
+                    "missing_priority": [],
+                }
+
+            # 5. Launch finalizer in background — does NOT block the SSE stream
+            #    run_finalizer() writes to GCS + Firestore when done.
+            #    Frontend polls GET /analyses/{session_id} to detect completion.
+            asyncio.create_task(
+                run_finalizer(
+                    session_id=session_id,
+                    user_id=req.user_id,
+                    conversation_text=conversation_text,
+                    discovery_fields=discovery_fields,
+                )
+            )
+            logger.debug(f"Finalizer background task created: session_id={session_id}")
 
         yield "data: [DONE]\n\n"
 
@@ -266,7 +312,6 @@ async def download_pdf(req: SessionRef):
     Extracts the RS markdown from the session and converts it to PDF.
     Returns 404 if no document has been generated yet.
     """
-    from fastapi.responses import Response
 
     markdown = await compile_rs_from_session(
         session_service=session_service,
@@ -275,13 +320,15 @@ async def download_pdf(req: SessionRef):
         session_id=req.session_id,
     )
     if markdown is None:
-        from fastapi import HTTPException
-
+        logger.warning(
+            f"PDF export requested but no RS document found: session_id={req.session_id}"
+        )
         raise HTTPException(
             status_code=404,
             detail="No RS document found. Complete the conversation first.",
         )
 
+    logger.info(f"Generating PDF export: session_id={req.session_id}")
     pdf_bytes = markdown_to_pdf(markdown)
 
     return Response(
@@ -311,11 +358,15 @@ async def download_docx(req: SessionRef):
         session_id=req.session_id,
     )
     if srs_json is None:
+        logger.warning(
+            f"DOCX export failed — SRS could not be compiled: session_id={req.session_id}"
+        )
         raise HTTPException(
             status_code=422,
             detail="Could not compile SRS from the conversation. Keep chatting to provide more details.",
         )
 
+    logger.info(f"Generating DOCX export: session_id={req.session_id}")
     docx_bytes = srs_json_to_docx(srs_json)
 
     return Response(
@@ -374,10 +425,13 @@ async def bpmn_generate(req: BpmnRequest):
     completeness = await check_completeness(conversation_text)
     score: int = completeness.get("score", 0)
     missing: list[str] = completeness.get("missing", [])
+    logger.info(f"BPMN completeness check: session_id={req.session_id} score={score}%")
 
     if score < 90:
+        logger.debug(f"BPMN not ready (score < 90): missing={missing}")
         return BpmnResponse(ready=False, score=score, missing=missing)
 
+    logger.info(f"Generating BPMN diagram: session_id={req.session_id}")
     mermaid = await generate_bpmn_diagram(conversation_text)
     return BpmnResponse(ready=True, mermaid=mermaid, score=score)
 
@@ -415,10 +469,15 @@ async def dataflow_generate(req: DataflowRequest):
     completeness = await check_dfd_completeness(conversation_text)
     score: int = completeness.get("score", 0)
     missing: list[str] = completeness.get("missing", [])
+    logger.info(
+        f"Dataflow completeness check: session_id={req.session_id} score={score}%"
+    )
 
     if score < 70:
+        logger.debug(f"Dataflow not ready (score < 70): missing={missing}")
         return DataflowResponse(ready=False, score=score, missing=missing)
 
+    logger.info(f"Generating Dataflow diagram: session_id={req.session_id}")
     mermaid = await generate_dataflow_diagram(conversation_text)
     return DataflowResponse(ready=True, mermaid=mermaid, score=score)
 
@@ -460,7 +519,11 @@ async def context_extract(req: ContextRequest):
         raise HTTPException(status_code=404, detail="Session not found.")
 
     conversation_text = _extract_conversation_text(session)
+    logger.debug(f"Extracting RS context: session_id={req.session_id}")
     result = await extract_rs_context(conversation_text)
+    logger.info(
+        f"RS context extracted: session_id={req.session_id} completeness={result.get('completeness')}%"
+    )
 
     # Fire-and-forget: persist full SRS to Firestore without blocking the response
     asyncio.create_task(
@@ -488,8 +551,11 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
         if srs_json:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(None, upsert_srs_fields, session_id, srs_json)
+            logger.debug(f"SRS persisted to Firestore: session_id={session_id}")
     except Exception as exc:  # noqa: BLE001
-        print(f"[Firestore] upsert failed for session {session_id}: {exc}")
+        logger.warning(
+            f"Firestore SRS upsert failed: session_id={session_id} error={exc}"
+        )
 
 
 # --- Firestore data retrieval ---
@@ -537,28 +603,30 @@ async def get_history(session_id: str):
 async def get_analysis(session_id: str):
     """Return the finalized analysis for a session, or status if still pending.
 
-    The frontend polls this endpoint after receiving the "finalizing" SSE event.
+    The frontend polls this endpoint every 5 s after receiving the "finalizing" SSE event.
+
     Returns:
-      - {"status": "pending"} while run_finalizer() is still running
-      - {"status": "complete", "analysis": {...}} when done
-      - {"status": "not_found"} if finalization was never triggered
-
-    TODO: implement by reading finalization_status from Firestore:
-          from firestore.writer import get_final_analysis
-          result = get_final_analysis(session_id)
-          if result is None:
-              return {"status": "not_found"}
-          if result.get("finalization_status") == "complete":
-              return {"status": "complete", "analysis": result}
-          return {"status": "pending"}
-
-    TODO: alternatively, read directly from GCS analyses/{session_id}/final_analysis.json
-          if it exists — that file is written last, so its existence = completion signal.
-          This avoids the need for a finalization_status field in Firestore.
-          Tradeoff: GCS read on every poll vs Firestore read (both are fast).
+      {"status": "not_found"}                          — finalization never triggered
+      {"status": "pending"}                            — run_finalizer() still running
+      {"status": "error"}                              — pipeline failed
+      {"status": "complete", "analysis": {...}}        — done, full analysis included
     """
-    # TODO: implement
-    return {"status": "not_found"}
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, get_final_analysis, session_id)
+
+    if result is None:
+        return {"status": "not_found"}
+
+    status = result.get("finalization_status", "not_found")
+
+    if status == "complete":
+        # Remove the internal status flag before returning to frontend
+        result.pop("finalization_status", None)
+        logger.info(f"Analysis ready: session_id={session_id}")
+        return {"status": "complete", "analysis": result}
+
+    logger.debug(f"Analysis poll: session_id={session_id} status={status}")
+    return {"status": status}
 
 
 @app.get("/firestore/data/{session_id}", response_model=FirestoreDataResponse)

@@ -7,23 +7,15 @@ Two functions:
 """
 
 import json
-import os
 
-import vertexai
+from config import MODEL_BPMN, init_vertex_ai
+from prompts.bpmn import BPMN_GENERATION_PROMPT, COMPLETENESS_PROMPT
 from vertexai.generative_models import GenerativeModel
-
-from .prompts import BPMN_GENERATION_PROMPT, COMPLETENESS_PROMPT
-
-_MODEL_NAME = "gemini-3-pro"
 
 
 def _get_model() -> GenerativeModel:
-    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    # Region for Vertex AI must be a region, not a zone — strip the zone suffix
-    region_raw = os.getenv("GOOGLE_CLOUD_REGION", "europe-central2")
-    region = "-".join(region_raw.split("-")[:3])  # e.g. "europe-central2-a" → "europe-central2"
-    vertexai.init(project=project, location=region)
-    return GenerativeModel(_MODEL_NAME)
+    init_vertex_ai()
+    return GenerativeModel(MODEL_BPMN)
 
 
 async def check_completeness(conversation_text: str) -> dict:

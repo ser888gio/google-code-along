@@ -11,19 +11,18 @@ can display every field in real-time.  `upsert_srs_fields` uses
 have a value — previously filled fields are never erased.
 """
 
-import os
+import json
 from datetime import datetime, timezone
 from typing import Any
 
+from config import FIRESTORE_COLLECTION, FIRESTORE_DATABASE, GCP_PROJECT
 from google.cloud import firestore
 
-_COLLECTION = os.getenv("FIRESTORE_COLLECTION", "srs_sessions")
+_COLLECTION = FIRESTORE_COLLECTION
 
 
 def _client() -> firestore.Client:
-    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    database = os.getenv("FIRESTORE_DATABASE", "businesspersona")
-    return firestore.Client(project=project, database=database)
+    return firestore.Client(project=GCP_PROJECT, database=FIRESTORE_DATABASE)
 
 
 def _srs_to_doc(session_id: str, srs: dict[str, Any]) -> dict[str, Any]:
@@ -44,19 +43,19 @@ def _srs_to_doc(session_id: str, srs: dict[str, Any]) -> dict[str, Any]:
             doc[key] = value
 
     # Block 1 — Context & Business Problem
-    _set("s1_context",          block1.get("context"))
+    _set("s1_context", block1.get("context"))
     _set("s1_business_problem", block1.get("business_problem"))
 
     # Block 2 — Target State & Success
     _set("s2_target_state", block2.get("target_state"))
-    _set("s2_success",      block2.get("success"))
+    _set("s2_success", block2.get("success"))
 
     # Block 3 — Scope & Boundaries
     _set("s3_scope_in_out", block3.get("scope_in_out"))
-    _set("s3_boundaries",   block3.get("boundaries"))
+    _set("s3_boundaries", block3.get("boundaries"))
 
     # Block 4 — Data, Systems, Integrations & Access
-    _set("s4_data_systems",        block4.get("data_systems"))
+    _set("s4_data_systems", block4.get("data_systems"))
     _set("s4_integrations_access", block4.get("integrations_access"))
 
     return doc
@@ -127,10 +126,105 @@ def list_sessions() -> list[dict[str, Any]]:
         data = doc.to_dict()
         messages = data.get("messages", [])
         preview = next((m["text"] for m in messages if m.get("role") == "user"), None)
-        results.append({
-            "session_id": data.get("session_id") or doc.id,
-            "updated_at": data.get("updated_at"),
-            "preview": preview,
-        })
+        results.append(
+            {
+                "session_id": data.get("session_id") or doc.id,
+                "updated_at": data.get("updated_at"),
+                "preview": preview,
+            }
+        )
     results.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Final analysis persistence (written by the Finalizer Agent pipeline)
+# ---------------------------------------------------------------------------
+
+
+def set_finalization_pending(session_id: str) -> None:
+    """Mark the session as finalization in-progress.
+
+    Called by main.py immediately when [FINALIZING] is detected so the
+    frontend can show a spinner while run_finalizer() runs in the background.
+    """
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    ref.set(
+        {
+            "session_id": session_id,
+            "finalization_status": "pending",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        merge=True,
+    )
+
+
+def upsert_final_analysis(session_id: str, analysis: dict) -> None:
+    """Persist the completed final analysis to Firestore.
+
+    Stores:
+    - finalization_status: "complete"
+    - finalized_at: ISO timestamp
+    - final_analysis_json: full JSON blob (used by GET /analyses/{session_id})
+
+    Uses merge=True so prior conversation/SRS fields are never erased.
+    """
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    ref.set(
+        {
+            "session_id": session_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "finalization_status": "complete",
+            "finalized_at": datetime.now(timezone.utc).isoformat(),
+            # Full JSON stored as a string so sub-field types don't need a Firestore schema
+            "final_analysis_json": json.dumps(analysis, ensure_ascii=False),
+        },
+        merge=True,
+    )
+
+
+def get_final_analysis(session_id: str) -> dict | None:
+    """Return the finalization status and data for a session.
+
+    Returns:
+        None                                   — document doesn't exist
+        {"finalization_status": "pending"}     — still running
+        {"finalization_status": "error"}       — pipeline failed
+        full analysis dict with "finalization_status": "complete"
+    """
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    if not snap.exists:
+        return None
+    data = snap.to_dict()
+    status = data.get("finalization_status")
+    if not status:
+        return None
+    if status != "complete":
+        return {"finalization_status": status}
+    json_str = data.get("final_analysis_json")
+    if json_str:
+        try:
+            result = json.loads(json_str)
+            result["finalization_status"] = "complete"
+            return result
+        except Exception:
+            pass
+    return data
+
+
+def set_finalization_error(session_id: str) -> None:
+    """Mark a session finalizer run as failed so the frontend can stop polling."""
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    ref.set(
+        {
+            "session_id": session_id,
+            "finalization_status": "error",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        merge=True,
+    )

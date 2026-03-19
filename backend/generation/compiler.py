@@ -9,9 +9,8 @@ If no marker is found, it returns None — the caller can then ask the agent
 to generate the document explicitly.
 """
 
+from config import RS_MARKER
 from google.adk.sessions import InMemorySessionService, Session
-
-RS_MARKER = "[GENERATE_RS]"
 
 
 async def compile_rs_from_session(
@@ -41,9 +40,7 @@ async def compile_rs_from_session(
         if event.content.role != "model":
             continue
 
-        full_text = "".join(
-            part.text for part in event.content.parts if part.text
-        )
+        full_text = "".join(part.text for part in event.content.parts if part.text)
 
         if RS_MARKER in full_text:
             # Return everything after the marker

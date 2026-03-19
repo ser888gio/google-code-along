@@ -1,7 +1,7 @@
 """
 Extraction prompts for the discovery pipeline.
 
-RS_EXTRACTION_PROMPT       — legacy 8-field extractor (keep until frontend is updated)
+RS_EXTRACTION_PROMPT        — legacy 8-field extractor (keep until frontend is updated)
 DISCOVERY_EXTRACTION_PROMPT — new 22-field extractor used by discovery_agent
 """
 

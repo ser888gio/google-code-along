@@ -7,22 +7,15 @@ Two functions:
 """
 
 import json
-import os
 
-import vertexai
+from config import MODEL_DATAFLOW, init_vertex_ai
+from prompts.dataflow import DATAFLOW_COMPLETENESS_PROMPT, DATAFLOW_GENERATION_PROMPT
 from vertexai.generative_models import GenerativeModel
-
-from .prompts import DATAFLOW_COMPLETENESS_PROMPT, DATAFLOW_GENERATION_PROMPT
-
-_MODEL_NAME = "gemini-3-pro"
 
 
 def _get_model() -> GenerativeModel:
-    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    region_raw = os.getenv("GOOGLE_CLOUD_REGION", "europe-central2")
-    region = "-".join(region_raw.split("-")[:3])
-    vertexai.init(project=project, location=region)
-    return GenerativeModel(_MODEL_NAME)
+    init_vertex_ai()
+    return GenerativeModel(MODEL_DATAFLOW)
 
 
 async def check_dfd_completeness(conversation_text: str) -> dict:

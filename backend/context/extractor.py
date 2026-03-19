@@ -7,35 +7,30 @@ completeness score and per-field { filled, content } data.
 """
 
 import json
-import os
 
-import vertexai
+from config import MODEL_CONTEXT, init_vertex_ai
+from logger import get_logger
+from prompts.context import RS_EXTRACTION_PROMPT
 from vertexai.generative_models import GenerativeModel
 
-from .prompts import RS_EXTRACTION_PROMPT
-
-_MODEL_NAME = "gemini-2.0-flash-001"
+logger = get_logger(__name__)
 
 # All 8 discovery session fields.
 EMPTY_SECTIONS: dict = {
-    "1_context":             {"filled": False, "content": None},
-    "1_business_problem":    {"filled": False, "content": None},
-    "2_target_state":        {"filled": False, "content": None},
-    "2_success":             {"filled": False, "content": None},
-    "3_scope_in_out":        {"filled": False, "content": None},
-    "3_boundaries":          {"filled": False, "content": None},
-    "4_data_systems":        {"filled": False, "content": None},
+    "1_context": {"filled": False, "content": None},
+    "1_business_problem": {"filled": False, "content": None},
+    "2_target_state": {"filled": False, "content": None},
+    "2_success": {"filled": False, "content": None},
+    "3_scope_in_out": {"filled": False, "content": None},
+    "3_boundaries": {"filled": False, "content": None},
+    "4_data_systems": {"filled": False, "content": None},
     "4_integrations_access": {"filled": False, "content": None},
 }
 
 
 def _get_model() -> GenerativeModel:
-    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    region_raw = os.getenv("GOOGLE_CLOUD_REGION", "europe-central2")
-    # Strip zone suffix: "europe-central2-a" → "europe-central2"
-    region = "-".join(region_raw.split("-")[:3])
-    vertexai.init(project=project, location=region)
-    return GenerativeModel(_MODEL_NAME)
+    init_vertex_ai()
+    return GenerativeModel(MODEL_CONTEXT)
 
 
 async def extract_rs_context(conversation_text: str) -> dict:
@@ -55,6 +50,7 @@ async def extract_rs_context(conversation_text: str) -> dict:
     if not conversation_text.strip():
         return {"completeness": 0, "sections": dict(EMPTY_SECTIONS)}
 
+    logger.debug("Extracting RS context from conversation transcript")
     try:
         model = _get_model()
         prompt = RS_EXTRACTION_PROMPT.format(conversation=conversation_text)
@@ -80,10 +76,13 @@ async def extract_rs_context(conversation_text: str) -> dict:
                 if not entry.get("filled", False):
                     entry["content"] = None
 
-        return {
-            "completeness": max(0, min(100, int(parsed.get("completeness", 0)))),
-            "sections": sections,
-        }
+        completeness = max(0, min(100, int(parsed.get("completeness", 0))))
+        filled = sum(1 for s in sections.values() if s.get("filled"))
+        logger.info(
+            f"RS context extracted: completeness={completeness}% filled_sections={filled}/{len(sections)}"
+        )
+        return {"completeness": completeness, "sections": sections}
 
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"extract_rs_context failed: {exc}")
         return {"completeness": 0, "sections": dict(EMPTY_SECTIONS)}

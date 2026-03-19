@@ -1,8 +1,5 @@
-import os
-
+from config import GCS_BUCKET_NAME as BUCKET_NAME
 from google.cloud import storage
-
-BUCKET_NAME = os.getenv("GCS_BUCKET_NAME", "code_along_input_business_persona")
 
 
 def _client() -> storage.Client:
@@ -20,7 +17,9 @@ def read_file(path: str, bucket_name: str = BUCKET_NAME) -> bytes:
     return _client().bucket(bucket_name).blob(path).download_as_bytes()
 
 
-def read_text(path: str, bucket_name: str = BUCKET_NAME, encoding: str = "utf-8") -> str:
+def read_text(
+    path: str, bucket_name: str = BUCKET_NAME, encoding: str = "utf-8"
+) -> str:
     """Download a text blob and return it as a string."""
     return read_file(path, bucket_name).decode(encoding)
 
