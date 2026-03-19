@@ -98,13 +98,10 @@ export interface RsSectionData {
 }
 
 export type RsSectionKey =
-  | "introduction"
-  | "overall_description"
-  | "system_features"
-  | "external_interface_requirements"
-  | "nonfunctional_requirements"
-  | "other_requirements"
-  | "appendices";
+  | "context_business_problem"
+  | "target_state_success"
+  | "scope_boundaries"
+  | "data_systems_integrations_access";
 
 export interface RsPartialData {
   completeness: number;
@@ -235,39 +232,18 @@ export async function getDocument(sessionId: string): Promise<DocumentResponse> 
 export interface SrsData {
   session_id: string;
   updated_at: string | null;
-  // Section 1
-  s1_1_purpose: string | null;
-  s1_2_project_scope: string | null;
-  s1_3_requester: string | null;
-  s1_4_product_owner: string | null;
-  s1_5_sponsor: string | null;
-  s1_6_delivery_responsibility: string | null;
-  // Section 2
-  s2_1_product_perspective: string | null;
-  s2_2_product_features: string | null;
-  s2_3_user_classes: string | null;
-  s2_4_operating_environment: string | null;
-  s2_5_design_constraints: string | null;
-  s2_6_user_documentation: string | null;
-  s2_7_assumptions_dependencies: string | null;
-  // Section 3
-  s3_system_features: string | null;
-  // Section 4
-  s4_1_user_interfaces: string | null;
-  s4_2_hardware_interfaces: string | null;
-  s4_3_software_interfaces: string | null;
-  s4_4_communications_interfaces: string | null;
-  // Section 5
-  s5_1_performance: string | null;
-  s5_2_safety: string | null;
-  s5_3_security: string | null;
-  s5_4_quality_attributes: string | null;
-  // Section 6
-  s6_other_requirements: string | null;
-  // Appendices
-  appendix_a_glossary: string | null;
-  appendix_b_analysis_models: string | null;
-  appendix_c_issues_list: string | null;
+  // Block 1 — Context & Business Problem
+  s1_context: string | null;
+  s1_business_problem: string | null;
+  // Block 2 — Target State & Success
+  s2_target_state: string | null;
+  s2_success: string | null;
+  // Block 3 — Scope & Boundaries
+  s3_scope_in_out: string | null;
+  s3_boundaries: string | null;
+  // Block 4 — Data, Systems, Integrations & Access
+  s4_data_systems: string | null;
+  s4_integrations_access: string | null;
 }
 
 /**
