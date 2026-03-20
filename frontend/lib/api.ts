@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// Empty string → relative URLs → Next.js rewrite proxy forwards to BACKEND_URL at runtime.
+// Set NEXT_PUBLIC_API_URL only if you want to bypass the proxy (e.g. local dev pointing at a remote BE).
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export interface ChatResponse {
   reply: string;
