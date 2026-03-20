@@ -6,7 +6,11 @@ TASKS.md
 
 gcp-key.json
 
-*/*.pdf
-*/*.docx
+**/*.pdf
+**/*.docx
+**/*.mmd
+**/*.png
+*.docx
 
 .vscode
+docs
