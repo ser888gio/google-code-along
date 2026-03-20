@@ -861,10 +861,20 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
         then runs the same post-processing pipeline as text chat:
         Firestore persistence, discovery-field extraction, SRS compilation,
         and [FINALIZING] detection.
+
+        Transcription events from the ADK arrive on dedicated fields:
+          - event.input_transcription.text  → user speech-to-text
+          - event.output_transcription.text → assistant speech-to-text
+        These are separate from audio blob events (event.content.parts[].inline_data).
+        Partial events (event.partial=True) carry incremental chunks;
+        final events (event.partial=False) carry the full accumulated text.
         """
-        # Accumulate transcription text per turn (reset after each turn_complete)
-        user_transcript_parts: list[str] = []
-        assistant_transcript_parts: list[str] = []
+        # Accumulate final transcription text per turn for Firestore persistence
+        user_transcript_final: str = ""
+        assistant_transcript_final: str = ""
+        # Track partial text already sent so we can compute diffs for streaming
+        user_partial_sent: str = ""
+        assistant_partial_sent: str = ""
 
         try:
             async for event in audio_runner.run_live(
@@ -872,11 +882,9 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                 live_request_queue=live_request_queue,
                 run_config=run_config,
             ):
+                # ── 1. Audio blob — send as binary frame ──────────────────
                 if event.content and event.content.parts:
-                    role = getattr(event.content, "role", None)
-
                     for part in event.content.parts:
-                        # Audio response — send as binary frame
                         if (
                             part.inline_data
                             and part.inline_data.mime_type
@@ -885,45 +893,99 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         ):
                             await websocket.send_bytes(part.inline_data.data)
 
-                        # Text (transcription or model text output)
+                        # Rare: text content in audio mode (non-transcription)
                         elif part.text:
-                            if role == "user":
-                                # User input transcription
-                                user_transcript_parts.append(part.text)
+                            logger.debug(
+                                f"[WS] Text content event (role={getattr(event.content, 'role', '?')}): "
+                                f"{part.text[:80]}"
+                            )
+
+                # ── 2. User input transcription ───────────────────────────
+                if event.input_transcription and event.input_transcription.text:
+                    full_text = event.input_transcription.text
+                    if event.partial:
+                        # Partial: send only the new chars as a diff
+                        new_chunk = full_text[len(user_partial_sent) :]
+                        user_partial_sent = full_text
+                        if new_chunk:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "user_transcript",
+                                        "text": new_chunk,
+                                    }
+                                )
+                            )
+                    else:
+                        # Final: send any remaining diff, store full text
+                        new_chunk = full_text[len(user_partial_sent) :]
+                        if new_chunk:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "user_transcript",
+                                        "text": new_chunk,
+                                    }
+                                )
+                            )
+                        user_transcript_final = full_text
+                        user_partial_sent = ""
+                        logger.debug(
+                            f"[WS] User transcription final ({len(full_text)} chars): "
+                            f"{full_text[:100]}"
+                        )
+
+                # ── 3. Assistant output transcription ─────────────────────
+                if event.output_transcription and event.output_transcription.text:
+                    full_text = event.output_transcription.text
+                    if event.partial:
+                        # Partial: send only the new chars as a diff
+                        new_chunk = full_text[len(assistant_partial_sent) :]
+                        assistant_partial_sent = full_text
+                        if new_chunk:
+                            # Strip [FINALIZING] marker before sending to client
+                            clean = new_chunk.replace(FINALIZING_MARKER, "").strip()
+                            if clean:
                                 await websocket.send_text(
                                     json.dumps(
                                         {
-                                            "type": "user_transcript",
-                                            "text": part.text,
+                                            "type": "text",
+                                            "text": clean,
                                         }
                                     )
                                 )
-                            else:
-                                # Assistant output transcription / text
-                                assistant_transcript_parts.append(part.text)
-                                # Strip [FINALIZING] marker before sending to client
-                                clean = part.text.replace(FINALIZING_MARKER, "").strip()
-                                if clean:
-                                    await websocket.send_text(
-                                        json.dumps(
-                                            {
-                                                "type": "text",
-                                                "text": clean,
-                                            }
-                                        )
+                    else:
+                        # Final: send any remaining diff, store full text
+                        new_chunk = full_text[len(assistant_partial_sent) :]
+                        if new_chunk:
+                            clean = new_chunk.replace(FINALIZING_MARKER, "").strip()
+                            if clean:
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "text",
+                                            "text": clean,
+                                        }
                                     )
+                                )
+                        assistant_transcript_final = full_text
+                        assistant_partial_sent = ""
+                        logger.debug(
+                            f"[WS] Assistant transcription final ({len(full_text)} chars): "
+                            f"{full_text[:100]}"
+                        )
 
-                # ── Turn complete: run the full post-processing pipeline ──
+                # ── 4. Turn complete: run the full post-processing pipeline ──
                 if event.is_final_response():
-                    user_text = "".join(user_transcript_parts).strip()
-                    assistant_text = "".join(assistant_transcript_parts).strip()
+                    user_text = user_transcript_final.strip()
+                    assistant_text = assistant_transcript_final.strip()
 
                     logger.info(
                         f"[WS] Turn complete: session={session_id} "
                         f"user_chars={len(user_text)} assistant_chars={len(assistant_text)}"
                     )
 
-                    # 1. Persist conversation turn to Firestore
+                    # 4a. Persist conversation turn to Firestore
                     if user_text or assistant_text:
                         loop = asyncio.get_event_loop()
                         loop.run_in_executor(
@@ -934,10 +996,10 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                             assistant_text,
                         )
 
-                    # 2. Check for [FINALIZING] marker
+                    # 4b. Check for [FINALIZING] marker
                     is_finalizing = FINALIZING_MARKER in assistant_text
 
-                    # 3. Build conversation transcript for extraction
+                    # 4c. Build conversation transcript for extraction
                     session_snap = await session_service.get_session(
                         app_name=APP_NAME,
                         user_id=user_id,
@@ -949,7 +1011,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         else f"User: {user_text}\nConsultant: {assistant_text}"
                     )
 
-                    # 4. Extract discovery fields + persist (async, non-blocking for WS)
+                    # 4d. Extract discovery fields + persist
                     try:
                         discovery_fields = await extract_discovery_fields(
                             conversation_text
@@ -972,10 +1034,10 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                             "missing_priority": [],
                         }
 
-                    # 5. Compile and persist SRS to Firestore (background)
+                    # 4e. Compile and persist SRS to Firestore (background)
                     asyncio.create_task(_persist_srs_to_firestore(session_id, user_id))
 
-                    # 6. If [FINALIZING] detected, launch the finalizer pipeline
+                    # 4f. If [FINALIZING] detected, launch the finalizer pipeline
                     if is_finalizing:
                         logger.info(
                             f"[WS][FINALIZING] detected: session={session_id} — launching finalizer"
@@ -991,7 +1053,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                             )
                         )
 
-                    # 7. Send turn_complete with metadata to the frontend
+                    # 4g. Send turn_complete with metadata to the frontend
                     await websocket.send_text(
                         json.dumps(
                             {
@@ -1002,8 +1064,10 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                     )
 
                     # Reset accumulators for next turn
-                    user_transcript_parts.clear()
-                    assistant_transcript_parts.clear()
+                    user_transcript_final = ""
+                    assistant_transcript_final = ""
+                    user_partial_sent = ""
+                    assistant_partial_sent = ""
 
         except WebSocketDisconnect:
             logger.debug(f"[WS] Client disconnected during downstream")
