@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, downloadPdf, getFirestoreData, RsPartialData, SrsData } from "../lib/api";
+import { streamChat, extractContext, getDiscoveryState, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, RsPartialData, SrsData, SessionSummary, FinalAnalysis } from "../lib/api";
+import AnalysisPanel, { FinalizingOverlay } from "./components/AnalysisPanel";
 import FileUpload from "./components/FileUpload";
 import BpmnPanel from "./components/BpmnPanel";
 import DataflowPanel from "./components/DataflowPanel";
@@ -19,8 +20,14 @@ interface Message {
   streaming?: boolean;
 }
 
-const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Summary"] as const;
+const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Analysis", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
+
+// Finalization can be in one of three states:
+//   idle       — not yet triggered
+//   finalizing — backend is running the finalizer pipeline; frontend is polling
+//   complete   — final analysis is ready and stored in state
+type FinalizingStatus = "idle" | "finalizing" | "complete";
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
@@ -78,6 +85,9 @@ function RsDocumentPanel({
   sessionId,
   onGenerateFull,
   srsData,
+  finalizingStatus,
+  finalAnalysis,
+  isExtracting,
 }: {
   activeTab: RsTab;
   onTabChange: (t: RsTab) => void;
@@ -85,6 +95,9 @@ function RsDocumentPanel({
   sessionId: string | null;
   onGenerateFull: () => void;
   srsData: SrsData | null;
+  finalizingStatus: FinalizingStatus;
+  finalAnalysis: FinalAnalysis | null;
+  isExtracting: boolean;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -98,13 +111,19 @@ function RsDocumentPanel({
             <button
               key={tab}
               onClick={() => onTabChange(tab)}
-              className={`whitespace-nowrap px-3 py-3 text-sm transition-colors ${
+              className={`relative whitespace-nowrap px-3 py-3 text-sm transition-colors ${
                 activeTab === tab
                   ? "border-b-2 border-[#1a3a2a] bg-[#1a3a2a] text-white"
                   : "text-gray-500 hover:text-gray-800"
               }`}
             >
               {tab}
+              {tab === "Analysis" && finalizingStatus === "finalizing" && (
+                <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 align-middle" />
+              )}
+              {tab === "Analysis" && finalizingStatus === "complete" && (
+                <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#4caf50] align-middle" />
+              )}
             </button>
           ))}
         </div>
@@ -113,13 +132,23 @@ function RsDocumentPanel({
       {/* Content area */}
       <div className="flex-1 overflow-hidden bg-gray-50">
         {activeTab === "Preview" ? (
-          <RsLiveTemplate rsPartial={rsPartial} onGenerateFull={onGenerateFull} />
+          <RsLiveTemplate rsPartial={rsPartial} onGenerateFull={onGenerateFull} isExtracting={isExtracting} />
         ) : activeTab === "BPMN" ? (
           <BpmnPanel sessionId={sessionId} />
         ) : activeTab === "Data" ? (
           <DataflowPanel sessionId={sessionId} />
         ) : activeTab === "Database" ? (
           <FirestoreSrsPanel data={srsData} />
+        ) : activeTab === "Analysis" ? (
+          finalizingStatus === "complete" && finalAnalysis ? (
+            <AnalysisPanel analysis={finalAnalysis} />
+          ) : finalizingStatus === "finalizing" ? (
+            <FinalizingOverlay />
+          ) : (
+            <div className="flex h-full items-center justify-center text-sm text-gray-400">
+              Analysis will appear here once the discovery is complete (≥ 90%).
+            </div>
+          )
         ) : activeTab === "Summary" ? (
           <div className="flex h-full flex-col items-center justify-center gap-4">
             <button
@@ -154,11 +183,39 @@ export default function ChatPage() {
   const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
   const [srsData, setSrsData] = useState<SrsData | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [finalizingStatus, setFinalizingStatus] = useState<FinalizingStatus>("idle");
+  const [finalAnalysis, setFinalAnalysis] = useState<FinalAnalysis | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Stale-response guard: discard extraction results from earlier turns
   const extractNonceRef = useRef(0);
+  // Polling interval ref — cleared when finalization completes or component unmounts
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Poll GET /analyses/{sessionId} every 5 s while the finalizer is running
+  useEffect(() => {
+    if (finalizingStatus !== "finalizing" || !sessionId) return;
+
+    pollingRef.current = setInterval(async () => {
+      const result = await getAnalysis(sessionId);
+      if (result.status === "complete" && result.analysis) {
+        clearInterval(pollingRef.current!);
+        pollingRef.current = null;
+        setFinalAnalysis(result.analysis);
+        setFinalizingStatus("complete");
+        setActiveTab("Analysis");
+      }
+    }, 5000);
+
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current);
+    };
+  }, [finalizingStatus, sessionId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -221,6 +278,7 @@ export default function ChatPage() {
         // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
           const nonce = ++extractNonceRef.current;
+          setIsExtracting(true);
           const [partial, fsData] = await Promise.all([
             extractContext(capturedSessionId),
             getFirestoreData(capturedSessionId),
@@ -229,6 +287,7 @@ export default function ChatPage() {
           if (nonce === extractNonceRef.current) {
             if (partial) setRsPartial(partial);
             if (fsData) setSrsData(fsData);
+            setIsExtracting(false);
           }
         }
       },
@@ -236,7 +295,12 @@ export default function ChatPage() {
         finalizeMessage(assistantId);
         setError(err);
         setIsStreaming(false);
-      }
+      },
+      // onFinalizing — backend has detected ≥ 90% completeness and started the pipeline
+      () => {
+        setFinalizingStatus("finalizing");
+        setActiveTab("Analysis");
+      },
     );
   }
 
@@ -256,19 +320,113 @@ export default function ChatPage() {
     }
   }
 
+  async function openHistory() {
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    const sessions = await getSessions();
+    setHistorySessions(sessions);
+    setHistoryLoading(false);
+  }
+
+  async function loadSession(sid: string) {
+    const msgs = await getHistory(sid);
+    setMessages(
+      msgs.map((m) => ({ id: crypto.randomUUID(), role: m.role, text: m.text }))
+    );
+    setSessionId(sid);
+    setRsPartial(null);
+    setSrsData(null);
+    setFinalizingStatus("idle");
+    setFinalAnalysis(null);
+    setHistoryOpen(false);
+
+    // Restore Preview panel and check for completed analysis in parallel
+    const [savedDiscovery, analysisResult, fsData] = await Promise.all([
+      getDiscoveryState(sid),
+      getAnalysis(sid),
+      getFirestoreData(sid),
+    ]);
+    if (savedDiscovery) setRsPartial(savedDiscovery);
+    if (fsData) setSrsData(fsData);
+    if (analysisResult.status === "complete" && analysisResult.analysis) {
+      setFinalAnalysis(analysisResult.analysis);
+      setFinalizingStatus("complete");
+      setActiveTab("Analysis");
+    }
+  }
+
+  function newConversation() {
+    setMessages([]);
+    setSessionId(null);
+    setRsPartial(null);
+    setSrsData(null);
+    setFinalizingStatus("idle");
+    setFinalAnalysis(null);
+    setHistoryOpen(false);
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
       {/* ── Left panel ─────────────────────────────────── */}
       <div className="flex w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
+        {/* History sidebar */}
+        {historyOpen && (
+          <div className="absolute inset-0 z-40 flex">
+            <div className="flex w-72 flex-col border-r border-gray-200 bg-white shadow-xl">
+              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
+                <span className="text-sm font-bold text-gray-800">Conversations</span>
+                <button onClick={() => setHistoryOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+              </div>
+              <div className="shrink-0 border-b border-gray-200 p-3">
+                <button
+                  onClick={newConversation}
+                  className="w-full rounded border border-dashed border-gray-300 py-2 text-xs font-semibold text-gray-500 hover:border-[#4caf50] hover:text-[#4a6659] transition-colors"
+                >
+                  + New conversation
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                {historyLoading ? (
+                  <p className="p-4 text-center text-xs text-gray-400">Loading…</p>
+                ) : historySessions.length === 0 ? (
+                  <p className="p-4 text-center text-xs text-gray-400">No past conversations found.</p>
+                ) : (
+                  historySessions.map((s) => (
+                    <button
+                      key={s.session_id}
+                      onClick={() => loadSession(s.session_id)}
+                      className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${s.session_id === sessionId ? "bg-[#f5fdf5]" : ""}`}
+                    >
+                      <p className="truncate text-xs font-medium text-gray-700">
+                        {s.preview ?? s.session_id}
+                      </p>
+                      {s.updated_at && (
+                        <p className="mt-0.5 text-[10px] text-gray-400">
+                          {new Date(s.updated_at).toLocaleString()}
+                        </p>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+            <div className="flex-1 bg-black/20" onClick={() => setHistoryOpen(false)} />
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
           <span className="text-sm font-bold text-gray-800">Document Preprocessor</span>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100">
+            <button
+              onClick={openHistory}
+              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+            >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1l-6 5v7h4v-4h4v4h4V6z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Home
+              History
             </button>
             <div className={`h-3 w-3 rounded-full ${isStreaming ? "animate-pulse bg-yellow-400" : "bg-[#4caf50]"}`} />
           </div>
@@ -374,6 +532,9 @@ export default function ChatPage() {
           sessionId={sessionId}
           onGenerateFull={handleGenerateFull}
           srsData={srsData}
+          finalizingStatus={finalizingStatus}
+          finalAnalysis={finalAnalysis}
+          isExtracting={isExtracting}
         />
       </div>
     </div>
