@@ -57,6 +57,7 @@ from google.genai.types import (
 )
 from logger import get_logger, setup_logging
 from pydantic import BaseModel
+from session_bridge import SessionBridge
 
 setup_logging()
 logger = get_logger(__name__)
@@ -86,6 +87,14 @@ audio_runner = Runner(
     app_name=APP_NAME,
     agent=audio_agent,
     session_service=session_service,
+)
+
+# Bridge: injects voice transcripts into the text orchestrator's ADK session
+# so the orchestrator has full context when the user switches back to text.
+session_bridge = SessionBridge(
+    session_service=session_service,
+    app_name=APP_NAME,
+    orchestrator_agent_name=rs_agent.name,
 )
 
 
@@ -182,7 +191,7 @@ async def chat(req: ChatRequest):
     reply = "".join(reply_parts)
     logger.info(f"Agent reply ready: session_id={session_id} reply_chars={len(reply)}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     loop.run_in_executor(None, append_conversation_turn, session_id, req.message, reply)
 
     return ChatResponse(reply=reply, session_id=session_id)
@@ -240,65 +249,27 @@ async def chat_stream(req: ChatRequest):
             f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}"
         )
 
-        # Persist conversation turn to Firestore (fire-and-forget)
-        loop = asyncio.get_event_loop()
-        loop.run_in_executor(
-            None, append_conversation_turn, session_id, req.message, full_reply
-        )
+        is_finalizing = FINALIZING_MARKER in full_reply
 
-        # --- Finalization trigger ---
-        if FINALIZING_MARKER in full_reply:
+        # Signal frontend before [DONE] so it can show FinalizingOverlay
+        if is_finalizing:
             logger.info(
                 f"[FINALIZING] detected for session_id={session_id} — launching finalizer pipeline"
             )
-            # 1. Signal frontend immediately — it shows FinalizingOverlay + switches to Analysis tab
             yield f"data: {json.dumps({'event': 'finalizing'})}\n\n"
 
-            # 2. Mark Firestore as pending so frontend polls know state
-            loop.run_in_executor(None, set_finalization_pending, session_id)
-
-            # 3. Build full conversation transcript from the ADK session events
-            session_snap = await session_service.get_session(
-                app_name=APP_NAME,
-                user_id=req.user_id,
+        # Shared pipeline: Firestore persist, discovery extraction, SRS,
+        # finalization — runs as a background task so [DONE] is sent promptly.
+        asyncio.create_task(
+            _run_turn_postprocessing(
                 session_id=session_id,
+                user_id=req.user_id,
+                user_text=req.message,
+                assistant_text=full_reply,
+                is_finalizing=is_finalizing,
+                fallback_transcript=full_reply,
             )
-            conversation_text = (
-                _extract_conversation_text(session_snap) if session_snap else full_reply
-            )
-
-            # 4. Extract current 22-field state for the finalizer (async, may take a few seconds)
-            try:
-                discovery_fields = await extract_discovery_fields(conversation_text)
-                logger.debug(
-                    f"Discovery fields extracted: session_id={session_id} completeness={discovery_fields.get('completeness')}%"
-                )
-                # Persist the latest discovery state so history restore reflects it
-                loop.run_in_executor(
-                    None, upsert_discovery_state, session_id, discovery_fields
-                )
-            except Exception as exc:
-                logger.warning(
-                    f"extract_discovery_fields failed for session_id={session_id}: {exc}"
-                )
-                discovery_fields = {
-                    "completeness": 0,
-                    "fields": {},
-                    "missing_priority": [],
-                }
-
-            # 5. Launch finalizer in background — does NOT block the SSE stream
-            #    run_finalizer() writes to GCS + Firestore when done.
-            #    Frontend polls GET /analyses/{session_id} to detect completion.
-            asyncio.create_task(
-                run_finalizer(
-                    session_id=session_id,
-                    user_id=req.user_id,
-                    conversation_text=conversation_text,
-                    discovery_fields=discovery_fields,
-                )
-            )
-            logger.debug(f"Finalizer background task created: session_id={session_id}")
+        )
 
         yield "data: [DONE]\n\n"
 
@@ -554,7 +525,7 @@ async def context_extract(req: ContextRequest):
 
     if session is None:
         # ADK session gone — return last persisted discovery state if available
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         saved = await loop.run_in_executor(None, get_discovery_state, req.session_id)
         if saved:
             logger.info(
@@ -574,7 +545,7 @@ async def context_extract(req: ContextRequest):
     )
 
     # Fire-and-forget: persist discovery state + full SRS to Firestore
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, upsert_discovery_state, req.session_id, result)
     asyncio.create_task(
         _persist_srs_to_firestore(
@@ -594,7 +565,7 @@ async def discovery_state(session_id: str):
     Preview panel without re-running Gemini extraction.
     Returns completeness=0 with empty fields if nothing has been saved yet.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     saved = await loop.run_in_executor(None, get_discovery_state, session_id)
     if saved:
         logger.debug(
@@ -618,7 +589,7 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
             session_id=session_id,
         )
         if srs_json:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, upsert_srs_fields, session_id, srs_json)
             logger.debug(f"SRS persisted to Firestore: session_id={session_id}")
     except Exception as exc:  # noqa: BLE001
@@ -644,7 +615,7 @@ class SessionSummary(BaseModel):
 @app.get("/sessions", response_model=list[SessionSummary])
 async def sessions_list():
     """Return a summary list of all stored sessions."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     items = await loop.run_in_executor(None, list_sessions)
     return items
 
@@ -657,7 +628,7 @@ class HistoryResponse(BaseModel):
 @app.get("/history/{session_id}", response_model=HistoryResponse)
 async def get_history(session_id: str):
     """Return the full conversation history for *session_id*."""
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     messages = await loop.run_in_executor(None, get_conversation_history, session_id)
     return HistoryResponse(session_id=session_id, messages=messages)
 
@@ -680,7 +651,7 @@ async def get_analysis(session_id: str):
       {"status": "error"}                              — pipeline failed
       {"status": "complete", "analysis": {...}}        — done, full analysis included
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, get_final_analysis, session_id)
 
     if result is None:
@@ -705,12 +676,135 @@ async def firestore_data(session_id: str):
     The frontend polls this endpoint after each turn to refresh the right panel.
     Returns data=null if no document has been written yet.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     doc = await loop.run_in_executor(None, get_srs_fields, session_id)
     return FirestoreDataResponse(session_id=session_id, data=doc)
 
 
 # --- Bidirectional audio WebSocket endpoint ---
+
+
+async def _run_turn_postprocessing(
+    session_id: str,
+    user_id: str,
+    user_text: str,
+    assistant_text: str,
+    is_finalizing: bool,
+    *,
+    fallback_transcript: str | None = None,
+) -> None:
+    """Shared post-processing pipeline for a completed conversation turn.
+
+    Called by both voice and text chat paths.  Executes these steps:
+
+      1. Persist conversation turn to Firestore (fire-and-forget)
+      2. Build conversation transcript from the ADK session
+      3. Extract discovery fields + persist
+      4. Compile SRS + persist
+      5. Launch finalizer (if [FINALIZING] detected)
+
+    Parameters
+    ----------
+    fallback_transcript:
+        Used when the ADK session snapshot is unavailable.  Defaults to a
+        simple ``User: / Consultant:`` formatted string.
+    """
+    loop = asyncio.get_running_loop()
+
+    # 1. Persist conversation turn to Firestore
+    if user_text or assistant_text:
+        loop.run_in_executor(
+            None,
+            append_conversation_turn,
+            session_id,
+            user_text or "(voice input)",
+            assistant_text,
+        )
+
+    # 2. Build conversation transcript for extraction
+    session_snap = await session_service.get_session(
+        app_name=APP_NAME,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    conversation_text = (
+        _extract_conversation_text(session_snap)
+        if session_snap
+        else (fallback_transcript or f"User: {user_text}\nConsultant: {assistant_text}")
+    )
+
+    # 3. Extract discovery fields + persist
+    try:
+        discovery_fields = await extract_discovery_fields(conversation_text)
+        logger.debug(
+            f"Discovery fields extracted: session={session_id} "
+            f"completeness={discovery_fields.get('completeness')}%"
+        )
+        loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_fields)
+    except Exception as exc:
+        logger.warning(f"extract_discovery_fields failed: session={session_id} {exc}")
+        discovery_fields = {
+            "completeness": 0,
+            "fields": {},
+            "missing_priority": [],
+        }
+
+    # 4. Compile and persist SRS to Firestore
+    asyncio.create_task(_persist_srs_to_firestore(session_id, user_id))
+
+    # 5. If [FINALIZING] detected, launch the finalizer pipeline
+    if is_finalizing:
+        logger.info(
+            f"[FINALIZING] detected: session={session_id} — launching finalizer"
+        )
+        loop.run_in_executor(None, set_finalization_pending, session_id)
+        asyncio.create_task(
+            run_finalizer(
+                session_id=session_id,
+                user_id=user_id,
+                conversation_text=conversation_text,
+                discovery_fields=discovery_fields,
+            )
+        )
+
+    return discovery_fields
+
+
+async def _voice_turn_postprocessing(
+    session_id: str,
+    user_id: str,
+    user_text: str,
+    assistant_text: str,
+    is_finalizing: bool,
+) -> None:
+    """Post-processing for a completed voice turn (runs as background task).
+
+    Wraps the shared ``_run_turn_postprocessing()`` and additionally injects
+    the voice transcript into the text orchestrator's ADK session via
+    ``SessionBridge`` so the orchestrator has full context when the user
+    switches back to text.
+    """
+    try:
+        # Voice-only: Inject transcript into orchestrator session first
+        await session_bridge.inject_voice_turn(
+            user_id=user_id,
+            session_id=session_id,
+            user_text=user_text,
+            assistant_text=assistant_text,
+        )
+
+        # Shared pipeline: Firestore, discovery, SRS, finalization
+        await _run_turn_postprocessing(
+            session_id=session_id,
+            user_id=user_id,
+            user_text=user_text,
+            assistant_text=assistant_text,
+            is_finalizing=is_finalizing,
+        )
+
+    except Exception as exc:
+        logger.error(f"[WS] Voice post-processing failed: session={session_id} {exc}")
+        traceback.print_exc()
 
 
 def _is_native_audio_model(model_name: str) -> bool:
@@ -953,75 +1047,10 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         f"user_chars={len(user_text)} assistant_chars={len(assistant_text)}"
                     )
 
-                    # 4a. Persist conversation turn to Firestore
-                    if user_text or assistant_text:
-                        loop = asyncio.get_event_loop()
-                        loop.run_in_executor(
-                            None,
-                            append_conversation_turn,
-                            session_id,
-                            user_text or "(voice input)",
-                            assistant_text,
-                        )
-
-                    # 4b. Check for [FINALIZING] marker
+                    # Check for [FINALIZING] marker (needed for turn_complete msg)
                     is_finalizing = FINALIZING_MARKER in assistant_text
 
-                    # 4c. Build conversation transcript for extraction
-                    session_snap = await session_service.get_session(
-                        app_name=APP_NAME,
-                        user_id=user_id,
-                        session_id=session_id,
-                    )
-                    conversation_text = (
-                        _extract_conversation_text(session_snap)
-                        if session_snap
-                        else f"User: {user_text}\nConsultant: {assistant_text}"
-                    )
-
-                    # 4d. Extract discovery fields + persist
-                    try:
-                        discovery_fields = await extract_discovery_fields(
-                            conversation_text
-                        )
-                        logger.debug(
-                            f"[WS] Discovery fields extracted: session={session_id} "
-                            f"completeness={discovery_fields.get('completeness')}%"
-                        )
-                        loop = asyncio.get_event_loop()
-                        loop.run_in_executor(
-                            None, upsert_discovery_state, session_id, discovery_fields
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            f"[WS] extract_discovery_fields failed: session={session_id} {exc}"
-                        )
-                        discovery_fields = {
-                            "completeness": 0,
-                            "fields": {},
-                            "missing_priority": [],
-                        }
-
-                    # 4e. Compile and persist SRS to Firestore (background)
-                    asyncio.create_task(_persist_srs_to_firestore(session_id, user_id))
-
-                    # 4f. If [FINALIZING] detected, launch the finalizer pipeline
-                    if is_finalizing:
-                        logger.info(
-                            f"[WS][FINALIZING] detected: session={session_id} — launching finalizer"
-                        )
-                        loop = asyncio.get_event_loop()
-                        loop.run_in_executor(None, set_finalization_pending, session_id)
-                        asyncio.create_task(
-                            run_finalizer(
-                                session_id=session_id,
-                                user_id=user_id,
-                                conversation_text=conversation_text,
-                                discovery_fields=discovery_fields,
-                            )
-                        )
-
-                    # 4g. Send turn_complete with metadata to the frontend
+                    # Send turn_complete immediately so the frontend can react
                     await websocket.send_text(
                         json.dumps(
                             {
@@ -1031,11 +1060,22 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         )
                     )
 
+                    # Run heavy post-processing (Firestore, SessionBridge,
+                    # discovery extraction, SRS, finalization) in a background
+                    # task so the event loop stays free for the next audio turn.
+                    asyncio.create_task(
+                        _voice_turn_postprocessing(
+                            session_id=session_id,
+                            user_id=user_id,
+                            user_text=user_text,
+                            assistant_text=assistant_text,
+                            is_finalizing=is_finalizing,
+                        )
+                    )
+
                     # Reset accumulators for next turn
                     user_transcript_final = ""
                     assistant_transcript_final = ""
-                    user_partial_sent = ""
-                    assistant_partial_sent = ""
 
         except WebSocketDisconnect:
             logger.debug(f"[WS] Client disconnected during downstream")
