@@ -698,10 +698,12 @@ async def _run_turn_postprocessing(
     Called by both voice and text chat paths.  Executes these steps:
 
       1. Persist conversation turn to Firestore (fire-and-forget)
-      2. Build conversation transcript from the ADK session
-      3. Extract discovery fields + persist
-      4. Compile SRS + persist
-      5. Launch finalizer (if [FINALIZING] detected)
+      2. Launch finalizer (if [FINALIZING] detected) — includes its own
+         discovery extraction so the heavy Gemini call only happens once
+
+    Discovery field extraction and SRS compilation are NOT done here — the
+    frontend triggers those via ``POST /context/extract`` after each turn.
+    This avoids duplicate Gemini calls (backend + frontend both extracting).
 
     Parameters
     ----------
@@ -721,43 +723,50 @@ async def _run_turn_postprocessing(
             assistant_text,
         )
 
-    # 2. Build conversation transcript for extraction
-    session_snap = await session_service.get_session(
-        app_name=APP_NAME,
-        user_id=user_id,
-        session_id=session_id,
-    )
-    conversation_text = (
-        _extract_conversation_text(session_snap)
-        if session_snap
-        else (fallback_transcript or f"User: {user_text}\nConsultant: {assistant_text}")
-    )
-
-    # 3. Extract discovery fields + persist
-    try:
-        discovery_fields = await extract_discovery_fields(conversation_text)
-        logger.debug(
-            f"Discovery fields extracted: session={session_id} "
-            f"completeness={discovery_fields.get('completeness')}%"
-        )
-        loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_fields)
-    except Exception as exc:
-        logger.warning(f"extract_discovery_fields failed: session={session_id} {exc}")
-        discovery_fields = {
-            "completeness": 0,
-            "fields": {},
-            "missing_priority": [],
-        }
-
-    # 4. Compile and persist SRS to Firestore
-    asyncio.create_task(_persist_srs_to_firestore(session_id, user_id))
-
-    # 5. If [FINALIZING] detected, launch the finalizer pipeline
+    # 2. If [FINALIZING] detected, launch the finalizer pipeline
+    #    The finalizer needs discovery fields + conversation transcript,
+    #    so we extract them here (only on finalization, not every turn).
     if is_finalizing:
         logger.info(
             f"[FINALIZING] detected: session={session_id} — launching finalizer"
         )
         loop.run_in_executor(None, set_finalization_pending, session_id)
+
+        # Build conversation transcript for the finalizer
+        session_snap = await session_service.get_session(
+            app_name=APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        conversation_text = (
+            _extract_conversation_text(session_snap)
+            if session_snap
+            else (
+                fallback_transcript
+                or f"User: {user_text}\nConsultant: {assistant_text}"
+            )
+        )
+
+        # Extract discovery fields for the finalizer
+        try:
+            discovery_fields = await extract_discovery_fields(conversation_text)
+            logger.debug(
+                f"Discovery fields for finalizer: session={session_id} "
+                f"completeness={discovery_fields.get('completeness')}%"
+            )
+            loop.run_in_executor(
+                None, upsert_discovery_state, session_id, discovery_fields
+            )
+        except Exception as exc:
+            logger.warning(
+                f"extract_discovery_fields failed: session={session_id} {exc}"
+            )
+            discovery_fields = {
+                "completeness": 0,
+                "fields": {},
+                "missing_priority": [],
+            }
+
         asyncio.create_task(
             run_finalizer(
                 session_id=session_id,
@@ -766,8 +775,6 @@ async def _run_turn_postprocessing(
                 discovery_fields=discovery_fields,
             )
         )
-
-    return discovery_fields
 
 
 async def _voice_turn_postprocessing(
@@ -793,7 +800,7 @@ async def _voice_turn_postprocessing(
             assistant_text=assistant_text,
         )
 
-        # Shared pipeline: Firestore, discovery, SRS, finalization
+        # Shared pipeline: Firestore persist + finalization (if needed)
         await _run_turn_postprocessing(
             session_id=session_id,
             user_id=user_id,
