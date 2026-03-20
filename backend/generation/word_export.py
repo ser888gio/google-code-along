@@ -6,9 +6,10 @@ each section into a properly formatted Word document.
 """
 
 import io
+
 from docx import Document
-from docx.shared import RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import RGBColor
 
 
 def _set_heading_color(paragraph, color: tuple[int, int, int]):
@@ -21,7 +22,7 @@ def _add_section_heading(doc: Document, text: str, level: int):
     """Add a numbered heading at the given level (1-4)."""
     p = doc.add_heading(text, level=level)
     colors = {
-        1: (26, 58, 42),   # dark green
+        1: (26, 58, 42),  # dark green
         2: (42, 74, 58),
         3: (60, 100, 80),
         4: (80, 120, 100),

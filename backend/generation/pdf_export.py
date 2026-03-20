@@ -9,15 +9,13 @@ bullet lists, and requirement IDs (FR-001, NFR-001).
 import io
 import re
 
-from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
-    SimpleDocTemplate,
     Paragraph,
-    Spacer,
-    PageBreak,
+    SimpleDocTemplate,
 )
 
 
@@ -149,9 +147,7 @@ def _parse_markdown_to_flowables(markdown: str, styles: dict) -> list:
         # Bullet list: - item or * item
         if re.match(r"^[\-\*]\s+", line):
             text = _inline_markdown(line.lstrip("-* ").strip())
-            flowables.append(
-                Paragraph(f"&bull; {text}", styles["bullet"])
-            )
+            flowables.append(Paragraph(f"&bull; {text}", styles["bullet"]))
             i += 1
             continue
 
@@ -159,14 +155,21 @@ def _parse_markdown_to_flowables(markdown: str, styles: dict) -> list:
         req_match = _REQ_ID_PATTERN.match(line)
         if req_match:
             text = _inline_markdown(line)
-            flowables.append(Paragraph(f"<b>{text}</b>" if ":" in text else text, styles["req_id"]))
+            flowables.append(
+                Paragraph(f"<b>{text}</b>" if ":" in text else text, styles["req_id"])
+            )
             i += 1
             continue
 
         # Regular paragraph — accumulate consecutive non-empty lines
         para_lines = [line]
         i += 1
-        while i < len(lines) and lines[i].strip() and not lines[i].startswith("#") and not re.match(r"^[\-\*]\s+", lines[i]):
+        while (
+            i < len(lines)
+            and lines[i].strip()
+            and not lines[i].startswith("#")
+            and not re.match(r"^[\-\*]\s+", lines[i])
+        ):
             para_lines.append(lines[i].rstrip())
             i += 1
 
