@@ -97,6 +97,13 @@ session_bridge = SessionBridge(
     orchestrator_agent_name=rs_agent.name,
 )
 
+# Per-session dedup lock for /context/extract.
+# Prevents multiple parallel Gemini extraction calls for the same session
+# (common in voice mode where turn_complete events arrive faster than
+# the ~40s extraction call can finish).
+_extract_locks: dict[str, asyncio.Lock] = {}
+_extract_inflight: dict[str, asyncio.Task] = {}
+
 
 # --- Request / response models ---
 
@@ -511,50 +518,99 @@ async def context_extract(req: ContextRequest):
     Calls Gemini Flash to map what has been discussed into the 22-field schema.
     Always returns all 22 field keys.
 
+    Per-session deduplication: if an extraction is already in-flight for this
+    session, subsequent requests wait for that result instead of spawning
+    parallel Gemini calls.  This is critical in voice mode where turn_complete
+    events arrive much faster than the ~40s extraction call.
+
     Fallback order when the ADK session is missing (e.g. after a backend restart
     or when loading a historical session that was never replayed in ADK):
       1. Try the ADK InMemorySessionService — extract fresh from live events.
       2. If not found, return the last saved discovery state from Firestore.
       3. If nothing saved yet, return empty state (completeness=0).
     """
+    sid = req.session_id
+
     session = await session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
-        session_id=req.session_id,
+        session_id=sid,
     )
 
     if session is None:
         # ADK session gone — return last persisted discovery state if available
         loop = asyncio.get_running_loop()
-        saved = await loop.run_in_executor(None, get_discovery_state, req.session_id)
+        saved = await loop.run_in_executor(None, get_discovery_state, sid)
         if saved:
             logger.info(
-                f"ADK session missing, returning saved discovery state: session_id={req.session_id} completeness={saved.get('completeness')}%"
+                f"ADK session missing, returning saved discovery state: session_id={sid} completeness={saved.get('completeness')}%"
             )
             return {"completeness": saved["completeness"], "fields": saved["fields"]}
-        logger.info(
-            f"No ADK session and no saved state for session_id={req.session_id}"
-        )
+        logger.info(f"No ADK session and no saved state for session_id={sid}")
         return {"completeness": 0, "fields": {}}
 
-    conversation_text = _extract_conversation_text(session)
-    logger.debug(f"Extracting discovery fields: session_id={req.session_id}")
-    result = await extract_discovery_fields(conversation_text)
-    logger.info(
-        f"Discovery fields extracted: session_id={req.session_id} completeness={result.get('completeness')}%"
-    )
+    # --- Per-session dedup lock ---
+    # Ensure only one Gemini extraction runs per session at a time.
+    # Additional callers wait for the lock and then read the freshly
+    # persisted result from Firestore (avoids a second Gemini call).
+    if sid not in _extract_locks:
+        _extract_locks[sid] = asyncio.Lock()
 
-    # Fire-and-forget: persist discovery state + full SRS to Firestore
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, upsert_discovery_state, req.session_id, result)
-    asyncio.create_task(
-        _persist_srs_to_firestore(
-            session_id=req.session_id,
+    lock = _extract_locks[sid]
+
+    if lock.locked():
+        # Another extraction is already running for this session.
+        # Wait for it to finish, then return the persisted result.
+        logger.info(f"Extraction already in-flight, waiting for lock: session_id={sid}")
+        async with lock:
+            # The first caller has finished and persisted the result.
+            loop = asyncio.get_running_loop()
+            saved = await loop.run_in_executor(None, get_discovery_state, sid)
+            if saved:
+                logger.info(
+                    f"Returning coalesced extraction result: session_id={sid} completeness={saved.get('completeness')}%"
+                )
+                return {
+                    "completeness": saved["completeness"],
+                    "fields": saved["fields"],
+                }
+            return {"completeness": 0, "fields": {}}
+
+    async with lock:
+        # Re-fetch session inside the lock to pick up events that were
+        # appended between the initial get_session() and acquiring the lock
+        # (e.g. SessionBridge injections that run before turn_complete).
+        session = await session_service.get_session(
+            app_name=APP_NAME,
             user_id=req.user_id,
+            session_id=sid,
         )
-    )
+        if session is None:
+            logger.warning(f"Session disappeared during extraction: session_id={sid}")
+            return {"completeness": 0, "fields": {}}
 
-    return {"completeness": result["completeness"], "fields": result["fields"]}
+        conversation_text = _extract_conversation_text(session)
+        logger.info(
+            f"Conversation text for extraction: session_id={sid} "
+            f"events={len(session.events)} text_len={len(conversation_text)} "
+            f"preview={conversation_text[:200]!r}"
+        )
+        result = await extract_discovery_fields(conversation_text)
+        logger.info(
+            f"Discovery fields extracted: session_id={sid} completeness={result.get('completeness')}%"
+        )
+
+        # Fire-and-forget: persist discovery state + full SRS to Firestore
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, upsert_discovery_state, sid, result)
+        asyncio.create_task(
+            _persist_srs_to_firestore(
+                session_id=sid,
+                user_id=req.user_id,
+            )
+        )
+
+        return {"completeness": result["completeness"], "fields": result["fields"]}
 
 
 @app.get("/discovery/{session_id}", response_model=ContextResponse)
@@ -775,43 +831,6 @@ async def _run_turn_postprocessing(
                 discovery_fields=discovery_fields,
             )
         )
-
-
-async def _voice_turn_postprocessing(
-    session_id: str,
-    user_id: str,
-    user_text: str,
-    assistant_text: str,
-    is_finalizing: bool,
-) -> None:
-    """Post-processing for a completed voice turn (runs as background task).
-
-    Wraps the shared ``_run_turn_postprocessing()`` and additionally injects
-    the voice transcript into the text orchestrator's ADK session via
-    ``SessionBridge`` so the orchestrator has full context when the user
-    switches back to text.
-    """
-    try:
-        # Voice-only: Inject transcript into orchestrator session first
-        await session_bridge.inject_voice_turn(
-            user_id=user_id,
-            session_id=session_id,
-            user_text=user_text,
-            assistant_text=assistant_text,
-        )
-
-        # Shared pipeline: Firestore persist + finalization (if needed)
-        await _run_turn_postprocessing(
-            session_id=session_id,
-            user_id=user_id,
-            user_text=user_text,
-            assistant_text=assistant_text,
-            is_finalizing=is_finalizing,
-        )
-
-    except Exception as exc:
-        logger.error(f"[WS] Voice post-processing failed: session={session_id} {exc}")
-        traceback.print_exc()
 
 
 def _is_native_audio_model(model_name: str) -> bool:
@@ -1044,7 +1063,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                             f"{assistant_transcript_final[:100]}"
                         )
 
-                # ── 4. Turn complete: run the full post-processing pipeline ──
+                # ── 4. Turn complete: inject into orchestrator session, THEN notify frontend ──
                 if event.is_final_response():
                     user_text = user_transcript_final.strip()
                     assistant_text = assistant_transcript_final.strip()
@@ -1057,7 +1076,49 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                     # Check for [FINALIZING] marker (needed for turn_complete msg)
                     is_finalizing = FINALIZING_MARKER in assistant_text
 
-                    # Send turn_complete immediately so the frontend can react
+                    # CRITICAL: Inject voice transcript into orchestrator's ADK
+                    # session BEFORE sending turn_complete to the frontend.
+                    # The frontend fires POST /context/extract on turn_complete,
+                    # which reads _extract_conversation_text() from the session.
+                    # If we defer injection to a background task, the extraction
+                    # runs on a stale session snapshot that lacks the voice data.
+                    try:
+                        await session_bridge.inject_voice_turn(
+                            user_id=user_id,
+                            session_id=session_id,
+                            user_text=user_text,
+                            assistant_text=assistant_text,
+                        )
+                        # Verify injection: fetch session from storage and check events
+                        _verify = await session_service.get_session(
+                            app_name=APP_NAME,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                        if _verify:
+                            _content_evts = [
+                                e
+                                for e in (_verify.events or [])
+                                if e.content
+                                and e.content.parts
+                                and any(p.text for p in e.content.parts if p.text)
+                            ]
+                            logger.info(
+                                f"[WS] Post-injection verify: session={session_id} "
+                                f"total_events={len(_verify.events or [])} "
+                                f"content_text_events={len(_content_evts)}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[WS] Post-injection: session NOT FOUND in storage! "
+                                f"session={session_id}"
+                            )
+                    except Exception as exc:
+                        logger.error(
+                            f"[WS] SessionBridge injection failed: session={session_id} {exc}"
+                        )
+
+                    # Now send turn_complete — the session has the voice data
                     await websocket.send_text(
                         json.dumps(
                             {
@@ -1067,11 +1128,11 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         )
                     )
 
-                    # Run heavy post-processing (Firestore, SessionBridge,
-                    # discovery extraction, SRS, finalization) in a background
-                    # task so the event loop stays free for the next audio turn.
+                    # Remaining post-processing (Firestore persist, finalization)
+                    # runs as a background task so the event loop stays free for
+                    # the next audio turn. SessionBridge is already done above.
                     asyncio.create_task(
-                        _voice_turn_postprocessing(
+                        _run_turn_postprocessing(
                             session_id=session_id,
                             user_id=user_id,
                             user_text=user_text,

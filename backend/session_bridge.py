@@ -103,6 +103,16 @@ class SessionBridge:
 
         session = await self._get_or_create_session(user_id, session_id)
 
+        # Log session state before injection for debugging
+        content_events = [
+            e for e in (session.events or []) if e.content and e.content.parts
+        ]
+        logger.info(
+            f"[SessionBridge] Session state before injection: "
+            f"session={session_id} total_events={len(session.events or [])} "
+            f"content_events={len(content_events)}"
+        )
+
         # --- Inject user event ---
         if user_text:
             user_event = self._make_user_event(user_text)
