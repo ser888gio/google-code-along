@@ -46,12 +46,16 @@ from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from google.genai.errors import APIError as GenaiAPIError
 from google.genai.types import (
+    ActivityEnd,
+    ActivityStart,
     AudioTranscriptionConfig,
+    AutomaticActivityDetection,
     Blob,
     Content,
     LiveConnectConfig,
     Modality,
     Part,
+    RealtimeInputConfig,
     SpeechConfig,
     VoiceConfig,
 )
@@ -605,8 +609,16 @@ async def discovery_state(session_id: str):
     return {"completeness": 0, "fields": {}}
 
 
-async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
+async def _persist_srs_to_firestore(
+    session_id: str,
+    user_id: str,
+    conversation_text: str | None = None,
+) -> None:
     """Compile the full SRS JSON and upsert it into Firestore.
+
+    Pass conversation_text for voice sessions where ADK session events contain
+    audio blobs rather than text (compile_srs_json_from_session would otherwise
+    return None).  For text sessions leave it None to use the ADK session events.
 
     Runs in the background — failures are logged and never surface to the user.
     """
@@ -616,6 +628,7 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
             app_name=APP_NAME,
             user_id=user_id,
             session_id=session_id,
+            conversation_text=conversation_text,
         )
         if srs_json:
             loop = asyncio.get_event_loop()
@@ -719,18 +732,27 @@ def _is_native_audio_model(model_name: str) -> bool:
 
 
 def _build_run_config() -> RunConfig:
-    """Build a RunConfig for bidi audio streaming.
+    """Build a RunConfig for bidi audio streaming in push-to-talk mode.
+
+    VAD (automatic activity detection) is disabled so the model waits for
+    explicit ActivityStart / ActivityEnd signals rather than auto-detecting
+    end-of-speech mid-sentence.
 
     Adapts response modalities and speech config depending on whether the
     audio model is a native-audio model or a half-cascade model.
     """
     is_native = _is_native_audio_model(MODEL_AUDIO)
 
+    # Disable VAD for push-to-talk — model responds only when ActivityEnd is sent
+    realtime_input_cfg = RealtimeInputConfig(
+        automatic_activity_detection=AutomaticActivityDetection(disabled=True),
+    )
+
     if is_native:
         # Native audio: model speaks audio directly
         run_config = RunConfig(
             streaming_mode=StreamingMode.BIDI,
-            response_modalities=["AUDIO"],
+            response_modalities=[Modality.AUDIO],
             speech_config=SpeechConfig(
                 voice_config=VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -740,12 +762,13 @@ def _build_run_config() -> RunConfig:
             ),
             output_audio_transcription=AudioTranscriptionConfig(),
             input_audio_transcription=AudioTranscriptionConfig(),
+            realtime_input_config=realtime_input_cfg,
         )
     else:
         # Half-cascade: model outputs text, TTS converts to audio
         run_config = RunConfig(
             streaming_mode=StreamingMode.BIDI,
-            response_modalities=["AUDIO"],
+            response_modalities=[Modality.AUDIO],
             speech_config=SpeechConfig(
                 voice_config=VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -753,6 +776,7 @@ def _build_run_config() -> RunConfig:
                     )
                 )
             ),
+            realtime_input_config=realtime_input_cfg,
         )
 
     return run_config
@@ -786,6 +810,17 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
             user_id=user_id,
             session_id=session_id,
         )
+
+    # Build a running plain-text transcript for this voice session.
+    # Seed it with any prior turns persisted to Firestore (covers text turns from
+    # the same session_id so the voice agent has full context).
+    loop = asyncio.get_event_loop()
+    prior_history = await loop.run_in_executor(None, get_conversation_history, session_id)
+    transcript_lines: list[str] = []
+    for m in prior_history:
+        if m.get("text"):
+            label = "User" if m.get("role") == "user" else "Consultant"
+            transcript_lines.append(f"{label}: {m['text']}")
 
     live_request_queue = LiveRequestQueue()
     run_config = _build_run_config()
@@ -833,14 +868,13 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                                 )
                                 live_request_queue.send_content(content)
 
+                        elif msg_type == "activity_start":
+                            # Push-to-talk: user pressed the mic button
+                            live_request_queue.send_realtime(ActivityStart())
+
                         elif msg_type == "end_of_turn":
-                            # Client signals end of voice turn
-                            live_request_queue.send_realtime(
-                                Blob(
-                                    mime_type="audio/pcm;rate=16000",
-                                    data=b"",
-                                )
-                            )
+                            # Push-to-talk: user released the mic button
+                            live_request_queue.send_realtime(ActivityEnd())
 
                 except WebSocketDisconnect:
                     break
@@ -967,17 +1001,15 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                     # 4b. Check for [FINALIZING] marker
                     is_finalizing = FINALIZING_MARKER in assistant_text
 
-                    # 4c. Build conversation transcript for extraction
-                    session_snap = await session_service.get_session(
-                        app_name=APP_NAME,
-                        user_id=user_id,
-                        session_id=session_id,
-                    )
-                    conversation_text = (
-                        _extract_conversation_text(session_snap)
-                        if session_snap
-                        else f"User: {user_text}\nConsultant: {assistant_text}"
-                    )
+                    # 4c. Build conversation transcript for extraction.
+                    # Append this turn to the running transcript (ADK session events
+                    # hold audio blobs for voice, so _extract_conversation_text would
+                    # return empty — use the accumulated text transcript instead).
+                    if user_text:
+                        transcript_lines.append(f"User: {user_text}")
+                    if assistant_text:
+                        transcript_lines.append(f"Consultant: {assistant_text}")
+                    conversation_text = "\n".join(transcript_lines)
 
                     # 4d. Extract discovery fields + persist
                     try:
@@ -1003,7 +1035,9 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         }
 
                     # 4e. Compile and persist SRS to Firestore (background)
-                    asyncio.create_task(_persist_srs_to_firestore(session_id, user_id))
+                    asyncio.create_task(
+                        _persist_srs_to_firestore(session_id, user_id, conversation_text)
+                    )
 
                     # 4f. If [FINALIZING] detected, launch the finalizer pipeline
                     if is_finalizing:
@@ -1031,11 +1065,9 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         )
                     )
 
-                    # Reset accumulators for next turn
+                    # Reset per-turn accumulators (transcript_lines grows across turns)
                     user_transcript_final = ""
                     assistant_transcript_final = ""
-                    user_partial_sent = ""
-                    assistant_partial_sent = ""
 
         except WebSocketDisconnect:
             logger.debug(f"[WS] Client disconnected during downstream")

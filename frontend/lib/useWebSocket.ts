@@ -39,6 +39,10 @@ export interface UseWebSocketReturn {
   sendAudio: (pcmData: ArrayBuffer) => void;
   /** Send a text message to the server */
   sendText: (text: string) => void;
+  /** Signal start of voice activity (mic pressed) */
+  sendActivityStart: () => void;
+  /** Signal end of voice turn (mic released) */
+  sendEndOfTurn: () => void;
 }
 
 /**
@@ -142,6 +146,18 @@ export function useWebSocket(options: {
     }
   }, []);
 
+  const sendActivityStart = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "activity_start" }));
+    }
+  }, []);
+
+  const sendEndOfTurn = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "end_of_turn" }));
+    }
+  }, []);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -152,5 +168,5 @@ export function useWebSocket(options: {
     };
   }, []);
 
-  return { connectionState, connect, disconnect, sendAudio, sendText };
+  return { connectionState, connect, disconnect, sendAudio, sendText, sendActivityStart, sendEndOfTurn };
 }

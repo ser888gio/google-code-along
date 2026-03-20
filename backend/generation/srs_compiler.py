@@ -41,20 +41,26 @@ async def compile_srs_json_from_session(
     app_name: str,
     user_id: str,
     session_id: str,
+    conversation_text: str | None = None,
 ) -> dict | None:
     """Extract a full structured SRS JSON dict from the session conversation.
 
+    If conversation_text is provided it is used directly (voice mode, where ADK
+    session events contain audio blobs rather than text).  Otherwise the text is
+    extracted from the ADK session events (text mode).
+
     Returns None if the session is not found or extraction fails.
     """
-    session: Session | None = await session_service.get_session(
-        app_name=app_name,
-        user_id=user_id,
-        session_id=session_id,
-    )
-    if session is None:
-        return None
+    if conversation_text is None:
+        session: Session | None = await session_service.get_session(
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        if session is None:
+            return None
+        conversation_text = _extract_conversation_text(session)
 
-    conversation_text = _extract_conversation_text(session)
     if not conversation_text.strip():
         return None
 

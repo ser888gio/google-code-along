@@ -504,15 +504,19 @@ export default function ChatPage() {
     ws.connect("default_user", sid);
   }
 
-  async function handleMicToggle() {
-    if (audioRecorder.isRecording) {
-      audioRecorder.stopRecording();
-    } else {
-      // Stop any playback when user starts talking
-      audioPlayer.stop();
-      voiceTranscriptIdRef.current = null;
-      await audioRecorder.startRecording();
-    }
+  async function handleMicPressStart() {
+    if (!isVoiceConnected || audioPlayer.isPlaying) return;
+    // Stop any lingering playback and start capturing
+    audioPlayer.stop();
+    voiceTranscriptIdRef.current = null;
+    ws.sendActivityStart();
+    await audioRecorder.startRecording();
+  }
+
+  function handleMicPressEnd() {
+    if (!audioRecorder.isRecording) return;
+    audioRecorder.stopRecording();
+    ws.sendEndOfTurn();
   }
 
   const isVoiceConnected = ws.connectionState === "connected";
@@ -657,16 +661,20 @@ export default function ChatPage() {
               )}
 
               <div className="flex items-center gap-3">
-                {/* Mic button */}
+                {/* Mic button — hold to talk */}
                 <button
-                  onClick={handleMicToggle}
-                  disabled={!isVoiceConnected}
-                  title={audioRecorder.isRecording ? "Stop speaking" : "Start speaking"}
-                  className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
+                  onMouseDown={handleMicPressStart}
+                  onMouseUp={handleMicPressEnd}
+                  onMouseLeave={handleMicPressEnd}
+                  onTouchStart={(e) => { e.preventDefault(); handleMicPressStart(); }}
+                  onTouchEnd={handleMicPressEnd}
+                  disabled={!isVoiceConnected || audioPlayer.isPlaying}
+                  title="Hold to speak"
+                  className={`flex h-12 w-12 items-center justify-center rounded-full transition-all select-none ${
                     audioRecorder.isRecording
                       ? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse"
-                      : isVoiceConnected
-                        ? "bg-[#4a6659] text-white hover:opacity-90"
+                      : isVoiceConnected && !audioPlayer.isPlaying
+                        ? "bg-[#4a6659] text-white hover:opacity-90 active:scale-95"
                         : "bg-gray-300 text-gray-500 cursor-not-allowed"
                   }`}
                 >
@@ -679,11 +687,11 @@ export default function ChatPage() {
 
                 <span className="text-xs text-gray-500">
                   {audioRecorder.isRecording
-                    ? "Listening..."
+                    ? "Release to send"
                     : audioPlayer.isPlaying
                       ? "AI is speaking..."
                       : isVoiceConnected
-                        ? "Tap to speak"
+                        ? "Hold to speak"
                         : "Connecting..."}
                 </span>
               </div>
