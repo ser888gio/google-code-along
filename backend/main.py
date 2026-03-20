@@ -44,6 +44,7 @@ from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from google.genai.errors import APIError as GenaiAPIError
 from google.genai.types import (
     AudioTranscriptionConfig,
     Blob,
@@ -1038,6 +1039,21 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
 
         except WebSocketDisconnect:
             logger.debug(f"[WS] Client disconnected during downstream")
+        except GenaiAPIError as e:
+            # Code 1000 = normal WebSocket close (user toggled voice off or navigated away)
+            if "1000" in str(e):
+                logger.info(
+                    f"[WS] Gemini Live session closed normally: session={session_id}"
+                )
+            else:
+                logger.error(f"[WS] Gemini Live API error: {e}")
+                traceback.print_exc()
+                try:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "message": str(e)})
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"[WS] Downstream error: {e}")
             traceback.print_exc()
