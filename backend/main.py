@@ -868,13 +868,13 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
         These are separate from audio blob events (event.content.parts[].inline_data).
         Partial events (event.partial=True) carry incremental chunks;
         final events (event.partial=False) carry the full accumulated text.
+
+        Only final (complete) transcriptions are sent to the frontend so each
+        role gets exactly one large chat bubble rather than many tiny fragments.
         """
         # Accumulate final transcription text per turn for Firestore persistence
         user_transcript_final: str = ""
         assistant_transcript_final: str = ""
-        # Track partial text already sent so we can compute diffs for streaming
-        user_partial_sent: str = ""
-        assistant_partial_sent: str = ""
 
         try:
             async for event in audio_runner.run_live(
@@ -902,77 +902,44 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
 
                 # ── 2. User input transcription ───────────────────────────
                 if event.input_transcription and event.input_transcription.text:
-                    full_text = event.input_transcription.text
-                    if event.partial:
-                        # Partial: send only the new chars as a diff
-                        new_chunk = full_text[len(user_partial_sent) :]
-                        user_partial_sent = full_text
-                        if new_chunk:
+                    if not event.partial:
+                        # Final accumulated user transcription — send as one complete bubble
+                        user_transcript_final = event.input_transcription.text
+                        clean = user_transcript_final.strip()
+                        if clean:
                             await websocket.send_text(
                                 json.dumps(
                                     {
                                         "type": "user_transcript",
-                                        "text": new_chunk,
+                                        "text": clean,
                                     }
                                 )
                             )
-                    else:
-                        # Final: send any remaining diff, store full text
-                        new_chunk = full_text[len(user_partial_sent) :]
-                        if new_chunk:
-                            await websocket.send_text(
-                                json.dumps(
-                                    {
-                                        "type": "user_transcript",
-                                        "text": new_chunk,
-                                    }
-                                )
-                            )
-                        user_transcript_final = full_text
-                        user_partial_sent = ""
                         logger.debug(
-                            f"[WS] User transcription final ({len(full_text)} chars): "
-                            f"{full_text[:100]}"
+                            f"[WS] User transcription final ({len(clean)} chars): "
+                            f"{clean[:100]}"
                         )
 
                 # ── 3. Assistant output transcription ─────────────────────
                 if event.output_transcription and event.output_transcription.text:
-                    full_text = event.output_transcription.text
-                    if event.partial:
-                        # Partial: send only the new chars as a diff
-                        new_chunk = full_text[len(assistant_partial_sent) :]
-                        assistant_partial_sent = full_text
-                        if new_chunk:
-                            # Strip [FINALIZING] marker before sending to client
-                            clean = new_chunk.replace(FINALIZING_MARKER, "").strip()
-                            if clean:
-                                await websocket.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "text",
-                                            "text": clean,
-                                        }
-                                    )
+                    if not event.partial:
+                        # Final accumulated assistant transcription — send as one complete bubble
+                        assistant_transcript_final = event.output_transcription.text
+                        clean = assistant_transcript_final.replace(
+                            FINALIZING_MARKER, ""
+                        ).strip()
+                        if clean:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "text",
+                                        "text": clean,
+                                    }
                                 )
-                    else:
-                        # Final: send any remaining diff, store full text
-                        new_chunk = full_text[len(assistant_partial_sent) :]
-                        if new_chunk:
-                            clean = new_chunk.replace(FINALIZING_MARKER, "").strip()
-                            if clean:
-                                await websocket.send_text(
-                                    json.dumps(
-                                        {
-                                            "type": "text",
-                                            "text": clean,
-                                        }
-                                    )
-                                )
-                        assistant_transcript_final = full_text
-                        assistant_partial_sent = ""
+                            )
                         logger.debug(
-                            f"[WS] Assistant transcription final ({len(full_text)} chars): "
-                            f"{full_text[:100]}"
+                            f"[WS] Assistant transcription final ({len(assistant_transcript_final)} chars): "
+                            f"{assistant_transcript_final[:100]}"
                         )
 
                 # ── 4. Turn complete: run the full post-processing pipeline ──
