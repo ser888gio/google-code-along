@@ -1,14 +1,24 @@
 import asyncio
+import base64
 import json
+import traceback
 import uuid
 
-from agent import rs_agent
+from agent import rs_agent, audio_agent
 from agent.discovery_agent import extract_discovery_fields
 from agent.finalizer_agent import run_finalizer
 from bpmn import check_completeness, generate_bpmn_diagram
-from config import APP_NAME, FINALIZING_MARKER
+from config import APP_NAME, FINALIZING_MARKER, MODEL_AUDIO
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from firestore import (
@@ -29,9 +39,21 @@ from generation import (
     markdown_to_pdf,
     srs_json_to_docx,
 )
+from google.adk.agents.live_request_queue import LiveRequestQueue
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from google.genai.types import (
+    AudioTranscriptionConfig,
+    Blob,
+    Content,
+    LiveConnectConfig,
+    Modality,
+    Part,
+    SpeechConfig,
+    VoiceConfig,
+)
 from logger import get_logger, setup_logging
 from pydantic import BaseModel
 
@@ -55,6 +77,13 @@ session_service = InMemorySessionService()
 runner = Runner(
     app_name=APP_NAME,
     agent=rs_agent,
+    session_service=session_service,
+)
+
+# Audio runner for bidi voice streaming (uses native-audio model)
+audio_runner = Runner(
+    app_name=APP_NAME,
+    agent=audio_agent,
     session_service=session_service,
 )
 
@@ -678,3 +707,331 @@ async def firestore_data(session_id: str):
     loop = asyncio.get_event_loop()
     doc = await loop.run_in_executor(None, get_srs_fields, session_id)
     return FirestoreDataResponse(session_id=session_id, data=doc)
+
+
+# --- Bidirectional audio WebSocket endpoint ---
+
+
+def _is_native_audio_model(model_name: str) -> bool:
+    """Check if the model supports native audio input/output."""
+    return "native-audio" in model_name
+
+
+def _build_run_config() -> RunConfig:
+    """Build a RunConfig for bidi audio streaming.
+
+    Adapts response modalities and speech config depending on whether the
+    audio model is a native-audio model or a half-cascade model.
+    """
+    is_native = _is_native_audio_model(MODEL_AUDIO)
+
+    if is_native:
+        # Native audio: model speaks audio directly
+        run_config = RunConfig(
+            streaming_mode=StreamingMode.BIDI,
+            response_modalities=["AUDIO"],
+            speech_config=SpeechConfig(
+                voice_config=VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Aoede",
+                    )
+                )
+            ),
+            output_audio_transcription=AudioTranscriptionConfig(),
+            input_audio_transcription=AudioTranscriptionConfig(),
+        )
+    else:
+        # Half-cascade: model outputs text, TTS converts to audio
+        run_config = RunConfig(
+            streaming_mode=StreamingMode.BIDI,
+            response_modalities=["AUDIO"],
+            speech_config=SpeechConfig(
+                voice_config=VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Aoede",
+                    )
+                )
+            ),
+        )
+
+    return run_config
+
+
+@app.websocket("/ws/{user_id}/{session_id}")
+async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
+    """Bidirectional audio streaming over WebSocket.
+
+    Protocol:
+      - Binary frames = raw PCM audio (16kHz, 16-bit, mono) from the client
+      - Text frames   = JSON messages:
+          {"type": "text",  "text": "..."}           — text input
+          {"type": "audio", "data": "<base64 PCM>"}  — audio as base64 (fallback)
+      - Server sends back:
+          Binary frames = PCM audio (24kHz, 16-bit, mono) for playback
+          Text frames   = JSON: {"type":"text", "text":"..."} for transcriptions / text
+    """
+    await websocket.accept()
+    logger.info(f"[WS] Connected: user={user_id} session={session_id}")
+
+    # Ensure session exists (share session store with REST endpoints)
+    session = await session_service.get_session(
+        app_name=APP_NAME,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if session is None:
+        session = await session_service.create_session(
+            app_name=APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+    live_request_queue = LiveRequestQueue()
+    run_config = _build_run_config()
+
+    async def upstream_task():
+        """Read from WebSocket and push into the LiveRequestQueue."""
+        try:
+            while True:
+                try:
+                    # Try binary first (raw PCM audio)
+                    data = await websocket.receive()
+
+                    if data.get("type") == "websocket.disconnect":
+                        break
+
+                    if "bytes" in data and data["bytes"]:
+                        # Raw PCM audio bytes from the mic
+                        audio_bytes = data["bytes"]
+                        audio_blob = Blob(
+                            mime_type="audio/pcm;rate=16000",
+                            data=audio_bytes,
+                        )
+                        live_request_queue.send_realtime(audio_blob)
+
+                    elif "text" in data and data["text"]:
+                        msg = json.loads(data["text"])
+                        msg_type = msg.get("type", "text")
+
+                        if msg_type == "audio":
+                            # Base64-encoded PCM audio (fallback path)
+                            audio_bytes = base64.b64decode(msg["data"])
+                            audio_blob = Blob(
+                                mime_type="audio/pcm;rate=16000",
+                                data=audio_bytes,
+                            )
+                            live_request_queue.send_realtime(audio_blob)
+
+                        elif msg_type == "text":
+                            # Text message
+                            text = msg.get("text", "")
+                            if text.strip():
+                                content = Content(
+                                    role="user",
+                                    parts=[Part.from_text(text=text)],
+                                )
+                                live_request_queue.send_content(content)
+
+                        elif msg_type == "end_of_turn":
+                            # Client signals end of voice turn
+                            live_request_queue.send_realtime(
+                                Blob(
+                                    mime_type="audio/pcm;rate=16000",
+                                    data=b"",
+                                )
+                            )
+
+                except WebSocketDisconnect:
+                    break
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[WS] Invalid JSON from client: {e}")
+                    continue
+
+        except Exception as e:
+            logger.error(f"[WS] Upstream error: {e}")
+            traceback.print_exc()
+        finally:
+            live_request_queue.close()
+            logger.debug(f"[WS] Upstream closed: user={user_id} session={session_id}")
+
+    async def downstream_task():
+        """Read events from runner.run_live() and send to WebSocket.
+
+        Accumulates user and assistant transcription text across a turn,
+        then runs the same post-processing pipeline as text chat:
+        Firestore persistence, discovery-field extraction, SRS compilation,
+        and [FINALIZING] detection.
+        """
+        # Accumulate transcription text per turn (reset after each turn_complete)
+        user_transcript_parts: list[str] = []
+        assistant_transcript_parts: list[str] = []
+
+        try:
+            async for event in audio_runner.run_live(
+                session=session,
+                live_request_queue=live_request_queue,
+                run_config=run_config,
+            ):
+                if event.content and event.content.parts:
+                    role = getattr(event.content, "role", None)
+
+                    for part in event.content.parts:
+                        # Audio response — send as binary frame
+                        if (
+                            part.inline_data
+                            and part.inline_data.mime_type
+                            and "audio" in part.inline_data.mime_type
+                            and part.inline_data.data
+                        ):
+                            await websocket.send_bytes(part.inline_data.data)
+
+                        # Text (transcription or model text output)
+                        elif part.text:
+                            if role == "user":
+                                # User input transcription
+                                user_transcript_parts.append(part.text)
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "user_transcript",
+                                            "text": part.text,
+                                        }
+                                    )
+                                )
+                            else:
+                                # Assistant output transcription / text
+                                assistant_transcript_parts.append(part.text)
+                                # Strip [FINALIZING] marker before sending to client
+                                clean = part.text.replace(FINALIZING_MARKER, "").strip()
+                                if clean:
+                                    await websocket.send_text(
+                                        json.dumps(
+                                            {
+                                                "type": "text",
+                                                "text": clean,
+                                            }
+                                        )
+                                    )
+
+                # ── Turn complete: run the full post-processing pipeline ──
+                if event.is_final_response():
+                    user_text = "".join(user_transcript_parts).strip()
+                    assistant_text = "".join(assistant_transcript_parts).strip()
+
+                    logger.info(
+                        f"[WS] Turn complete: session={session_id} "
+                        f"user_chars={len(user_text)} assistant_chars={len(assistant_text)}"
+                    )
+
+                    # 1. Persist conversation turn to Firestore
+                    if user_text or assistant_text:
+                        loop = asyncio.get_event_loop()
+                        loop.run_in_executor(
+                            None,
+                            append_conversation_turn,
+                            session_id,
+                            user_text or "(voice input)",
+                            assistant_text,
+                        )
+
+                    # 2. Check for [FINALIZING] marker
+                    is_finalizing = FINALIZING_MARKER in assistant_text
+
+                    # 3. Build conversation transcript for extraction
+                    session_snap = await session_service.get_session(
+                        app_name=APP_NAME,
+                        user_id=user_id,
+                        session_id=session_id,
+                    )
+                    conversation_text = (
+                        _extract_conversation_text(session_snap)
+                        if session_snap
+                        else f"User: {user_text}\nConsultant: {assistant_text}"
+                    )
+
+                    # 4. Extract discovery fields + persist (async, non-blocking for WS)
+                    try:
+                        discovery_fields = await extract_discovery_fields(
+                            conversation_text
+                        )
+                        logger.debug(
+                            f"[WS] Discovery fields extracted: session={session_id} "
+                            f"completeness={discovery_fields.get('completeness')}%"
+                        )
+                        loop = asyncio.get_event_loop()
+                        loop.run_in_executor(
+                            None, upsert_discovery_state, session_id, discovery_fields
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"[WS] extract_discovery_fields failed: session={session_id} {exc}"
+                        )
+                        discovery_fields = {
+                            "completeness": 0,
+                            "fields": {},
+                            "missing_priority": [],
+                        }
+
+                    # 5. Compile and persist SRS to Firestore (background)
+                    asyncio.create_task(_persist_srs_to_firestore(session_id, user_id))
+
+                    # 6. If [FINALIZING] detected, launch the finalizer pipeline
+                    if is_finalizing:
+                        logger.info(
+                            f"[WS][FINALIZING] detected: session={session_id} — launching finalizer"
+                        )
+                        loop = asyncio.get_event_loop()
+                        loop.run_in_executor(None, set_finalization_pending, session_id)
+                        asyncio.create_task(
+                            run_finalizer(
+                                session_id=session_id,
+                                user_id=user_id,
+                                conversation_text=conversation_text,
+                                discovery_fields=discovery_fields,
+                            )
+                        )
+
+                    # 7. Send turn_complete with metadata to the frontend
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "turn_complete",
+                                "finalizing": is_finalizing,
+                            }
+                        )
+                    )
+
+                    # Reset accumulators for next turn
+                    user_transcript_parts.clear()
+                    assistant_transcript_parts.clear()
+
+        except WebSocketDisconnect:
+            logger.debug(f"[WS] Client disconnected during downstream")
+        except Exception as e:
+            logger.error(f"[WS] Downstream error: {e}")
+            traceback.print_exc()
+            try:
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "message": str(e),
+                        }
+                    )
+                )
+            except Exception:
+                pass
+        finally:
+            logger.debug(f"[WS] Downstream closed: user={user_id} session={session_id}")
+
+    try:
+        # Run upstream (WS → queue) and downstream (live → WS) concurrently
+        await asyncio.gather(
+            upstream_task(),
+            downstream_task(),
+        )
+    except Exception as e:
+        logger.error(f"[WS] Connection error: {e}")
+        traceback.print_exc()
+    finally:
+        logger.info(f"[WS] Connection closed: user={user_id} session={session_id}")

@@ -1,9 +1,18 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   experimental: {
     serverActions:{
         allowedOrigins: ['*']
     }
+  },
+  async rewrites() {
+    return [
+      {
+        source: "/:path*",
+        destination: `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/:path*`,
+      },
+    ];
   },
   webpack(config) {
     config.module.rules.push({

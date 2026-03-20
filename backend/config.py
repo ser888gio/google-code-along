@@ -24,6 +24,12 @@ FIRESTORE_DATABASE: str = os.getenv("FIRESTORE_DATABASE", "")
 
 VERTEX_AI_SEARCH_DATASTORE_ID: str | None = os.getenv("VERTEX_AI_SEARCH_DATASTORE_ID")
 
+# Audio model for bidirectional voice streaming via Live API
+MODEL_AUDIO = "gemini-live-2.5-flash-native-audio"
+
+# Region for the Live API (may differ from GOOGLE_CLOUD_REGION)
+AUDIO_REGION = os.getenv("GOOGLE_CLOUD_AUDIO_REGION", "europe-west1")
+
 # Orchestrator: strong reasoning, drives the discovery conversation
 MODEL_ORCHESTRATOR = "gemini-3.1-pro-preview"
 
