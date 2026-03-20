@@ -1,52 +1,69 @@
-# Agentic Spark Code Along with Google
-# Business Analyst AI Guide
+# AI Business Consultant — RS Generator
 
-### Project Team
-| Name | Email |
-| :--- | :--- |
-| Petr Kaiser | petr.kaiser@skoda-auto.cz |
-| Tetiana Lukanieva | Tetiana.Lukanieva@skoda-auto.cz |
-| Sergiu Nica | sergiu.nica@skoda-auto.cz |
-| Luboš Polák | lubos.polak@greencode.cz |
-| Jan Prokeš | jan.prokes@skoda-auto.cz |
-| David Schwarz | David.Schwarz@volkswagen.de |
-| Jaroslav Štěpán | Jaroslav.Stepan3@skoda-auto.cz |
-| Igor Votintsev | Igor.Votintsev@skoda-auto.cz |
-| Lukáš Zendel | lukas.zendel@skoda-auto.cz |
+Monorepo for the AI-Assisted Requirement Specification Generator.
 
----
+An interactive AI persona that guides business users through defining their needs and automatically generates coherent, standardized Requirement Specification (RS) documents, complete with auto-generated system diagrams.
 
-### Shrnutí projektu
-Projekt se zaměřuje na vytvoření „Business Analytics AI Persony“, která bude interaktivně pomáhat business uživatelům popsat jejich požadavky a tvořit funkční specifikace bez nutnosti složité manuální práce. Cílem je, aby AI průvodce kladl správné otázky, zpracoval vstupy z chatu, meetingů či dokumentů a následně automaticky sestavil ucelenou a kvalitní Requirement Specification.
+## Features
 
-### Project Summary
-This project focuses on creating a "Business Analytics AI Persona" that will interactively help business users describe their requirements and generate functional specifications without the need for complex manual work. The goal is for the AI guide to ask the right questions, process inputs from chats, meetings, or documents, and then automatically compile a comprehensive and high-quality Requirement Specification.
+- **Conversational Discovery:** Chat with an expert AI business consultant (Google ADK + Gemini 1.5 Pro) to map out "As-Is" and "To-Be" specifications.
+- **Automated Diagramming:** Generates BPMN and Dataflow diagrams on the fly from conversational context using Mermaid.js.
+- **Document Export:** Compiles the live session context into standard Document formats (PDF, Word).
+- **Live Sync & Context:** Extracts core project context continuously and syncs document sections in real-time using Firestore.
+- **Document Uploads:** Ingest specific user context by uploading source documents to Google Cloud Storage for multimodal processing.
 
----
- Miro link https://miro.com/app/board/uXjVGvPUWIc=/?share_link_id=717213042622
+## Structure
 
- ### Business basic questions
+```text
+/
+├── frontend/   # Next.js 16 app with React 19, Tailwind CSS, & Mermaid
+├── backend/    # Python FastAPI with Google ADK, agents, compilers, and diagrams
+└── docs/       # Project planning and active to-do lists
+```
 
- Discovery session agenda questions:
- 
-**1) Context & Business Problem** _(15 min)_
-- "How does it work today?" (high-level process, where it hurts)
-- What triggered the request (audit, legislation, deadline, efficiency...)
-- Who is affected (users, teams, number of people / units – roughly)
- 
-**2) Target State & Success** _(15 min)_
-- What exactly should be different?
-- Define 3–5 success criteria (measurable or observable)
-- Priority: must-have / should-have / nice-to-have
- 
-**3) Scope – in/out + boundaries** _(10 min)_
-- In-scope: features / processes / reports / automations
-- Out-of-scope (what we are consciously not doing now)
-- Dependencies: other teams, ongoing projects, SME availability
- 
-**4) Data, Systems, Integrations & Access** _(10 min)_
-- What data is needed, where does it come from, and who owns it?
-- Integration needs (SAP, data marts, SharePoint, email, documents...)
-- Data sensitivity (personal data, financial sensitivity, contracts)
+## Getting Started
 
-### 
+### Prerequisites
+
+Enable the following APIs in your GCP project:
+
+- Vertex AI API
+- Cloud Storage API
+- Discovery Engine API (for Vertex AI Search)
+- Firestore API (if utilizing live document tracking)
+
+### Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+cp .env.example .env   # Fill in your GCP project details, GCS bucket out, etc.
+uvicorn main:app --reload
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+cp .env.local.example .env.local   # Fill in NEXT_PUBLIC_API_URL
+npm run dev
+```
+
+## Running Tests
+
+There are extensive tests in both the backend and frontend.
+
+**Backend tests:**
+
+```bash
+cd backend
+pytest tests/
+```
+
+**Frontend tests:**
+
+```bash
+cd frontend
+npm run test
+```
