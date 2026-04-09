@@ -1,0 +1,84 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main # Triggers on pushes to the main branch
+
+env:
+  PROJECT_ID: skda-f skoda-sandbox
+  GAR_LOCATION: europe-west4 
+  REPOSITORY: google-code-along
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    # Required for Workload Identity Federation authentication
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: '${{ secrets.WIF_PROVIDER }}'
+          service_account: '${{ secrets.SA_EMAIL }}'
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker Auth for Artifact Registry
+        run: |-
+          gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
+
+      # ==========================================
+      # 1. INGESTION SERVICE (europe-west1)
+      # ==========================================
+      - name: Build and Push Ingestion Image
+        run: |-
+          # NOTE: Adjust './path-to-ingestion' to the actual folder containing its Dockerfile
+          docker build -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/ingestion:${{ github.sha }} ./path-to-ingestion
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/ingestion:${{ github.sha }}
+
+      - name: Deploy Ingestion to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: businespersona-docs-ingestion
+          region: europe-west1
+          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/ingestion:${{ github.sha }}
+
+      # ==========================================
+      # 2. BACKEND SERVICE (europe-west4)
+      # ==========================================
+      - name: Build and Push Backend Image
+        run: |-
+          docker build -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} ./backend
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+
+      - name: Deploy Backend to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: business-persona-ai-backend
+          region: europe-west4
+          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+
+      # ==========================================
+      # 3. FRONTEND SERVICE (europe-west4)
+      # ==========================================
+      - name: Build and Push Frontend Image
+        run: |-
+          docker build -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} ./frontend
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
+
+      - name: Deploy Frontend to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: buseinss-persona-ai-frontend
+          region: europe-west4
+          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
