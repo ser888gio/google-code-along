@@ -4,6 +4,7 @@ import re
 from dotenv import load_dotenv
 
 load_dotenv()
+os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
 
 GCP_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
 
