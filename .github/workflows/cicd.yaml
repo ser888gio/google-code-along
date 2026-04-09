@@ -6,9 +6,9 @@ on:
       - develop # Triggers on pushes to the main branch
 
 env:
-  PROJECT_ID: skda-f skoda-sandbox
+  PROJECT_ID: vw-skda-fskoda-sandbox-jzf
   GAR_LOCATION: europe-west4 
-  REPOSITORY: google-code-along
+  REPOSITORY: business-persona-ai-repo
 
 jobs:
   build-and-deploy:
@@ -38,23 +38,7 @@ jobs:
           gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
 
       # ==========================================
-      # 1. INGESTION SERVICE (europe-west1)
-      # ==========================================
-      - name: Build and Push Ingestion Image
-        run: |-
-          # NOTE: Adjust './path-to-ingestion' to the actual folder containing its Dockerfile
-          docker build -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/ingestion:${{ github.sha }} ./path-to-ingestion
-          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/ingestion:${{ github.sha }}
-
-      - name: Deploy Ingestion to Cloud Run
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: businespersona-docs-ingestion
-          region: europe-west1
-          image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/ingestion:${{ github.sha }}
-
-      # ==========================================
-      # 2. BACKEND SERVICE (europe-west4)
+      # 1. BACKEND SERVICE (europe-west4)
       # ==========================================
       - name: Build and Push Backend Image
         run: |-
@@ -69,7 +53,7 @@ jobs:
           image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
 
       # ==========================================
-      # 3. FRONTEND SERVICE (europe-west4)
+      # 2. FRONTEND SERVICE (europe-west4)
       # ==========================================
       - name: Build and Push Frontend Image
         run: |-
@@ -79,6 +63,6 @@ jobs:
       - name: Deploy Frontend to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
-          service: buseinss-persona-ai-frontend
+          service: business-persona-ai-frontend
           region: europe-west4
           image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
