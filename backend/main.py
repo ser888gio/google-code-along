@@ -1,29 +1,69 @@
 import asyncio
+import base64
 import json
-import os
+import traceback
 import uuid
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, UploadFile
+from agent import rs_agent, audio_agent
+from agent.discovery_agent import extract_discovery_fields
+from agent.finalizer_agent import run_finalizer
+from bpmn import check_completeness, generate_bpmn_diagram
+from config import APP_NAME, FINALIZING_MARKER, MODEL_AUDIO
+from dataflow import check_dfd_completeness, generate_dataflow_diagram
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from google.cloud import storage
-
+from fastapi.responses import Response, StreamingResponse
+from firestore import (
+    append_conversation_turn,
+    get_conversation_history,
+    get_discovery_state,
+    get_final_analysis,
+    get_srs_fields,
+    list_sessions,
+    set_finalization_pending,
+    upsert_discovery_state,
+    upsert_srs_fields,
+)
+from gcs import write_file
+from generation import (
+    compile_rs_from_session,
+    compile_srs_json_from_session,
+    markdown_to_pdf,
+    srs_json_to_docx,
+)
+from google.adk.agents.live_request_queue import LiveRequestQueue
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from google.genai.errors import APIError as GenaiAPIError
+from google.genai.types import (
+    AudioTranscriptionConfig,
+    Blob,
+    Content,
+    LiveConnectConfig,
+    Modality,
+    Part,
+    SpeechConfig,
+    VoiceConfig,
+)
+from logger import get_logger, setup_logging
+from pydantic import BaseModel
+from session_bridge import SessionBridge
 
-from agent import rs_agent
-from generation import compile_rs_from_session, markdown_to_pdf, compile_srs_json_from_session, srs_json_to_docx
-from bpmn import check_completeness, generate_bpmn_diagram
-from context import extract_rs_context
-from dataflow import check_dfd_completeness, generate_dataflow_diagram
-from firestore import upsert_srs_fields, get_srs_fields
-
-load_dotenv()
+setup_logging()
+logger = get_logger(__name__)
 
 app = FastAPI(title="RS Generator API")
+logger.info(f"RS Generator API initializing (app_name={APP_NAME})")
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,13 +76,33 @@ app.add_middleware(
 
 session_service = InMemorySessionService()
 
-APP_NAME = "rs_generator"
-
 runner = Runner(
     app_name=APP_NAME,
     agent=rs_agent,
     session_service=session_service,
 )
+
+# Audio runner for bidi voice streaming (uses native-audio model)
+audio_runner = Runner(
+    app_name=APP_NAME,
+    agent=audio_agent,
+    session_service=session_service,
+)
+
+# Bridge: injects voice transcripts into the text orchestrator's ADK session
+# so the orchestrator has full context when the user switches back to text.
+session_bridge = SessionBridge(
+    session_service=session_service,
+    app_name=APP_NAME,
+    orchestrator_agent_name=rs_agent.name,
+)
+
+# Per-session dedup lock for /context/extract.
+# Prevents multiple parallel Gemini extraction calls for the same session
+# (common in voice mode where turn_complete events arrive faster than
+# the ~40s extraction call can finish).
+_extract_locks: dict[str, asyncio.Lock] = {}
+_extract_inflight: dict[str, asyncio.Task] = {}
 
 
 # --- Request / response models ---
@@ -81,20 +141,18 @@ async def upload_file(
     session_id: str = Form(...),
 ):
     """Upload a file to GCS under sessions/{session_id}/{filename}."""
-    bucket_name = os.getenv("GCS_BUCKET_NAME", "hackathon-skoda")
     destination = f"sessions/{session_id}/{file.filename}"
-
-    client = storage.Client()
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(destination)
-
     contents = await file.read()
-    blob.upload_from_string(contents, content_type=file.content_type or "application/octet-stream")
-
-    return UploadResponse(
-        gcs_path=f"gs://{bucket_name}/{destination}",
-        filename=file.filename,
+    logger.info(
+        f"Upload received: file={file.filename} size={len(contents)}B session_id={session_id}"
     )
+    gcs_path = write_file(
+        path=destination,
+        data=contents,
+        content_type=file.content_type or "application/octet-stream",
+    )
+    logger.debug(f"File uploaded to GCS: {gcs_path}")
+    return UploadResponse(gcs_path=gcs_path, filename=file.filename)
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -102,6 +160,7 @@ async def chat(req: ChatRequest):
     """Send a message to the RS consultant agent and get a response."""
 
     session_id = req.session_id or str(uuid.uuid4())
+    logger.debug(f"Chat request: session_id={session_id} user_id={req.user_id}")
 
     # Ensure session exists
     session = await session_service.get_session(
@@ -115,6 +174,9 @@ async def chat(req: ChatRequest):
             user_id=req.user_id,
             session_id=session_id,
         )
+        logger.info(f"New session created: {session_id}")
+    else:
+        logger.debug(f"Resumed existing session: {session_id}")
 
     user_content = types.Content(
         role="user",
@@ -133,10 +195,13 @@ async def chat(req: ChatRequest):
                 if part.text:
                     reply_parts.append(part.text)
 
-    return ChatResponse(
-        reply="".join(reply_parts),
-        session_id=session_id,
-    )
+    reply = "".join(reply_parts)
+    logger.info(f"Agent reply ready: session_id={session_id} reply_chars={len(reply)}")
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, append_conversation_turn, session_id, req.message, reply)
+
+    return ChatResponse(reply=reply, session_id=session_id)
 
 
 @app.post("/chat/stream")
@@ -144,6 +209,7 @@ async def chat_stream(req: ChatRequest):
     """Stream the agent's response as Server-Sent Events."""
 
     session_id = req.session_id or str(uuid.uuid4())
+    logger.debug(f"Stream chat request: session_id={session_id} user_id={req.user_id}")
 
     session = await session_service.get_session(
         app_name="rs_generator",
@@ -156,6 +222,9 @@ async def chat_stream(req: ChatRequest):
             user_id=req.user_id,
             session_id=session_id,
         )
+        logger.info(f"New session created: {session_id}")
+    else:
+        logger.debug(f"Resumed existing session: {session_id}")
 
     user_content = types.Content(
         role="user",
@@ -164,8 +233,9 @@ async def chat_stream(req: ChatRequest):
 
     async def event_generator():
         # First, send the session_id so the client can track it
-        yield f"data: {{\"session_id\": \"{session_id}\"}}\n\n"
+        yield f'data: {{"session_id": "{session_id}"}}\n\n'
 
+        reply_parts: list[str] = []
         async for event in runner.run_async(
             user_id=req.user_id,
             session_id=session_id,
@@ -174,7 +244,39 @@ async def chat_stream(req: ChatRequest):
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
-                        yield f"data: {json.dumps({'text': part.text})}\n\n"
+                        reply_parts.append(part.text)
+                        # Strip [FINALIZING] marker before sending to the client
+                        # so the user never sees the raw signal token.
+                        clean = part.text.replace(FINALIZING_MARKER, "").strip()
+                        if clean:
+                            yield f"data: {json.dumps({'text': clean})}\n\n"
+
+        full_reply = "".join(reply_parts)
+        logger.info(
+            f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}"
+        )
+
+        is_finalizing = FINALIZING_MARKER in full_reply
+
+        # Signal frontend before [DONE] so it can show FinalizingOverlay
+        if is_finalizing:
+            logger.info(
+                f"[FINALIZING] detected for session_id={session_id} — launching finalizer pipeline"
+            )
+            yield f"data: {json.dumps({'event': 'finalizing'})}\n\n"
+
+        # Shared pipeline: Firestore persist, discovery extraction, SRS,
+        # finalization — runs as a background task so [DONE] is sent promptly.
+        asyncio.create_task(
+            _run_turn_postprocessing(
+                session_id=session_id,
+                user_id=req.user_id,
+                user_text=req.message,
+                assistant_text=full_reply,
+                is_finalizing=is_finalizing,
+                fallback_transcript=full_reply,
+            )
+        )
 
         yield "data: [DONE]\n\n"
 
@@ -223,7 +325,6 @@ async def download_pdf(req: SessionRef):
     Extracts the RS markdown from the session and converts it to PDF.
     Returns 404 if no document has been generated yet.
     """
-    from fastapi.responses import Response
 
     markdown = await compile_rs_from_session(
         session_service=session_service,
@@ -232,12 +333,15 @@ async def download_pdf(req: SessionRef):
         session_id=req.session_id,
     )
     if markdown is None:
-        from fastapi import HTTPException
+        logger.warning(
+            f"PDF export requested but no RS document found: session_id={req.session_id}"
+        )
         raise HTTPException(
             status_code=404,
             detail="No RS document found. Complete the conversation first.",
         )
 
+    logger.info(f"Generating PDF export: session_id={req.session_id}")
     pdf_bytes = markdown_to_pdf(markdown)
 
     return Response(
@@ -257,8 +361,6 @@ async def download_docx(req: SessionRef):
     then writes it into a Word document using the SRS template structure.
     Returns 404 if the session is not found, 422 if compilation fails.
     """
-    from fastapi.responses import Response
-    from fastapi import HTTPException
 
     srs_json = await compile_srs_json_from_session(
         session_service=session_service,
@@ -267,11 +369,15 @@ async def download_docx(req: SessionRef):
         session_id=req.session_id,
     )
     if srs_json is None:
+        logger.warning(
+            f"DOCX export failed — SRS could not be compiled: session_id={req.session_id}"
+        )
         raise HTTPException(
             status_code=422,
             detail="Could not compile SRS from the conversation. Keep chatting to provide more details.",
         )
 
+    logger.info(f"Generating DOCX export: session_id={req.session_id}")
     docx_bytes = srs_json_to_docx(srs_json)
 
     return Response(
@@ -322,6 +428,7 @@ async def bpmn_generate(req: BpmnRequest):
     )
     if session is None:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Session not found.")
 
     conversation_text = _extract_conversation_text(session)
@@ -329,10 +436,13 @@ async def bpmn_generate(req: BpmnRequest):
     completeness = await check_completeness(conversation_text)
     score: int = completeness.get("score", 0)
     missing: list[str] = completeness.get("missing", [])
+    logger.info(f"BPMN completeness check: session_id={req.session_id} score={score}%")
 
     if score < 90:
+        logger.debug(f"BPMN not ready (score < 90): missing={missing}")
         return BpmnResponse(ready=False, score=score, missing=missing)
 
+    logger.info(f"Generating BPMN diagram: session_id={req.session_id}")
     mermaid = await generate_bpmn_diagram(conversation_text)
     return BpmnResponse(ready=True, mermaid=mermaid, score=score)
 
@@ -362,6 +472,7 @@ async def dataflow_generate(req: DataflowRequest):
     )
     if session is None:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=404, detail="Session not found.")
 
     conversation_text = _extract_conversation_text(session)
@@ -369,10 +480,15 @@ async def dataflow_generate(req: DataflowRequest):
     completeness = await check_dfd_completeness(conversation_text)
     score: int = completeness.get("score", 0)
     missing: list[str] = completeness.get("missing", [])
+    logger.info(
+        f"Dataflow completeness check: session_id={req.session_id} score={score}%"
+    )
 
     if score < 70:
+        logger.debug(f"Dataflow not ready (score < 70): missing={missing}")
         return DataflowResponse(ready=False, score=score, missing=missing)
 
+    logger.info(f"Generating Dataflow diagram: session_id={req.session_id}")
     mermaid = await generate_dataflow_diagram(conversation_text)
     return DataflowResponse(ready=True, mermaid=mermaid, score=score)
 
@@ -385,45 +501,135 @@ class ContextRequest(BaseModel):
     user_id: str = "default_user"
 
 
-class SectionData(BaseModel):
+class FieldData(BaseModel):
     filled: bool
-    content: str | None
+    value: str | None
 
 
 class ContextResponse(BaseModel):
     completeness: int
-    sections: dict[str, SectionData]
+    fields: dict[str, FieldData]
 
 
 @app.post("/context/extract", response_model=ContextResponse)
 async def context_extract(req: ContextRequest):
-    """Extract structured RS section data from the current conversation.
+    """Extract all 22 discovery form fields from the current conversation.
 
-    Calls Gemini to map what has been discussed so far into the 8 RS sections.
-    Always returns all 8 section keys. Returns completeness=0 with empty sections
-    if the session is not found or Gemini fails.
+    Calls Gemini Flash to map what has been discussed into the 22-field schema.
+    Always returns all 22 field keys.
+
+    Per-session deduplication: if an extraction is already in-flight for this
+    session, subsequent requests wait for that result instead of spawning
+    parallel Gemini calls.  This is critical in voice mode where turn_complete
+    events arrive much faster than the ~40s extraction call.
+
+    Fallback order when the ADK session is missing (e.g. after a backend restart
+    or when loading a historical session that was never replayed in ADK):
+      1. Try the ADK InMemorySessionService — extract fresh from live events.
+      2. If not found, return the last saved discovery state from Firestore.
+      3. If nothing saved yet, return empty state (completeness=0).
     """
+    sid = req.session_id
+
     session = await session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
-        session_id=req.session_id,
+        session_id=sid,
     )
+
     if session is None:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="Session not found.")
+        # ADK session gone — return last persisted discovery state if available
+        loop = asyncio.get_running_loop()
+        saved = await loop.run_in_executor(None, get_discovery_state, sid)
+        if saved:
+            logger.info(
+                f"ADK session missing, returning saved discovery state: session_id={sid} completeness={saved.get('completeness')}%"
+            )
+            return {"completeness": saved["completeness"], "fields": saved["fields"]}
+        logger.info(f"No ADK session and no saved state for session_id={sid}")
+        return {"completeness": 0, "fields": {}}
 
-    conversation_text = _extract_conversation_text(session)
-    result = await extract_rs_context(conversation_text)
+    # --- Per-session dedup lock ---
+    # Ensure only one Gemini extraction runs per session at a time.
+    # Additional callers wait for the lock and then read the freshly
+    # persisted result from Firestore (avoids a second Gemini call).
+    if sid not in _extract_locks:
+        _extract_locks[sid] = asyncio.Lock()
 
-    # Fire-and-forget: persist full SRS to Firestore without blocking the response
-    asyncio.create_task(
-        _persist_srs_to_firestore(
-            session_id=req.session_id,
+    lock = _extract_locks[sid]
+
+    if lock.locked():
+        # Another extraction is already running for this session.
+        # Wait for it to finish, then return the persisted result.
+        logger.info(f"Extraction already in-flight, waiting for lock: session_id={sid}")
+        async with lock:
+            # The first caller has finished and persisted the result.
+            loop = asyncio.get_running_loop()
+            saved = await loop.run_in_executor(None, get_discovery_state, sid)
+            if saved:
+                logger.info(
+                    f"Returning coalesced extraction result: session_id={sid} completeness={saved.get('completeness')}%"
+                )
+                return {
+                    "completeness": saved["completeness"],
+                    "fields": saved["fields"],
+                }
+            return {"completeness": 0, "fields": {}}
+
+    async with lock:
+        # Re-fetch session inside the lock to pick up events that were
+        # appended between the initial get_session() and acquiring the lock
+        # (e.g. SessionBridge injections that run before turn_complete).
+        session = await session_service.get_session(
+            app_name=APP_NAME,
             user_id=req.user_id,
+            session_id=sid,
         )
-    )
+        if session is None:
+            logger.warning(f"Session disappeared during extraction: session_id={sid}")
+            return {"completeness": 0, "fields": {}}
 
-    return result
+        conversation_text = _extract_conversation_text(session)
+        logger.info(
+            f"Conversation text for extraction: session_id={sid} "
+            f"events={len(session.events)} text_len={len(conversation_text)} "
+            f"preview={conversation_text[:200]!r}"
+        )
+        result = await extract_discovery_fields(conversation_text)
+        logger.info(
+            f"Discovery fields extracted: session_id={sid} completeness={result.get('completeness')}%"
+        )
+
+        # Fire-and-forget: persist discovery state + full SRS to Firestore
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, upsert_discovery_state, sid, result)
+        asyncio.create_task(
+            _persist_srs_to_firestore(
+                session_id=sid,
+                user_id=req.user_id,
+            )
+        )
+
+        return {"completeness": result["completeness"], "fields": result["fields"]}
+
+
+@app.get("/discovery/{session_id}", response_model=ContextResponse)
+async def discovery_state(session_id: str):
+    """Return the last saved 22-field discovery state for *session_id*.
+
+    Used by the frontend when loading a historical session to restore the
+    Preview panel without re-running Gemini extraction.
+    Returns completeness=0 with empty fields if nothing has been saved yet.
+    """
+    loop = asyncio.get_running_loop()
+    saved = await loop.run_in_executor(None, get_discovery_state, session_id)
+    if saved:
+        logger.debug(
+            f"Discovery state retrieved: session_id={session_id} completeness={saved.get('completeness')}%"
+        )
+        return {"completeness": saved["completeness"], "fields": saved["fields"]}
+    logger.debug(f"No saved discovery state for session_id={session_id}")
+    return {"completeness": 0, "fields": {}}
 
 
 async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
@@ -439,10 +645,13 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
             session_id=session_id,
         )
         if srs_json:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, upsert_srs_fields, session_id, srs_json)
+            logger.debug(f"SRS persisted to Firestore: session_id={session_id}")
     except Exception as exc:  # noqa: BLE001
-        print(f"[Firestore] upsert failed for session {session_id}: {exc}")
+        logger.warning(
+            f"Firestore SRS upsert failed: session_id={session_id} error={exc}"
+        )
 
 
 # --- Firestore data retrieval ---
@@ -453,6 +662,69 @@ class FirestoreDataResponse(BaseModel):
     data: dict | None = None
 
 
+class SessionSummary(BaseModel):
+    session_id: str
+    updated_at: str | None = None
+    preview: str | None = None
+
+
+@app.get("/sessions", response_model=list[SessionSummary])
+async def sessions_list():
+    """Return a summary list of all stored sessions."""
+    loop = asyncio.get_running_loop()
+    items = await loop.run_in_executor(None, list_sessions)
+    return items
+
+
+class HistoryResponse(BaseModel):
+    session_id: str
+    messages: list[dict]
+
+
+@app.get("/history/{session_id}", response_model=HistoryResponse)
+async def get_history(session_id: str):
+    """Return the full conversation history for *session_id*."""
+    loop = asyncio.get_running_loop()
+    messages = await loop.run_in_executor(None, get_conversation_history, session_id)
+    return HistoryResponse(session_id=session_id, messages=messages)
+
+
+# --- Final analysis endpoint ---
+
+# TODO: add AnalysisResponse model once final_analysis schema is finalized
+#       (mirrors FINAL_ANALYSIS_SCHEMA in agent/finalizer_agent.py)
+
+
+@app.get("/analyses/{session_id}")
+async def get_analysis(session_id: str):
+    """Return the finalized analysis for a session, or status if still pending.
+
+    The frontend polls this endpoint every 5 s after receiving the "finalizing" SSE event.
+
+    Returns:
+      {"status": "not_found"}                          — finalization never triggered
+      {"status": "pending"}                            — run_finalizer() still running
+      {"status": "error"}                              — pipeline failed
+      {"status": "complete", "analysis": {...}}        — done, full analysis included
+    """
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, get_final_analysis, session_id)
+
+    if result is None:
+        return {"status": "not_found"}
+
+    status = result.get("finalization_status", "not_found")
+
+    if status == "complete":
+        # Remove the internal status flag before returning to frontend
+        result.pop("finalization_status", None)
+        logger.info(f"Analysis ready: session_id={session_id}")
+        return {"status": "complete", "analysis": result}
+
+    logger.debug(f"Analysis poll: session_id={session_id} status={status}")
+    return {"status": status}
+
+
 @app.get("/firestore/data/{session_id}", response_model=FirestoreDataResponse)
 async def firestore_data(session_id: str):
     """Return the latest SRS data stored in Firestore for *session_id*.
@@ -460,6 +732,461 @@ async def firestore_data(session_id: str):
     The frontend polls this endpoint after each turn to refresh the right panel.
     Returns data=null if no document has been written yet.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     doc = await loop.run_in_executor(None, get_srs_fields, session_id)
     return FirestoreDataResponse(session_id=session_id, data=doc)
+
+
+# --- Bidirectional audio WebSocket endpoint ---
+
+
+async def _run_turn_postprocessing(
+    session_id: str,
+    user_id: str,
+    user_text: str,
+    assistant_text: str,
+    is_finalizing: bool,
+    *,
+    fallback_transcript: str | None = None,
+) -> None:
+    """Shared post-processing pipeline for a completed conversation turn.
+
+    Called by both voice and text chat paths.  Executes these steps:
+
+      1. Persist conversation turn to Firestore (fire-and-forget)
+      2. Launch finalizer (if [FINALIZING] detected) — includes its own
+         discovery extraction so the heavy Gemini call only happens once
+
+    Discovery field extraction and SRS compilation are NOT done here — the
+    frontend triggers those via ``POST /context/extract`` after each turn.
+    This avoids duplicate Gemini calls (backend + frontend both extracting).
+
+    Parameters
+    ----------
+    fallback_transcript:
+        Used when the ADK session snapshot is unavailable.  Defaults to a
+        simple ``User: / Consultant:`` formatted string.
+    """
+    loop = asyncio.get_running_loop()
+
+    # 1. Persist conversation turn to Firestore
+    if user_text or assistant_text:
+        loop.run_in_executor(
+            None,
+            append_conversation_turn,
+            session_id,
+            user_text or "(voice input)",
+            assistant_text,
+        )
+
+    # 2. If [FINALIZING] detected, launch the finalizer pipeline
+    #    The finalizer needs discovery fields + conversation transcript,
+    #    so we extract them here (only on finalization, not every turn).
+    if is_finalizing:
+        logger.info(
+            f"[FINALIZING] detected: session={session_id} — launching finalizer"
+        )
+        loop.run_in_executor(None, set_finalization_pending, session_id)
+
+        # Build conversation transcript for the finalizer
+        session_snap = await session_service.get_session(
+            app_name=APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        conversation_text = (
+            _extract_conversation_text(session_snap)
+            if session_snap
+            else (
+                fallback_transcript
+                or f"User: {user_text}\nConsultant: {assistant_text}"
+            )
+        )
+
+        # Extract discovery fields for the finalizer
+        try:
+            discovery_fields = await extract_discovery_fields(conversation_text)
+            logger.debug(
+                f"Discovery fields for finalizer: session={session_id} "
+                f"completeness={discovery_fields.get('completeness')}%"
+            )
+            loop.run_in_executor(
+                None, upsert_discovery_state, session_id, discovery_fields
+            )
+        except Exception as exc:
+            logger.warning(
+                f"extract_discovery_fields failed: session={session_id} {exc}"
+            )
+            discovery_fields = {
+                "completeness": 0,
+                "fields": {},
+                "missing_priority": [],
+            }
+
+        asyncio.create_task(
+            run_finalizer(
+                session_id=session_id,
+                user_id=user_id,
+                conversation_text=conversation_text,
+                discovery_fields=discovery_fields,
+            )
+        )
+
+
+def _is_native_audio_model(model_name: str) -> bool:
+    """Check if the model supports native audio input/output."""
+    return "native-audio" in model_name
+
+
+def _build_run_config() -> RunConfig:
+    """Build a RunConfig for bidi audio streaming.
+
+    Adapts response modalities and speech config depending on whether the
+    audio model is a native-audio model or a half-cascade model.
+    """
+    is_native = _is_native_audio_model(MODEL_AUDIO)
+
+    if is_native:
+        # Native audio: model speaks audio directly
+        run_config = RunConfig(
+            streaming_mode=StreamingMode.BIDI,
+            response_modalities=["AUDIO"],
+            speech_config=SpeechConfig(
+                voice_config=VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Aoede",
+                    )
+                )
+            ),
+            output_audio_transcription=AudioTranscriptionConfig(),
+            input_audio_transcription=AudioTranscriptionConfig(),
+        )
+    else:
+        # Half-cascade: model outputs text, TTS converts to audio
+        run_config = RunConfig(
+            streaming_mode=StreamingMode.BIDI,
+            response_modalities=["AUDIO"],
+            speech_config=SpeechConfig(
+                voice_config=VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Aoede",
+                    )
+                )
+            ),
+        )
+
+    return run_config
+
+
+@app.websocket("/ws/{user_id}/{session_id}")
+async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
+    """Bidirectional audio streaming over WebSocket.
+
+    Protocol:
+      - Binary frames = raw PCM audio (16kHz, 16-bit, mono) from the client
+      - Text frames   = JSON messages:
+          {"type": "text",  "text": "..."}           — text input
+          {"type": "audio", "data": "<base64 PCM>"}  — audio as base64 (fallback)
+      - Server sends back:
+          Binary frames = PCM audio (24kHz, 16-bit, mono) for playback
+          Text frames   = JSON: {"type":"text", "text":"..."} for transcriptions / text
+    """
+    await websocket.accept()
+    logger.info(f"[WS] Connected: user={user_id} session={session_id}")
+
+    # Ensure session exists (share session store with REST endpoints)
+    session = await session_service.get_session(
+        app_name=APP_NAME,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    if session is None:
+        session = await session_service.create_session(
+            app_name=APP_NAME,
+            user_id=user_id,
+            session_id=session_id,
+        )
+
+    live_request_queue = LiveRequestQueue()
+    run_config = _build_run_config()
+
+    async def upstream_task():
+        """Read from WebSocket and push into the LiveRequestQueue."""
+        try:
+            while True:
+                try:
+                    # Try binary first (raw PCM audio)
+                    data = await websocket.receive()
+
+                    if data.get("type") == "websocket.disconnect":
+                        break
+
+                    if "bytes" in data and data["bytes"]:
+                        # Raw PCM audio bytes from the mic
+                        audio_bytes = data["bytes"]
+                        audio_blob = Blob(
+                            mime_type="audio/pcm;rate=16000",
+                            data=audio_bytes,
+                        )
+                        live_request_queue.send_realtime(audio_blob)
+
+                    elif "text" in data and data["text"]:
+                        msg = json.loads(data["text"])
+                        msg_type = msg.get("type", "text")
+
+                        if msg_type == "audio":
+                            # Base64-encoded PCM audio (fallback path)
+                            audio_bytes = base64.b64decode(msg["data"])
+                            audio_blob = Blob(
+                                mime_type="audio/pcm;rate=16000",
+                                data=audio_bytes,
+                            )
+                            live_request_queue.send_realtime(audio_blob)
+
+                        elif msg_type == "text":
+                            # Text message
+                            text = msg.get("text", "")
+                            if text.strip():
+                                content = Content(
+                                    role="user",
+                                    parts=[Part.from_text(text=text)],
+                                )
+                                live_request_queue.send_content(content)
+
+                        elif msg_type == "end_of_turn":
+                            # Client signals end of voice turn
+                            live_request_queue.send_realtime(
+                                Blob(
+                                    mime_type="audio/pcm;rate=16000",
+                                    data=b"",
+                                )
+                            )
+
+                except WebSocketDisconnect:
+                    break
+                except json.JSONDecodeError as e:
+                    logger.warning(f"[WS] Invalid JSON from client: {e}")
+                    continue
+
+        except Exception as e:
+            logger.error(f"[WS] Upstream error: {e}")
+            traceback.print_exc()
+        finally:
+            live_request_queue.close()
+            logger.debug(f"[WS] Upstream closed: user={user_id} session={session_id}")
+
+    async def downstream_task():
+        """Read events from runner.run_live() and send to WebSocket.
+
+        Accumulates user and assistant transcription text across a turn,
+        then runs the same post-processing pipeline as text chat:
+        Firestore persistence, discovery-field extraction, SRS compilation,
+        and [FINALIZING] detection.
+
+        Transcription events from the ADK arrive on dedicated fields:
+          - event.input_transcription.text  → user speech-to-text
+          - event.output_transcription.text → assistant speech-to-text
+        These are separate from audio blob events (event.content.parts[].inline_data).
+        Partial events (event.partial=True) carry incremental chunks;
+        final events (event.partial=False) carry the full accumulated text.
+
+        Only final (complete) transcriptions are sent to the frontend so each
+        role gets exactly one large chat bubble rather than many tiny fragments.
+        """
+        # Accumulate final transcription text per turn for Firestore persistence
+        user_transcript_final: str = ""
+        assistant_transcript_final: str = ""
+
+        try:
+            async for event in audio_runner.run_live(
+                session=session,
+                live_request_queue=live_request_queue,
+                run_config=run_config,
+            ):
+                # ── 1. Audio blob — send as binary frame ──────────────────
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if (
+                            part.inline_data
+                            and part.inline_data.mime_type
+                            and "audio" in part.inline_data.mime_type
+                            and part.inline_data.data
+                        ):
+                            await websocket.send_bytes(part.inline_data.data)
+
+                        # Rare: text content in audio mode (non-transcription)
+                        elif part.text:
+                            logger.debug(
+                                f"[WS] Text content event (role={getattr(event.content, 'role', '?')}): "
+                                f"{part.text[:80]}"
+                            )
+
+                # ── 2. User input transcription ───────────────────────────
+                if event.input_transcription and event.input_transcription.text:
+                    if not event.partial:
+                        # Final accumulated user transcription — send as one complete bubble
+                        user_transcript_final = event.input_transcription.text
+                        clean = user_transcript_final.strip()
+                        if clean:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "user_transcript",
+                                        "text": clean,
+                                    }
+                                )
+                            )
+                        logger.debug(
+                            f"[WS] User transcription final ({len(clean)} chars): "
+                            f"{clean[:100]}"
+                        )
+
+                # ── 3. Assistant output transcription ─────────────────────
+                if event.output_transcription and event.output_transcription.text:
+                    if not event.partial:
+                        # Final accumulated assistant transcription — send as one complete bubble
+                        assistant_transcript_final = event.output_transcription.text
+                        clean = assistant_transcript_final.replace(
+                            FINALIZING_MARKER, ""
+                        ).strip()
+                        if clean:
+                            await websocket.send_text(
+                                json.dumps(
+                                    {
+                                        "type": "text",
+                                        "text": clean,
+                                    }
+                                )
+                            )
+                        logger.debug(
+                            f"[WS] Assistant transcription final ({len(assistant_transcript_final)} chars): "
+                            f"{assistant_transcript_final[:100]}"
+                        )
+
+                # ── 4. Turn complete: inject into orchestrator session, THEN notify frontend ──
+                if event.is_final_response():
+                    user_text = user_transcript_final.strip()
+                    assistant_text = assistant_transcript_final.strip()
+
+                    logger.info(
+                        f"[WS] Turn complete: session={session_id} "
+                        f"user_chars={len(user_text)} assistant_chars={len(assistant_text)}"
+                    )
+
+                    # Check for [FINALIZING] marker (needed for turn_complete msg)
+                    is_finalizing = FINALIZING_MARKER in assistant_text
+
+                    # CRITICAL: Inject voice transcript into orchestrator's ADK
+                    # session BEFORE sending turn_complete to the frontend.
+                    # The frontend fires POST /context/extract on turn_complete,
+                    # which reads _extract_conversation_text() from the session.
+                    # If we defer injection to a background task, the extraction
+                    # runs on a stale session snapshot that lacks the voice data.
+                    try:
+                        await session_bridge.inject_voice_turn(
+                            user_id=user_id,
+                            session_id=session_id,
+                            user_text=user_text,
+                            assistant_text=assistant_text,
+                        )
+                        # Verify injection: fetch session from storage and check events
+                        _verify = await session_service.get_session(
+                            app_name=APP_NAME,
+                            user_id=user_id,
+                            session_id=session_id,
+                        )
+                        if _verify:
+                            _content_evts = [
+                                e
+                                for e in (_verify.events or [])
+                                if e.content
+                                and e.content.parts
+                                and any(p.text for p in e.content.parts if p.text)
+                            ]
+                            logger.info(
+                                f"[WS] Post-injection verify: session={session_id} "
+                                f"total_events={len(_verify.events or [])} "
+                                f"content_text_events={len(_content_evts)}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[WS] Post-injection: session NOT FOUND in storage! "
+                                f"session={session_id}"
+                            )
+                    except Exception as exc:
+                        logger.error(
+                            f"[WS] SessionBridge injection failed: session={session_id} {exc}"
+                        )
+
+                    # Now send turn_complete — the session has the voice data
+                    await websocket.send_text(
+                        json.dumps(
+                            {
+                                "type": "turn_complete",
+                                "finalizing": is_finalizing,
+                            }
+                        )
+                    )
+
+                    # Remaining post-processing (Firestore persist, finalization)
+                    # runs as a background task so the event loop stays free for
+                    # the next audio turn. SessionBridge is already done above.
+                    asyncio.create_task(
+                        _run_turn_postprocessing(
+                            session_id=session_id,
+                            user_id=user_id,
+                            user_text=user_text,
+                            assistant_text=assistant_text,
+                            is_finalizing=is_finalizing,
+                        )
+                    )
+
+                    # Reset accumulators for next turn
+                    user_transcript_final = ""
+                    assistant_transcript_final = ""
+
+        except WebSocketDisconnect:
+            logger.debug(f"[WS] Client disconnected during downstream")
+        except GenaiAPIError as e:
+            # Code 1000 = normal WebSocket close (user toggled voice off or navigated away)
+            if "1000" in str(e):
+                logger.info(
+                    f"[WS] Gemini Live session closed normally: session={session_id}"
+                )
+            else:
+                logger.error(f"[WS] Gemini Live API error: {e}")
+                traceback.print_exc()
+                try:
+                    await websocket.send_text(
+                        json.dumps({"type": "error", "message": str(e)})
+                    )
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"[WS] Downstream error: {e}")
+            traceback.print_exc()
+            try:
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "error",
+                            "message": str(e),
+                        }
+                    )
+                )
+            except Exception:
+                pass
+        finally:
+            logger.debug(f"[WS] Downstream closed: user={user_id} session={session_id}")
+
+    try:
+        # Run upstream (WS → queue) and downstream (live → WS) concurrently
+        await asyncio.gather(
+            upstream_task(),
+            downstream_task(),
+        )
+    except Exception as e:
+        logger.error(f"[WS] Connection error: {e}")
+        traceback.print_exc()
+    finally:
+        logger.info(f"[WS] Connection closed: user={user_id} session={session_id}")

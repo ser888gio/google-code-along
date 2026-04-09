@@ -1,0 +1,1381 @@
+diff --git a/backend/agent/__init__.py b/backend/agent/__init__.py
+index eb60cd2..ed1813c 100644
+--- a/backend/agent/__init__.py
++++ b/backend/agent/__init__.py
+@@ -1,3 +1,3 @@
+-from .agent import rs_agent
++from .agent import rs_agent, audio_agent, AUDIO_MODEL
+ 
+-__all__ = ["rs_agent"]
++__all__ = ["rs_agent", "audio_agent", "AUDIO_MODEL"]
+diff --git a/backend/agent/agent.py b/backend/agent/agent.py
+index a5ac088..192478e 100644
+--- a/backend/agent/agent.py
++++ b/backend/agent/agent.py
+@@ -1,5 +1,9 @@
+ """
+ ADK agent definition — Expert IT Business Consultant.
++
++Two variants:
++- rs_agent:    text-only, uses Gemini 3.1 Pro for structured RS conversations
++- audio_agent: native-audio model for bidirectional voice streaming (bidi)
+ """
+ 
+ from google.adk.agents import Agent
+@@ -13,6 +17,9 @@ load_dotenv()
+ # ADK model string for Gemini 3.1. Pro Pro on Vertex AI
+ MODEL = "gemini-3.1-pro-preview"
+ 
++# Native audio model for bidirectional voice streaming
++AUDIO_MODEL = "gemini-2.5-flash-native-audio-preview"
++
+ rs_agent = Agent(
+     name="rs_consultant",
+     description=(
+@@ -24,3 +31,15 @@ rs_agent = Agent(
+     instruction=SYSTEM_PROMPT,
+     tools=[],
+ )
++
++audio_agent = Agent(
++    name="rs_consultant_audio",
++    description=(
++        "An expert IT Business Consultant (voice mode) that guides users "
++        "through a structured discovery process to create a Requirement "
++        "Specification document via real-time voice conversation."
++    ),
++    model=AUDIO_MODEL,
++    instruction=SYSTEM_PROMPT,
++    tools=[],
++)
+diff --git a/backend/main.py b/backend/main.py
+index 0306fe1..219f7b2 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -1,10 +1,12 @@
+ import asyncio
++import base64
+ import json
+ import os
++import traceback
+ import uuid
+ 
+ from dotenv import load_dotenv
+-from fastapi import FastAPI, File, Form, UploadFile
++from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+ from fastapi.middleware.cors import CORSMiddleware
+ from fastapi.responses import StreamingResponse
+ from pydantic import BaseModel
+@@ -14,8 +16,26 @@ from google.adk.runners import Runner
+ from google.adk.sessions import InMemorySessionService
+ from google.genai import types
+ 
+-from agent import rs_agent
+-from generation import compile_rs_from_session, markdown_to_pdf, compile_srs_json_from_session, srs_json_to_docx
++from google.adk.agents.live_request_queue import LiveRequestQueue
++from google.adk.agents.run_config import RunConfig, StreamingMode
++from google.genai.types import (
++    AudioTranscriptionConfig,
++    Blob,
++    Content,
++    LiveConnectConfig,
++    Modality,
++    Part,
++    SpeechConfig,
++    VoiceConfig,
++)
++
++from agent import rs_agent, audio_agent, AUDIO_MODEL
++from generation import (
++    compile_rs_from_session,
++    markdown_to_pdf,
++    compile_srs_json_from_session,
++    srs_json_to_docx,
++)
+ from bpmn import check_completeness, generate_bpmn_diagram
+ from context import extract_rs_context
+ from dataflow import check_dfd_completeness, generate_dataflow_diagram
+@@ -44,6 +64,13 @@ runner = Runner(
+     session_service=session_service,
+ )
+ 
++# Audio runner for bidi voice streaming (uses native-audio model)
++audio_runner = Runner(
++    app_name=APP_NAME,
++    agent=audio_agent,
++    session_service=session_service,
++)
++
+ 
+ # --- Request / response models ---
+ 
+@@ -89,7 +116,9 @@ async def upload_file(
+     blob = bucket.blob(destination)
+ 
+     contents = await file.read()
+-    blob.upload_from_string(contents, content_type=file.content_type or "application/octet-stream")
++    blob.upload_from_string(
++        contents, content_type=file.content_type or "application/octet-stream"
++    )
+ 
+     return UploadResponse(
+         gcs_path=f"gs://{bucket_name}/{destination}",
+@@ -164,7 +193,7 @@ async def chat_stream(req: ChatRequest):
+ 
+     async def event_generator():
+         # First, send the session_id so the client can track it
+-        yield f"data: {{\"session_id\": \"{session_id}\"}}\n\n"
++        yield f'data: {{"session_id": "{session_id}"}}\n\n'
+ 
+         async for event in runner.run_async(
+             user_id=req.user_id,
+@@ -233,6 +262,7 @@ async def download_pdf(req: SessionRef):
+     )
+     if markdown is None:
+         from fastapi import HTTPException
++
+         raise HTTPException(
+             status_code=404,
+             detail="No RS document found. Complete the conversation first.",
+@@ -322,6 +352,7 @@ async def bpmn_generate(req: BpmnRequest):
+     )
+     if session is None:
+         from fastapi import HTTPException
++
+         raise HTTPException(status_code=404, detail="Session not found.")
+ 
+     conversation_text = _extract_conversation_text(session)
+@@ -362,6 +393,7 @@ async def dataflow_generate(req: DataflowRequest):
+     )
+     if session is None:
+         from fastapi import HTTPException
++
+         raise HTTPException(status_code=404, detail="Session not found.")
+ 
+     conversation_text = _extract_conversation_text(session)
+@@ -410,6 +442,7 @@ async def context_extract(req: ContextRequest):
+     )
+     if session is None:
+         from fastapi import HTTPException
++
+         raise HTTPException(status_code=404, detail="Session not found.")
+ 
+     conversation_text = _extract_conversation_text(session)
+@@ -463,3 +496,220 @@ async def firestore_data(session_id: str):
+     loop = asyncio.get_event_loop()
+     doc = await loop.run_in_executor(None, get_srs_fields, session_id)
+     return FirestoreDataResponse(session_id=session_id, data=doc)
++
++
++# --- Bidirectional audio WebSocket endpoint ---
++
++
++def _is_native_audio_model(model_name: str) -> bool:
++    """Check if the model supports native audio input/output."""
++    return "native-audio" in model_name
++
++
++def _build_run_config() -> RunConfig:
++    """Build a RunConfig for bidi audio streaming.
++
++    Adapts response modalities and speech config depending on whether the
++    audio model is a native-audio model or a half-cascade model.
++    """
++    is_native = _is_native_audio_model(AUDIO_MODEL)
++
++    if is_native:
++        # Native audio: model speaks audio directly
++        run_config = RunConfig(
++            streaming_mode=StreamingMode.BIDI,
++            response_modalities=["AUDIO"],
++            speech_config=SpeechConfig(
++                voice_config=VoiceConfig(
++                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
++                        voice_name="Aoede",
++                    )
++                )
++            ),
++            output_audio_transcription=AudioTranscriptionConfig(),
++            input_audio_transcription=AudioTranscriptionConfig(),
++        )
++    else:
++        # Half-cascade: model outputs text, TTS converts to audio
++        run_config = RunConfig(
++            streaming_mode=StreamingMode.BIDI,
++            response_modalities=["AUDIO"],
++            speech_config=SpeechConfig(
++                voice_config=VoiceConfig(
++                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
++                        voice_name="Aoede",
++                    )
++                )
++            ),
++        )
++
++    return run_config
++
++
++@app.websocket("/ws/{user_id}/{session_id}")
++async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
++    """Bidirectional audio streaming over WebSocket.
++
++    Protocol:
++      - Binary frames = raw PCM audio (16kHz, 16-bit, mono) from the client
++      - Text frames   = JSON messages:
++          {"type": "text",  "text": "..."}           — text input
++          {"type": "audio", "data": "<base64 PCM>"}  — audio as base64 (fallback)
++      - Server sends back:
++          Binary frames = PCM audio (24kHz, 16-bit, mono) for playback
++          Text frames   = JSON: {"type":"text", "text":"..."} for transcriptions / text
++    """
++    await websocket.accept()
++    print(f"[WS] Connected: user={user_id} session={session_id}")
++
++    # Ensure session exists (share session store with REST endpoints)
++    session = await session_service.get_session(
++        app_name=APP_NAME,
++        user_id=user_id,
++        session_id=session_id,
++    )
++    if session is None:
++        session = await session_service.create_session(
++            app_name=APP_NAME,
++            user_id=user_id,
++            session_id=session_id,
++        )
++
++    live_request_queue = LiveRequestQueue()
++    run_config = _build_run_config()
++
++    async def upstream_task():
++        """Read from WebSocket and push into the LiveRequestQueue."""
++        try:
++            while True:
++                try:
++                    # Try binary first (raw PCM audio)
++                    data = await websocket.receive()
++
++                    if data.get("type") == "websocket.disconnect":
++                        break
++
++                    if "bytes" in data and data["bytes"]:
++                        # Raw PCM audio bytes from the mic
++                        audio_bytes = data["bytes"]
++                        audio_blob = Blob(
++                            mime_type="audio/pcm;rate=16000",
++                            data=audio_bytes,
++                        )
++                        live_request_queue.send_realtime(audio_blob)
++
++                    elif "text" in data and data["text"]:
++                        msg = json.loads(data["text"])
++                        msg_type = msg.get("type", "text")
++
++                        if msg_type == "audio":
++                            # Base64-encoded PCM audio (fallback path)
++                            audio_bytes = base64.b64decode(msg["data"])
++                            audio_blob = Blob(
++                                mime_type="audio/pcm;rate=16000",
++                                data=audio_bytes,
++                            )
++                            live_request_queue.send_realtime(audio_blob)
++
++                        elif msg_type == "text":
++                            # Text message
++                            text = msg.get("text", "")
++                            if text.strip():
++                                content = Content(
++                                    role="user",
++                                    parts=[Part.from_text(text=text)],
++                                )
++                                live_request_queue.send_content(content)
++
++                        elif msg_type == "end_of_turn":
++                            # Client signals end of voice turn
++                            live_request_queue.send_realtime(
++                                Blob(
++                                    mime_type="audio/pcm;rate=16000",
++                                    data=b"",
++                                )
++                            )
++
++                except WebSocketDisconnect:
++                    break
++                except json.JSONDecodeError as e:
++                    print(f"[WS] Invalid JSON from client: {e}")
++                    continue
++
++        except Exception as e:
++            print(f"[WS] Upstream error: {e}")
++            traceback.print_exc()
++        finally:
++            live_request_queue.close()
++            print(f"[WS] Upstream closed: user={user_id} session={session_id}")
++
++    async def downstream_task():
++        """Read events from runner.run_live() and send to WebSocket."""
++        try:
++            async for event in audio_runner.run_live(
++                session=session,
++                live_request_queue=live_request_queue,
++                run_config=run_config,
++            ):
++                if event.content and event.content.parts:
++                    for part in event.content.parts:
++                        # Audio response — send as binary frame
++                        if (
++                            part.inline_data
++                            and part.inline_data.mime_type
++                            and "audio" in part.inline_data.mime_type
++                            and part.inline_data.data
++                        ):
++                            await websocket.send_bytes(part.inline_data.data)
++
++                        # Text response (transcription or model text output)
++                        elif part.text:
++                            await websocket.send_text(
++                                json.dumps(
++                                    {
++                                        "type": "text",
++                                        "text": part.text,
++                                    }
++                                )
++                            )
++
++                # Check for turn_complete or interrupted signals
++                if event.is_final_response():
++                    await websocket.send_text(
++                        json.dumps(
++                            {
++                                "type": "turn_complete",
++                            }
++                        )
++                    )
++
++        except WebSocketDisconnect:
++            print(f"[WS] Client disconnected during downstream")
++        except Exception as e:
++            print(f"[WS] Downstream error: {e}")
++            traceback.print_exc()
++            try:
++                await websocket.send_text(
++                    json.dumps(
++                        {
++                            "type": "error",
++                            "message": str(e),
++                        }
++                    )
++                )
++            except Exception:
++                pass
++        finally:
++            print(f"[WS] Downstream closed: user={user_id} session={session_id}")
++
++    try:
++        # Run upstream (WS → queue) and downstream (live → WS) concurrently
++        await asyncio.gather(
++            upstream_task(),
++            downstream_task(),
++        )
++    except Exception as e:
++        print(f"[WS] Connection error: {e}")
++        traceback.print_exc()
++    finally:
++        print(f"[WS] Connection closed: user={user_id} session={session_id}")
+diff --git a/frontend/app/page.tsx b/frontend/app/page.tsx
+index c35ab59..de2f31e 100644
+--- a/frontend/app/page.tsx
++++ b/frontend/app/page.tsx
+@@ -1,7 +1,10 @@
+ "use client";
+ 
+-import { useEffect, useRef, useState } from "react";
++import { useCallback, useEffect, useRef, useState } from "react";
+ import { streamChat, extractContext, downloadPdf, getFirestoreData, RsPartialData, SrsData } from "../lib/api";
++import { useAudioRecorder } from "../lib/useAudioRecorder";
++import { useAudioPlayer } from "../lib/useAudioPlayer";
++import { useWebSocket, ConnectionState, WsServerMessage } from "../lib/useWebSocket";
+ import FileUpload from "./components/FileUpload";
+ import BpmnPanel from "./components/BpmnPanel";
+ import DataflowPanel from "./components/DataflowPanel";
+@@ -22,6 +25,8 @@ interface Message {
+ const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Summary"] as const;
+ type RsTab = (typeof RS_TABS)[number];
+ 
++type ChatMode = "text" | "voice";
++
+ // ─── Message Bubble ───────────────────────────────────────────────────────────
+ 
+ function MessageBubble({ msg }: { msg: Message }) {
+@@ -154,11 +159,65 @@ export default function ChatPage() {
+   const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
+   const [srsData, setSrsData] = useState<SrsData | null>(null);
+   const [uploadOpen, setUploadOpen] = useState(false);
++  const [chatMode, setChatMode] = useState<ChatMode>("text");
+ 
+   const bottomRef = useRef<HTMLDivElement>(null);
+   const textareaRef = useRef<HTMLTextAreaElement>(null);
+   // Stale-response guard: discard extraction results from earlier turns
+   const extractNonceRef = useRef(0);
++  // Track the current voice transcription message id so we can append to it
++  const voiceTranscriptIdRef = useRef<string | null>(null);
++
++  // ─── Audio Player ──────────────────────────────────────────────────────────
++  const audioPlayer = useAudioPlayer();
++
++  // ─── WebSocket ─────────────────────────────────────────────────────────────
++  const handleWsAudio = useCallback(
++    (pcmData: ArrayBuffer) => {
++      audioPlayer.enqueue(pcmData);
++    },
++    [audioPlayer]
++  );
++
++  const handleWsMessage = useCallback(
++    (msg: WsServerMessage) => {
++      if (msg.type === "text") {
++        // Append transcription/text to the current assistant message or create one
++        if (voiceTranscriptIdRef.current) {
++          appendToMessage(voiceTranscriptIdRef.current, msg.text);
++        } else {
++          const id = addMessage("assistant", msg.text, true);
++          voiceTranscriptIdRef.current = id;
++        }
++      } else if (msg.type === "turn_complete") {
++        // Finalize the assistant voice message
++        if (voiceTranscriptIdRef.current) {
++          finalizeMessage(voiceTranscriptIdRef.current);
++          voiceTranscriptIdRef.current = null;
++        }
++        audioPlayer.drain();
++      } else if (msg.type === "error") {
++        setError(msg.message);
++      }
++    },
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++    [audioPlayer]
++  );
++
++  const ws = useWebSocket({
++    onAudioData: handleWsAudio,
++    onMessage: handleWsMessage,
++  });
++
++  // ─── Audio Recorder ────────────────────────────────────────────────────────
++  const handleAudioChunk = useCallback(
++    (pcmData: ArrayBuffer) => {
++      ws.sendAudio(pcmData);
++    },
++    [ws]
++  );
++
++  const audioRecorder = useAudioRecorder(handleAudioChunk);
+ 
+   useEffect(() => {
+     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+@@ -256,6 +315,45 @@ export default function ChatPage() {
+     }
+   }
+ 
++  // ─── Voice mode handlers ───────────────────────────────────────────────────
++
++  async function handleToggleVoice() {
++    if (chatMode === "voice") {
++      // Switching back to text mode
++      audioRecorder.stopRecording();
++      audioPlayer.stop();
++      ws.disconnect();
++      setChatMode("text");
++      return;
++    }
++
++    // Switching to voice mode
++    setChatMode("voice");
++
++    // Ensure we have a session id (generate one if first interaction)
++    const sid = sessionId ?? crypto.randomUUID();
++    if (!sessionId) setSessionId(sid);
++
++    // Initialize audio player (needs user gesture — this click counts)
++    await audioPlayer.init();
++
++    // Connect WebSocket
++    ws.connect("default_user", sid);
++  }
++
++  async function handleMicToggle() {
++    if (audioRecorder.isRecording) {
++      audioRecorder.stopRecording();
++    } else {
++      // Stop any playback when user starts talking
++      audioPlayer.stop();
++      voiceTranscriptIdRef.current = null;
++      await audioRecorder.startRecording();
++    }
++  }
++
++  const isVoiceConnected = ws.connectionState === "connected";
++
+   return (
+     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
+       {/* ── Left panel ─────────────────────────────────── */}
+@@ -264,13 +362,55 @@ export default function ChatPage() {
+         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
+           <span className="text-sm font-bold text-gray-800">Document Preprocessor</span>
+           <div className="flex items-center gap-3">
++            {/* Voice/Text mode toggle */}
++            <button
++              onClick={handleToggleVoice}
++              title={chatMode === "voice" ? "Switch to text mode" : "Switch to voice mode"}
++              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
++                chatMode === "voice"
++                  ? "bg-red-50 text-red-600 hover:bg-red-100"
++                  : "text-gray-500 hover:bg-gray-100"
++              }`}
++            >
++              {chatMode === "voice" ? (
++                <>
++                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
++                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="currentColor" />
++                    <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
++                    <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
++                  </svg>
++                  Voice Mode
++                </>
++              ) : (
++                <>
++                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
++                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" />
++                    <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
++                    <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
++                  </svg>
++                  Voice
++                </>
++              )}
++            </button>
+             <button className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100">
+               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                 <path d="M7 1l-6 5v7h4v-4h4v4h4V6z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+               </svg>
+               Home
+             </button>
+-            <div className={`h-3 w-3 rounded-full ${isStreaming ? "animate-pulse bg-yellow-400" : "bg-[#4caf50]"}`} />
++            <div className={`h-3 w-3 rounded-full ${
++              chatMode === "voice"
++                ? ws.connectionState === "connected"
++                  ? audioRecorder.isRecording
++                    ? "animate-pulse bg-red-500"
++                    : "bg-blue-500"
++                  : ws.connectionState === "connecting"
++                    ? "animate-pulse bg-yellow-400"
++                    : "bg-gray-400"
++                : isStreaming
++                  ? "animate-pulse bg-yellow-400"
++                  : "bg-[#4caf50]"
++            }`} />
+           </div>
+         </div>
+ 
+@@ -290,47 +430,96 @@ export default function ChatPage() {
+ 
+         {/* Input area */}
+         <div className="shrink-0 border-t border-gray-200 p-3">
+-          <div className="flex items-end gap-2">
+-            <button
+-              onClick={() => setUploadOpen(true)}
+-              title="Attach a file"
+-              className="flex shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 hover:border-[#4caf50] hover:text-[#4caf50] transition-colors"
+-              style={{ width: 40, height: 40 }}
+-            >
+-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+-                <path d="M9 4v10M4 9h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+-              </svg>
+-            </button>
+-            <textarea
+-              ref={textareaRef}
+-              value={input}
+-              onChange={(e) => setInput(e.target.value)}
+-              onKeyDown={handleKeyDown}
+-              placeholder="Describe your project or answer the consultant's questions…"
+-              rows={1}
+-              disabled={isStreaming}
+-              className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
+-              style={{ minHeight: 40, maxHeight: 160 }}
+-            />
+-            <button
+-              onClick={handleSend}
+-              disabled={!input.trim() || isStreaming}
+-              className="flex shrink-0 items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+-            >
+-              {isStreaming ? (
+-                <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+-                  <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
++          {chatMode === "voice" ? (
++            /* Voice mode input */
++            <div className="flex flex-col items-center gap-2">
++              {/* Connection status */}
++              {ws.connectionState === "connecting" && (
++                <p className="text-xs text-yellow-600">Connecting...</p>
++              )}
++              {ws.connectionState === "error" && (
++                <p className="text-xs text-red-600">Connection failed. Try toggling voice mode.</p>
++              )}
++              {audioRecorder.error && (
++                <p className="text-xs text-red-600">{audioRecorder.error}</p>
++              )}
++
++              <div className="flex items-center gap-3">
++                {/* Mic button */}
++                <button
++                  onClick={handleMicToggle}
++                  disabled={!isVoiceConnected}
++                  title={audioRecorder.isRecording ? "Stop speaking" : "Start speaking"}
++                  className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
++                    audioRecorder.isRecording
++                      ? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse"
++                      : isVoiceConnected
++                        ? "bg-[#4a6659] text-white hover:opacity-90"
++                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
++                  }`}
++                >
++                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
++                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="currentColor" />
++                    <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
++                    <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
++                  </svg>
++                </button>
++
++                <span className="text-xs text-gray-500">
++                  {audioRecorder.isRecording
++                    ? "Listening..."
++                    : audioPlayer.isPlaying
++                      ? "AI is speaking..."
++                      : isVoiceConnected
++                        ? "Tap to speak"
++                        : "Connecting..."}
++                </span>
++              </div>
++            </div>
++          ) : (
++            /* Text mode input */
++            <div className="flex items-end gap-2">
++              <button
++                onClick={() => setUploadOpen(true)}
++                title="Attach a file"
++                className="flex shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 hover:border-[#4caf50] hover:text-[#4caf50] transition-colors"
++                style={{ width: 40, height: 40 }}
++              >
++                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
++                  <path d="M9 4v10M4 9h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                 </svg>
+-              ) : (
+-                <>
+-                  Send
+-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+-                    <path d="M2 7h10M7 2l5 5-5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
++              </button>
++              <textarea
++                ref={textareaRef}
++                value={input}
++                onChange={(e) => setInput(e.target.value)}
++                onKeyDown={handleKeyDown}
++                placeholder="Describe your project or answer the consultant's questions…"
++                rows={1}
++                disabled={isStreaming}
++                className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
++                style={{ minHeight: 40, maxHeight: 160 }}
++              />
++              <button
++                onClick={handleSend}
++                disabled={!input.trim() || isStreaming}
++                className="flex shrink-0 items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
++              >
++                {isStreaming ? (
++                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
++                    <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
+                   </svg>
+-                </>
+-              )}
+-            </button>
+-          </div>
++                ) : (
++                  <>
++                    Send
++                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
++                      <path d="M2 7h10M7 2l5 5-5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
++                    </svg>
++                  </>
++                )}
++              </button>
++            </div>
++          )}
+         </div>
+ 
+         {/* File upload modal */}
+diff --git a/frontend/lib/useAudioPlayer.ts b/frontend/lib/useAudioPlayer.ts
+new file mode 100644
+index 0000000..6d6b167
+--- /dev/null
++++ b/frontend/lib/useAudioPlayer.ts
+@@ -0,0 +1,95 @@
++"use client";
++
++import { useCallback, useRef, useState } from "react";
++
++export interface UseAudioPlayerReturn {
++  /** Whether audio is currently being played */
++  isPlaying: boolean;
++  /** Initialize the player (must be called after user gesture) */
++  init: () => Promise<void>;
++  /** Enqueue a chunk of PCM audio (Int16, 24 kHz mono) for playback */
++  enqueue: (pcmData: ArrayBuffer) => void;
++  /** Signal that no more audio chunks will arrive — play until buffer drains */
++  drain: () => void;
++  /** Stop playback immediately and clear buffer */
++  stop: () => void;
++  /** Any error that occurred */
++  error: string | null;
++}
++
++/**
++ * Hook that wraps the AudioWorklet-based PCM player.
++ *
++ * Plays back PCM audio chunks (24 kHz, 16-bit mono) received from the
++ * server through the `pcm-player-processor.js` worklet.
++ *
++ * Must call `init()` in response to a user gesture (click) to satisfy
++ * browser autoplay policies.
++ */
++export function useAudioPlayer(): UseAudioPlayerReturn {
++  const [isPlaying, setIsPlaying] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  const audioContextRef = useRef<AudioContext | null>(null);
++  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
++  const initializedRef = useRef(false);
++
++  const init = useCallback(async () => {
++    if (initializedRef.current) return;
++
++    try {
++      setError(null);
++
++      // 24 kHz to match the server's output PCM rate
++      const audioContext = new AudioContext({ sampleRate: 24000 });
++      audioContextRef.current = audioContext;
++
++      await audioContext.audioWorklet.addModule("/pcm-player-processor.js");
++
++      const workletNode = new AudioWorkletNode(audioContext, "pcm-player-processor");
++      workletNodeRef.current = workletNode;
++
++      // Listen for playback_complete from the worklet
++      workletNode.port.onmessage = (event) => {
++        if (event.data.type === "playback_complete") {
++          setIsPlaying(false);
++        }
++      };
++
++      // Connect worklet to speakers
++      workletNode.connect(audioContext.destination);
++
++      initializedRef.current = true;
++    } catch (err) {
++      const message = err instanceof Error ? err.message : "Failed to init audio player";
++      setError(message);
++      console.error("[useAudioPlayer] init failed:", err);
++    }
++  }, []);
++
++  const enqueue = useCallback((pcmData: ArrayBuffer) => {
++    if (!workletNodeRef.current) {
++      console.warn("[useAudioPlayer] enqueue called before init");
++      return;
++    }
++
++    workletNodeRef.current.port.postMessage(
++      { command: "play", data: pcmData },
++      [pcmData] // Transfer ownership
++    );
++    setIsPlaying(true);
++  }, []);
++
++  const drain = useCallback(() => {
++    if (!workletNodeRef.current) return;
++    workletNodeRef.current.port.postMessage({ command: "drain" });
++  }, []);
++
++  const stop = useCallback(() => {
++    if (!workletNodeRef.current) return;
++    workletNodeRef.current.port.postMessage({ command: "stop" });
++    setIsPlaying(false);
++  }, []);
++
++  return { isPlaying, init, enqueue, drain, stop, error };
++}
+diff --git a/frontend/lib/useAudioRecorder.ts b/frontend/lib/useAudioRecorder.ts
+new file mode 100644
+index 0000000..8498880
+--- /dev/null
++++ b/frontend/lib/useAudioRecorder.ts
+@@ -0,0 +1,113 @@
++"use client";
++
++import { useCallback, useRef, useState } from "react";
++
++export interface UseAudioRecorderReturn {
++  /** Whether the recorder is actively capturing audio */
++  isRecording: boolean;
++  /** Start recording from the microphone */
++  startRecording: () => Promise<void>;
++  /** Stop recording and release mic */
++  stopRecording: () => void;
++  /** Any error that occurred */
++  error: string | null;
++}
++
++/**
++ * Hook that wraps the AudioWorklet-based PCM recorder.
++ *
++ * Records microphone audio, downsamples to 16 kHz mono Int16 PCM via
++ * the `pcm-recorder-processor.js` worklet, and calls `onAudioData` with
++ * each chunk of raw PCM bytes (ArrayBuffer).
++ */
++export function useAudioRecorder(
++  onAudioData: (pcmData: ArrayBuffer) => void
++): UseAudioRecorderReturn {
++  const [isRecording, setIsRecording] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  const audioContextRef = useRef<AudioContext | null>(null);
++  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
++  const streamRef = useRef<MediaStream | null>(null);
++  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
++
++  const startRecording = useCallback(async () => {
++    try {
++      setError(null);
++
++      // Request mic permission
++      const stream = await navigator.mediaDevices.getUserMedia({
++        audio: {
++          sampleRate: 16000,       // Hint — browser may ignore
++          channelCount: 1,
++          echoCancellation: true,
++          noiseSuppression: true,
++          autoGainControl: true,
++        },
++      });
++      streamRef.current = stream;
++
++      // Create AudioContext (browser may use 44.1/48 kHz regardless of hint)
++      const audioContext = new AudioContext({ sampleRate: 16000 });
++      audioContextRef.current = audioContext;
++
++      // Load the PCM recorder worklet
++      await audioContext.audioWorklet.addModule("/pcm-recorder-processor.js");
++
++      const workletNode = new AudioWorkletNode(audioContext, "pcm-recorder-processor");
++      workletNodeRef.current = workletNode;
++
++      // Handle PCM chunks from the worklet
++      workletNode.port.onmessage = (event) => {
++        if (event.data.type === "audio") {
++          onAudioData(event.data.data);
++        }
++      };
++
++      // Connect mic → worklet
++      const source = audioContext.createMediaStreamSource(stream);
++      sourceRef.current = source;
++      source.connect(workletNode);
++      // Don't connect worklet to destination — we don't want to hear our own voice
++
++      // Tell the worklet to start capturing
++      workletNode.port.postMessage({ command: "start" });
++      setIsRecording(true);
++    } catch (err) {
++      const message = err instanceof Error ? err.message : "Failed to start recording";
++      setError(message);
++      console.error("[useAudioRecorder] startRecording failed:", err);
++    }
++  }, [onAudioData]);
++
++  const stopRecording = useCallback(() => {
++    // Tell worklet to stop and flush
++    if (workletNodeRef.current) {
++      workletNodeRef.current.port.postMessage({ command: "stop" });
++      workletNodeRef.current.disconnect();
++      workletNodeRef.current = null;
++    }
++
++    // Disconnect source
++    if (sourceRef.current) {
++      sourceRef.current.disconnect();
++      sourceRef.current = null;
++    }
++
++    // Stop all mic tracks
++    if (streamRef.current) {
++      streamRef.current.getTracks().forEach((track) => track.stop());
++      streamRef.current = null;
++    }
++
++    // Close AudioContext
++    if (audioContextRef.current) {
++      audioContextRef.current.close();
++      audioContextRef.current = null;
++    }
++
++    setIsRecording(false);
++  }, []);
++
++  return { isRecording, startRecording, stopRecording, error };
++}
+diff --git a/frontend/lib/useWebSocket.ts b/frontend/lib/useWebSocket.ts
+new file mode 100644
+index 0000000..2ba01bc
+--- /dev/null
++++ b/frontend/lib/useWebSocket.ts
+@@ -0,0 +1,150 @@
++"use client";
++
++import { useCallback, useEffect, useRef, useState } from "react";
++
++const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8000";
++
++export type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
++
++export interface WsTextMessage {
++  type: "text";
++  text: string;
++}
++
++export interface WsTurnCompleteMessage {
++  type: "turn_complete";
++}
++
++export interface WsErrorMessage {
++  type: "error";
++  message: string;
++}
++
++export type WsServerMessage = WsTextMessage | WsTurnCompleteMessage | WsErrorMessage;
++
++export interface UseWebSocketReturn {
++  /** Current connection state */
++  connectionState: ConnectionState;
++  /** Connect to the bidi WebSocket */
++  connect: (userId: string, sessionId: string) => void;
++  /** Disconnect from the WebSocket */
++  disconnect: () => void;
++  /** Send raw PCM audio bytes to the server */
++  sendAudio: (pcmData: ArrayBuffer) => void;
++  /** Send a text message to the server */
++  sendText: (text: string) => void;
++}
++
++/**
++ * Hook for managing the bidirectional WebSocket connection to the backend.
++ *
++ * Handles:
++ * - Connection lifecycle (connect/disconnect/reconnect)
++ * - Sending binary PCM audio frames and text JSON frames
++ * - Receiving binary audio (→ onAudioData) and text messages (→ onMessage)
++ */
++export function useWebSocket(options: {
++  /** Called when binary audio data is received from the server (PCM 24kHz) */
++  onAudioData: (pcmData: ArrayBuffer) => void;
++  /** Called when a text/JSON message is received */
++  onMessage: (msg: WsServerMessage) => void;
++  /** Called when connection state changes */
++  onConnectionChange?: (state: ConnectionState) => void;
++}): UseWebSocketReturn {
++  const { onAudioData, onMessage, onConnectionChange } = options;
++
++  const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
++  const wsRef = useRef<WebSocket | null>(null);
++
++  // Keep callback refs stable to avoid reconnect loops
++  const onAudioDataRef = useRef(onAudioData);
++  const onMessageRef = useRef(onMessage);
++  const onConnectionChangeRef = useRef(onConnectionChange);
++
++  useEffect(() => { onAudioDataRef.current = onAudioData; }, [onAudioData]);
++  useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
++  useEffect(() => { onConnectionChangeRef.current = onConnectionChange; }, [onConnectionChange]);
++
++  const updateState = useCallback((state: ConnectionState) => {
++    setConnectionState(state);
++    onConnectionChangeRef.current?.(state);
++  }, []);
++
++  const connect = useCallback((userId: string, sessionId: string) => {
++    // Close existing connection if any
++    if (wsRef.current) {
++      wsRef.current.close();
++      wsRef.current = null;
++    }
++
++    updateState("connecting");
++
++    const url = `${WS_URL}/ws/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`;
++    const ws = new WebSocket(url);
++    ws.binaryType = "arraybuffer";
++    wsRef.current = ws;
++
++    ws.onopen = () => {
++      console.log("[useWebSocket] Connected");
++      updateState("connected");
++    };
++
++    ws.onclose = (event) => {
++      console.log(`[useWebSocket] Closed: code=${event.code} reason=${event.reason}`);
++      wsRef.current = null;
++      updateState("disconnected");
++    };
++
++    ws.onerror = (event) => {
++      console.error("[useWebSocket] Error:", event);
++      updateState("error");
++    };
++
++    ws.onmessage = (event) => {
++      if (event.data instanceof ArrayBuffer) {
++        // Binary frame = PCM audio from the server
++        onAudioDataRef.current(event.data);
++      } else if (typeof event.data === "string") {
++        // Text frame = JSON message
++        try {
++          const msg: WsServerMessage = JSON.parse(event.data);
++          onMessageRef.current(msg);
++        } catch (err) {
++          console.error("[useWebSocket] Failed to parse message:", err);
++        }
++      }
++    };
++  }, [updateState]);
++
++  const disconnect = useCallback(() => {
++    if (wsRef.current) {
++      wsRef.current.close();
++      wsRef.current = null;
++    }
++    updateState("disconnected");
++  }, [updateState]);
++
++  const sendAudio = useCallback((pcmData: ArrayBuffer) => {
++    if (wsRef.current?.readyState === WebSocket.OPEN) {
++      wsRef.current.send(pcmData);
++    }
++  }, []);
++
++  const sendText = useCallback((text: string) => {
++    if (wsRef.current?.readyState === WebSocket.OPEN) {
++      wsRef.current.send(JSON.stringify({ type: "text", text }));
++    }
++  }, []);
++
++  // Cleanup on unmount
++  useEffect(() => {
++    return () => {
++      if (wsRef.current) {
++        wsRef.current.close();
++        wsRef.current = null;
++      }
++    };
++  }, []);
++
++  return { connectionState, connect, disconnect, sendAudio, sendText };
++}
+diff --git a/frontend/public/pcm-player-processor.js b/frontend/public/pcm-player-processor.js
+new file mode 100644
+index 0000000..3923c93
+--- /dev/null
++++ b/frontend/public/pcm-player-processor.js
+@@ -0,0 +1,104 @@
++/**
++ * AudioWorkletProcessor for playing back PCM audio received from the server.
++ *
++ * Uses a ring buffer to handle asynchronous audio chunk delivery.
++ * Expects 24 kHz, 16-bit mono PCM input (converted to Float32 for playback).
++ *
++ * Messages from the main thread:
++ *   { command: "play", data: ArrayBuffer }  — enqueue PCM chunk for playback
++ *   { command: "stop" }                     — clear buffer, stop playback
++ *
++ * Messages to the main thread:
++ *   { type: "playback_complete" }  — ring buffer has been fully drained
++ */
++
++class PCMPlayerProcessor extends AudioWorkletProcessor {
++  constructor() {
++    super();
++
++    // Ring buffer: ~10 seconds at 24 kHz
++    this._ringBufferSize = 24000 * 10;
++    this._ringBuffer = new Float32Array(this._ringBufferSize);
++    this._writeIndex = 0;
++    this._readIndex = 0;
++    this._samplesAvailable = 0;
++    this._playing = false;
++    this._draining = false; // true when no more data will arrive
++
++    this.port.onmessage = (event) => {
++      const { command, data } = event.data;
++
++      if (command === "play") {
++        this._enqueue(data);
++        this._playing = true;
++        this._draining = false;
++      } else if (command === "stop") {
++        this._playing = false;
++        this._draining = false;
++        this._writeIndex = 0;
++        this._readIndex = 0;
++        this._samplesAvailable = 0;
++      } else if (command === "drain") {
++        // Signal that no more chunks are coming — play until empty
++        this._draining = true;
++      }
++    };
++  }
++
++  /**
++   * Convert Int16 PCM to Float32 and write into ring buffer.
++   */
++  _enqueue(arrayBuffer) {
++    const int16 = new Int16Array(arrayBuffer);
++    const sampleCount = int16.length;
++
++    for (let i = 0; i < sampleCount; i++) {
++      if (this._samplesAvailable >= this._ringBufferSize) {
++        // Buffer full — drop oldest samples (shouldn't happen normally)
++        this._readIndex = (this._readIndex + 1) % this._ringBufferSize;
++        this._samplesAvailable--;
++      }
++
++      // Int16 → Float32
++      this._ringBuffer[this._writeIndex] = int16[i] / 32768.0;
++      this._writeIndex = (this._writeIndex + 1) % this._ringBufferSize;
++      this._samplesAvailable++;
++    }
++  }
++
++  process(inputs, outputs, parameters) {
++    const output = outputs[0];
++    if (!output || !output[0]) {
++      return true;
++    }
++
++    const channel = output[0];
++
++    if (!this._playing) {
++      // Output silence
++      channel.fill(0);
++      return true;
++    }
++
++    for (let i = 0; i < channel.length; i++) {
++      if (this._samplesAvailable > 0) {
++        channel[i] = this._ringBuffer[this._readIndex];
++        this._readIndex = (this._readIndex + 1) % this._ringBufferSize;
++        this._samplesAvailable--;
++      } else {
++        channel[i] = 0; // Silence when buffer is empty
++      }
++    }
++
++    // Notify main thread when draining and buffer is empty
++    if (this._draining && this._samplesAvailable === 0) {
++      this._playing = false;
++      this._draining = false;
++      this.port.postMessage({ type: "playback_complete" });
++    }
++
++    return true; // Keep processor alive
++  }
++}
++
++registerProcessor("pcm-player-processor", PCMPlayerProcessor);
+diff --git a/frontend/public/pcm-recorder-processor.js b/frontend/public/pcm-recorder-processor.js
+new file mode 100644
+index 0000000..743aea5
+--- /dev/null
++++ b/frontend/public/pcm-recorder-processor.js
+@@ -0,0 +1,113 @@
++/**
++ * AudioWorkletProcessor for recording microphone input as PCM 16-bit mono.
++ *
++ * Receives Float32 audio from the mic (typically 44.1/48 kHz), downsamples
++ * to 16 kHz, converts to Int16 PCM, and posts the raw bytes to the main thread.
++ *
++ * Messages from the main thread:
++ *   { command: "start" }  — begin capturing
++ *   { command: "stop" }   — stop capturing
++ *
++ * Messages to the main thread:
++ *   { type: "audio", data: Int16Array }  — a chunk of 16 kHz PCM audio
++ */
++
++class PCMRecorderProcessor extends AudioWorkletProcessor {
++  constructor() {
++    super();
++    this._recording = false;
++    this._bufferSize = 2048; // samples at source rate before flushing
++    this._buffer = [];
++
++    this.port.onmessage = (event) => {
++      if (event.data.command === "start") {
++        this._recording = true;
++        this._buffer = [];
++      } else if (event.data.command === "stop") {
++        // Flush remaining buffer
++        if (this._buffer.length > 0) {
++          this._flush();
++        }
++        this._recording = false;
++      }
++    };
++  }
++
++  /**
++   * Downsample Float32 audio from sourceSampleRate to 16000 Hz.
++   * Simple linear interpolation — good enough for voice.
++   */
++  _downsample(float32Array, sourceSampleRate) {
++    if (sourceSampleRate === 16000) {
++      return float32Array;
++    }
++
++    const ratio = sourceSampleRate / 16000;
++    const newLength = Math.round(float32Array.length / ratio);
++    const result = new Float32Array(newLength);
++
++    for (let i = 0; i < newLength; i++) {
++      const srcIndex = i * ratio;
++      const lower = Math.floor(srcIndex);
++      const upper = Math.min(Math.ceil(srcIndex), float32Array.length - 1);
++      const frac = srcIndex - lower;
++      result[i] = float32Array[lower] * (1 - frac) + float32Array[upper] * frac;
++    }
++
++    return result;
++  }
++
++  /**
++   * Convert Float32 samples [-1, 1] to Int16 PCM.
++   */
++  _floatToInt16(float32Array) {
++    const int16 = new Int16Array(float32Array.length);
++    for (let i = 0; i < float32Array.length; i++) {
++      const s = Math.max(-1, Math.min(1, float32Array[i]));
++      int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
++    }
++    return int16;
++  }
++
++  /**
++   * Flush accumulated buffer: downsample → convert → post to main thread.
++   */
++  _flush() {
++    const float32 = new Float32Array(this._buffer);
++    this._buffer = [];
++
++    const downsampled = this._downsample(float32, sampleRate); // sampleRate is a global in AudioWorklet
++    const pcm16 = this._floatToInt16(downsampled);
++
++    this.port.postMessage(
++      { type: "audio", data: pcm16.buffer },
++      [pcm16.buffer] // Transfer ownership for zero-copy
++    );
++  }
++
++  process(inputs, outputs, parameters) {
++    if (!this._recording) {
++      return true; // Keep processor alive
++    }
++
++    const input = inputs[0];
++    if (!input || !input[0]) {
++      return true;
++    }
++
++    // Take channel 0 (mono)
++    const channelData = input[0];
++    for (let i = 0; i < channelData.length; i++) {
++      this._buffer.push(channelData[i]);
++    }
++
++    // Flush when we've accumulated enough samples
++    if (this._buffer.length >= this._bufferSize) {
++      this._flush();
++    }
++
++    return true; // Keep processor alive
++  }
++}
++
++registerProcessor("pcm-recorder-processor", PCMRecorderProcessor);
+diff --git a/mise.toml b/mise.toml
+new file mode 100644
+index 0000000..193e7ca
+--- /dev/null
++++ b/mise.toml
+@@ -0,0 +1,56 @@
++[tools]
++python = "3.12"
++node = "22"
++
++[env]
++VIRTUAL_ENV = "{{config_root}}/backend/venv"
++PATH = "{{config_root}}/backend/venv/bin:{{env.PATH}}"
++
++# ── Backend ──────────────────────────────────────────────
++[tasks.venv]
++description = "Create Python venv and install dependencies"
++run = """
++python -m venv backend/venv
++source backend/venv/bin/activate
++pip install -r backend/requirements.txt
++"""
++
++[tasks.backend]
++description = "Start FastAPI backend with auto-reload"
++dir = "backend"
++run = "uvicorn main:app --reload"
++
++# ── Frontend ─────────────────────────────────────────────
++[tasks.install]
++description = "Install frontend npm dependencies"
++dir = "frontend"
++run = "npm install"
++
++[tasks.frontend]
++description = "Start Next.js dev server"
++dir = "frontend"
++run = "npm run dev"
++
++[tasks.build]
++description = "Build Next.js frontend"
++dir = "frontend"
++run = "npm run build"
++
++[tasks.lint]
++description = "Run ESLint on frontend"
++dir = "frontend"
++run = "npm run lint"
++
++[tasks.test]
++description = "Run frontend tests"
++dir = "frontend"
++run = "npm test"
++
++# ── Full Stack ───────────────────────────────────────────
++[tasks.dev]
++description = "Start backend and frontend in parallel"
++depends = ["backend", "frontend"]
++
++[tasks.setup]
++description = "Full project setup (venv + npm install)"
++depends = ["venv", "install"]

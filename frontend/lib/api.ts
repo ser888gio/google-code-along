@@ -12,8 +12,14 @@ export interface DocumentResponse {
 
 /**
  * Send a message and stream the response via SSE.
- * Calls onChunk for each text piece, onSessionId once with the session ID,
- * and onDone when the stream ends.
+ *
+ * Callbacks:
+ *   onChunk      — each text piece from the assistant
+ *   onSessionId  — fires once with the session ID (first SSE event)
+ *   onFinalizing — fires when the backend detects ≥ 90% completeness and starts
+ *                  the finalizer pipeline; the UI should show a "finalizing" state
+ *   onDone       — stream ended normally
+ *   onError      — network or server error
  */
 export async function streamChat(
   message: string,
@@ -21,7 +27,9 @@ export async function streamChat(
   onChunk: (text: string) => void,
   onSessionId: (id: string) => void,
   onDone: () => void,
-  onError: (err: string) => void
+  onError: (err: string) => void,
+  // TODO: wire onFinalizing in page.tsx once backend emits {"event": "finalizing"}
+  onFinalizing?: () => void,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
@@ -57,6 +65,9 @@ export async function streamChat(
         const parsed = JSON.parse(payload);
         if (parsed.session_id) onSessionId(parsed.session_id);
         if (parsed.text) onChunk(parsed.text);
+        // TODO: handle finalizing event from backend
+        // Backend emits: data: {"event": "finalizing"}
+        if (parsed.event === "finalizing") onFinalizing?.();
       } catch {
         // ignore malformed lines
       }
@@ -94,18 +105,31 @@ export async function downloadPdf(sessionId: string): Promise<void> {
 
 export interface RsSectionData {
   filled: boolean;
-  content: string | null;
+  value: string | null;
 }
-
-export type RsSectionKey =
-  | "context_business_problem"
-  | "target_state_success"
-  | "scope_boundaries"
-  | "data_systems_integrations_access";
 
 export interface RsPartialData {
   completeness: number;
-  sections: Record<string, RsSectionData>;
+  fields: Record<string, RsSectionData>;
+}
+
+/**
+ * Fetch the last persisted 22-field discovery state for a session.
+ * Used when loading a historical session to restore the Preview panel instantly
+ * without re-running Gemini extraction.
+ * Returns null on any failure so the caller keeps its current state.
+ */
+export async function getDiscoveryState(sessionId: string): Promise<RsPartialData | null> {
+  try {
+    const res = await fetch(`${API_URL}/discovery/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return null;
+    const data: RsPartialData = await res.json();
+    // Treat completeness=0 with no fields as "nothing saved yet"
+    if (data.completeness === 0 && Object.keys(data.fields).length === 0) return null;
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -246,6 +270,41 @@ export interface SrsData {
   s4_integrations_access: string | null;
 }
 
+// ─── Conversation history ─────────────────────────────────────────────────────
+
+export interface SessionSummary {
+  session_id: string;
+  updated_at: string | null;
+  preview: string | null;
+}
+
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  text: string;
+  ts: string;
+}
+
+export async function getSessions(): Promise<SessionSummary[]> {
+  try {
+    const res = await fetch(`${API_URL}/sessions`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getHistory(sessionId: string): Promise<HistoryMessage[]> {
+  try {
+    const res = await fetch(`${API_URL}/history/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return [];
+    const body: { session_id: string; messages: HistoryMessage[] } = await res.json();
+    return body.messages;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Fetch the latest SRS data stored in Firestore for this session.
  * Returns null on any failure so callers can keep the previous state.
@@ -258,5 +317,75 @@ export async function getFirestoreData(sessionId: string): Promise<SrsData | nul
     return body.data;
   } catch {
     return null;
+  }
+}
+
+// ─── Final Analysis (Finalizer Agent output) ──────────────────────────────────
+// TODO: align these types with FINAL_ANALYSIS_SCHEMA in backend/agent/finalizer_agent.py
+//       and generate them automatically once the schema is stable.
+
+export interface TechnologyRecommendation {
+  primary: string;
+  rationale: string;
+  alternatives: string[];
+  constraints: string[];
+}
+
+export interface TeamProfile {
+  recommended_team_type: "internal" | "partner" | "vendor" | "mixed";
+  skills_required: string[];
+  rationale: string;
+}
+
+export interface PriorityTier {
+  tier: "strategic" | "tactical" | "operational";
+  score: number;           // 0–100
+  scoring_rationale: string;
+  priority_drivers: string[];
+}
+
+export interface RiskAndDependencies {
+  risks: string[];
+  dependencies: string[];
+  open_questions: string[];
+}
+
+export interface FinalAnalysisMeta {
+  session_id: string;
+  finalized_at: string;
+  model: string;
+  discovery_completeness: number;
+}
+
+export interface FinalAnalysis {
+  // All 22 form fields as collected and cleaned up by the finalizer
+  // TODO: replace Record<string,string> with a typed interface once field names are locked
+  use_case_form: Record<string, string | null>;
+  technology_recommendation: TechnologyRecommendation;
+  team_profile: TeamProfile;
+  priority_tier: PriorityTier;
+  risk_and_dependencies: RiskAndDependencies;
+  _meta: FinalAnalysisMeta;
+}
+
+export type AnalysisStatus = "not_found" | "pending" | "complete";
+
+export interface AnalysisResponse {
+  status: AnalysisStatus;
+  analysis?: FinalAnalysis;
+}
+
+/**
+ * Poll GET /analyses/{sessionId} to check finalization status.
+ * Returns the status and the analysis if complete.
+ * Always resolves (never throws) so callers can poll safely.
+ */
+export async function getAnalysis(sessionId: string): Promise<AnalysisResponse> {
+  try {
+    const res = await fetch(`${API_URL}/analyses/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return { status: "not_found" };
+    return res.json();
+  } catch {
+    return { status: "not_found" };
   }
 }
