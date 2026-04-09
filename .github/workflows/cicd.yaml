@@ -45,6 +45,13 @@ jobs:
           docker build -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} ./backend
           docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
 
+      - name: Remove GOOGLE_API_KEY plain env var from backend service
+        run: |-
+          gcloud run services update business-persona-ai-backend \
+            --region europe-west4 \
+            --remove-env-vars GOOGLE_API_KEY \
+            --quiet || true
+
       - name: Deploy Backend to Cloud Run
         id: deploy-backend
         uses: google-github-actions/deploy-cloudrun@v2
