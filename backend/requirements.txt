@@ -1,5 +1,5 @@
 google-adk
-google-cloud-aiplatform
+google-generativeai
 google-cloud-storage
 google-cloud-firestore
 fastapi
