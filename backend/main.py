@@ -20,7 +20,8 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from starlette.requests import Request
 from firestore import (
     append_conversation_turn,
     get_conversation_history,
@@ -71,6 +72,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Return a JSON 500 for any unhandled exception.
+
+    This ensures the response flows through CORSMiddleware so the browser
+    always receives Access-Control-Allow-Origin headers — even on errors.
+    """
+    logger.error(
+        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"},
+    )
 
 # --- ADK runner setup ---
 
@@ -236,20 +254,27 @@ async def chat_stream(req: ChatRequest):
         yield f'data: {{"session_id": "{session_id}"}}\n\n'
 
         reply_parts: list[str] = []
-        async for event in runner.run_async(
-            user_id=req.user_id,
-            session_id=session_id,
-            new_message=user_content,
-        ):
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if part.text:
-                        reply_parts.append(part.text)
-                        # Strip [FINALIZING] marker before sending to the client
-                        # so the user never sees the raw signal token.
-                        clean = part.text.replace(FINALIZING_MARKER, "").strip()
-                        if clean:
-                            yield f"data: {json.dumps({'text': clean})}\n\n"
+        try:
+            async for event in runner.run_async(
+                user_id=req.user_id,
+                session_id=session_id,
+                new_message=user_content,
+            ):
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            reply_parts.append(part.text)
+                            # Strip [FINALIZING] marker before sending to the client
+                            # so the user never sees the raw signal token.
+                            clean = part.text.replace(FINALIZING_MARKER, "").strip()
+                            if clean:
+                                yield f"data: {json.dumps({'text': clean})}\n\n"
+        except Exception as exc:
+            logger.error(
+                f"Streaming error for session_id={session_id}: {exc}",
+                exc_info=True,
+            )
+            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
 
         full_reply = "".join(reply_parts)
         logger.info(
@@ -531,16 +556,24 @@ async def context_extract(req: ContextRequest):
     """
     sid = req.session_id
 
-    session = await session_service.get_session(
-        app_name=APP_NAME,
-        user_id=req.user_id,
-        session_id=sid,
-    )
+    try:
+        session = await session_service.get_session(
+            app_name=APP_NAME,
+            user_id=req.user_id,
+            session_id=sid,
+        )
+    except Exception as exc:
+        logger.error(f"Failed to get session for extraction: session_id={sid}: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Session lookup failed: {type(exc).__name__}")
 
     if session is None:
         # ADK session gone — return last persisted discovery state if available
-        loop = asyncio.get_running_loop()
-        saved = await loop.run_in_executor(None, get_discovery_state, sid)
+        try:
+            loop = asyncio.get_running_loop()
+            saved = await loop.run_in_executor(None, get_discovery_state, sid)
+        except Exception as exc:
+            logger.error(f"Firestore fallback failed for session_id={sid}: {exc}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
         if saved:
             logger.info(
                 f"ADK session missing, returning saved discovery state: session_id={sid} completeness={saved.get('completeness')}%"
@@ -732,8 +765,12 @@ async def firestore_data(session_id: str):
     The frontend polls this endpoint after each turn to refresh the right panel.
     Returns data=null if no document has been written yet.
     """
-    loop = asyncio.get_running_loop()
-    doc = await loop.run_in_executor(None, get_srs_fields, session_id)
+    try:
+        loop = asyncio.get_running_loop()
+        doc = await loop.run_in_executor(None, get_srs_fields, session_id)
+    except Exception as exc:
+        logger.error(f"Firestore read failed for session_id={session_id}: {exc}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
     return FirestoreDataResponse(session_id=session_id, data=doc)
 
 
