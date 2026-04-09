@@ -52,6 +52,14 @@ jobs:
           service: business-persona-ai-backend
           region: europe-west4
           image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+          env_vars: |
+            GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}
+            GOOGLE_CLOUD_REGION=europe-west4
+          secrets: |
+            VERTEX_AI_SEARCH_DATASTORE_ID=VERTEX_AI_SEARCH_DATASTORE_ID:latest
+            GCS_BUCKET_NAME=GCS_BUCKET_NAME:latest
+            FIRESTORE_COLLECTION=FIRESTORE_COLLECTION:latest
+            FIRESTORE_DATABASE=FIRESTORE_DATABASE:latest
 
       # ==========================================
       # 2. FRONTEND SERVICE (europe-west4)
