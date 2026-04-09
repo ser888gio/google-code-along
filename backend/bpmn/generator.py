@@ -9,17 +9,19 @@ Two functions:
 import json
 import time
 
-from config import MODEL_BPMN, init_vertex_ai
+import google.generativeai as genai
+
+from config import GOOGLE_API_KEY, MODEL_BPMN
 from logger import get_logger
 from prompts.bpmn import BPMN_GENERATION_PROMPT, COMPLETENESS_PROMPT
-from vertexai.generative_models import GenerativeModel
+
+genai.configure(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
 
-def _get_model() -> GenerativeModel:
-    init_vertex_ai()
-    return GenerativeModel(MODEL_BPMN)
+def _get_model() -> genai.GenerativeModel:
+    return genai.GenerativeModel(MODEL_BPMN)
 
 
 async def check_completeness(conversation_text: str) -> dict:

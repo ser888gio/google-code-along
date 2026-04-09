@@ -8,8 +8,7 @@ Discovery Session structure, ready to be rendered into a Word document.
 import json
 import os
 
-import vertexai
-from vertexai.generative_models import GenerativeModel
+import google.generativeai as genai
 
 from google.adk.sessions import InMemorySessionService, Session
 
@@ -55,12 +54,9 @@ Conversation:
 """
 
 
-def _get_model() -> GenerativeModel:
-    project = os.getenv("GOOGLE_CLOUD_PROJECT")
-    region_raw = os.getenv("GOOGLE_CLOUD_REGION", "europe-central2")
-    region = "-".join(region_raw.split("-")[:3])
-    vertexai.init(project=project, location=region)
-    return GenerativeModel(_MODEL_NAME)
+def _get_model() -> genai.GenerativeModel:
+    genai.configure(api_key=os.getenv("GOOGLE_API_KEY", ""))
+    return genai.GenerativeModel(_MODEL_NAME)
 
 
 def _extract_conversation_text(session: Session) -> str:

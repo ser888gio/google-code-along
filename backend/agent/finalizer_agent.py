@@ -35,7 +35,9 @@ import json
 import os
 import time
 
-from config import MODEL_FINALIZER, TEXT_EXTENSIONS, init_vertex_ai
+import google.generativeai as genai
+
+from config import GOOGLE_API_KEY, MODEL_FINALIZER, TEXT_EXTENSIONS
 from firestore.writer import (
     set_finalization_error,
     upsert_final_analysis,
@@ -44,7 +46,8 @@ from gcs.connector import BUCKET_NAME, list_files, read_file, write_file
 from google.adk.agents import Agent
 from logger import get_logger
 from prompts.agent import FINALIZER_SYSTEM_PROMPT
-from vertexai.generative_models import GenerativeModel
+
+genai.configure(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
@@ -140,8 +143,7 @@ async def run_finalizer(
         logger.debug(
             f"Calling Gemini model={MODEL_FINALIZER} for final analysis: session_id={session_id}"
         )
-        init_vertex_ai()
-        model = GenerativeModel(MODEL_FINALIZER)
+        model = genai.GenerativeModel(MODEL_FINALIZER)
 
         # Run blocking generate_content() in a thread so we don't freeze the event loop
         logger.info(

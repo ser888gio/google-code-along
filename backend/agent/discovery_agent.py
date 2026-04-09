@@ -22,12 +22,15 @@ import asyncio
 import json
 import time
 
-from config import MODEL_DISCOVERY, init_vertex_ai
+import google.generativeai as genai
+
+from config import GOOGLE_API_KEY, MODEL_DISCOVERY
 from google.adk.agents import Agent
 from logger import get_logger
 from prompts.agent import DISCOVERY_SYSTEM_PROMPT
 from prompts.context import DISCOVERY_EXTRACTION_PROMPT
-from vertexai.generative_models import GenerativeModel
+
+genai.configure(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
@@ -52,10 +55,8 @@ discovery_agent = Agent(
 #       The old 8-field extractor can be kept temporarily for frontend backwards compat.
 
 
-def _get_discovery_model() -> GenerativeModel:
-    """Initialise Vertex AI and return a Gemini Flash model instance."""
-    init_vertex_ai()
-    return GenerativeModel(MODEL_DISCOVERY)
+def _get_discovery_model() -> genai.GenerativeModel:
+    return genai.GenerativeModel(MODEL_DISCOVERY)
 
 
 async def extract_discovery_fields(conversation_text: str) -> dict:

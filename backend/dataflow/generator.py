@@ -9,17 +9,19 @@ Two functions:
 import json
 import time
 
-from config import MODEL_DATAFLOW, init_vertex_ai
+import google.generativeai as genai
+
+from config import GOOGLE_API_KEY, MODEL_DATAFLOW
 from logger import get_logger
 from prompts.dataflow import DATAFLOW_COMPLETENESS_PROMPT, DATAFLOW_GENERATION_PROMPT
-from vertexai.generative_models import GenerativeModel
+
+genai.configure(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
 
-def _get_model() -> GenerativeModel:
-    init_vertex_ai()
-    return GenerativeModel(MODEL_DATAFLOW)
+def _get_model() -> genai.GenerativeModel:
+    return genai.GenerativeModel(MODEL_DATAFLOW)
 
 
 async def check_dfd_completeness(conversation_text: str) -> dict:

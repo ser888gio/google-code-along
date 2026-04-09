@@ -9,10 +9,13 @@ completeness score and per-field { filled, content } data.
 import json
 import time
 
-from config import MODEL_CONTEXT, init_vertex_ai
+import google.generativeai as genai
+
+from config import GOOGLE_API_KEY, MODEL_CONTEXT
 from logger import get_logger
 from prompts.context import RS_EXTRACTION_PROMPT
-from vertexai.generative_models import GenerativeModel
+
+genai.configure(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
@@ -29,9 +32,8 @@ EMPTY_SECTIONS: dict = {
 }
 
 
-def _get_model() -> GenerativeModel:
-    init_vertex_ai()
-    return GenerativeModel(MODEL_CONTEXT)
+def _get_model() -> genai.GenerativeModel:
+    return genai.GenerativeModel(MODEL_CONTEXT)
 
 
 async def extract_rs_context(conversation_text: str) -> dict:

@@ -17,10 +17,9 @@ Two variants:
   - audio_agent:             native-audio model for bidirectional voice streaming (bidi)
 """
 
-import os
 from functools import cached_property
 
-from config import MODEL_AUDIO, MODEL_ORCHESTRATOR, AUDIO_REGION
+from config import GOOGLE_API_KEY, MODEL_AUDIO, MODEL_ORCHESTRATOR
 from google.adk.agents import Agent
 from google.adk.models.google_llm import Gemini
 from google.genai import types as genai_types
@@ -30,29 +29,19 @@ from .research_agent import RESEARCH_TOOLS
 
 
 # ---------------------------------------------------------------------------
-# Region-pinned Gemini LLM for the Live API
+# API-key-pinned Gemini LLM for the Live API
 # ---------------------------------------------------------------------------
 
 
-class _RegionPinnedGemini(Gemini):
-    """Gemini LLM subclass that pins the Live API client to a specific region.
-
-    The default Gemini class reads GOOGLE_CLOUD_REGION from the environment,
-    which may point to a multi-region (e.g. 'eur3') that doesn't support
-    bidiGenerateContent. This subclass overrides _live_api_client to use
-    a Vertex AI client pinned to AUDIO_REGION.
-    """
-
-    _audio_region: str = AUDIO_REGION
+class _ApiKeyGemini(Gemini):
+    """Gemini LLM subclass that uses an API key for the Live API client."""
 
     @cached_property
     def _live_api_client(self):
         from google.genai import Client
 
         return Client(
-            vertexai=True,
-            project=os.environ.get("GOOGLE_CLOUD_PROJECT"),
-            location=self._audio_region,
+            api_key=GOOGLE_API_KEY,
             http_options=genai_types.HttpOptions(
                 headers=self._tracking_headers(),
                 api_version=self._live_api_version,
@@ -102,7 +91,7 @@ audio_agent = Agent(
         "AI Business Analyst (voice mode) that guides users through a structured "
         "discovery session via real-time voice conversation."
     ),
-    model=_RegionPinnedGemini(model=MODEL_AUDIO),
+    model=_ApiKeyGemini(model=MODEL_AUDIO),
     instruction=ORCHESTRATOR_SYSTEM_PROMPT,
     tools=[],
 )

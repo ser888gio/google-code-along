@@ -30,7 +30,7 @@ Bucket layout this agent reads from:
 
 import json
 
-from config import MODEL_RESEARCH, VERTEX_AI_SEARCH_DATASTORE_ID
+from config import MODEL_RESEARCH
 from gcs.connector import list_files, read_text
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
@@ -45,54 +45,11 @@ logger = get_logger(__name__)
 
 
 def search_vertex_ai(query: str, max_results: int = 5) -> dict:
-    """Search the Vertex AI Search datastore for documents matching *query*.
-
-    Covers both the curated knowledge base and indexed past analyses.
-
-    Returns:
-        {"found": bool, "results": [...]}
-
-    TODO (Google Cloud setup required before hackathon continues):
-      1. Go to GCP Console → Vertex AI Search → Create App (Generic / Document search)
-      2. Connect it to GCS bucket paths:
-           gs://<bucket>/knowledge_base/
-           gs://<bucket>/analyses/
-      3. Enable periodic re-indexing so new finalizer outputs appear automatically
-      4. Copy the datastore ID into .env as VERTEX_AI_SEARCH_DATASTORE_ID
-      5. Uncomment implementation below
-
-    TODO (code — implement when datastore is ready):
-        from google.cloud import discoveryengine_v1 as discoveryengine
-        client = discoveryengine.SearchServiceClient()
-        serving_config = (
-            f"projects/{GCP_PROJECT}/locations/global/collections/default_collection"
-            f"/dataStores/{VERTEX_AI_SEARCH_DATASTORE_ID}/servingConfigs/default_config"
-        )
-        request = discoveryengine.SearchRequest(
-            serving_config=serving_config, query=query, page_size=max_results
-        )
-        response = client.search(request)
-        results = [
-            {"title": r.document.name, "snippet": r.document.derived_struct_data.get("snippets", ""),
-             "source": r.document.name, "relevance_score": None}
-            for r in response.results
-        ]
-        return {"found": bool(results), "results": results}
-    """
-    if not VERTEX_AI_SEARCH_DATASTORE_ID:
-        logger.warning(
-            "Vertex AI Search not configured — VERTEX_AI_SEARCH_DATASTORE_ID missing, falling back to GCS scan"
-        )
-        return {
-            "found": False,
-            "results": [],
-            "note": "Vertex AI Search not configured (VERTEX_AI_SEARCH_DATASTORE_ID missing)",
-        }
-    # TODO: implement when datastore is created — see docstring above
+    """Stub — Vertex AI Search removed; falls back to GCS scan via search_past_analyses."""
     return {
         "found": False,
         "results": [],
-        "note": "Vertex AI Search integration pending",
+        "note": "Vertex AI Search not available — use search_past_analyses instead",
     }
 
 
