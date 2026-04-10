@@ -361,6 +361,9 @@ export default function ChatPage() {
 
     addMessage("user", text);
     setIsStreaming(true);
+    // Start shimmering placeholders immediately — stays true until the
+    // post-turn full /context/extract finishes in onDone.
+    setIsExtracting(true);
     const assistantId = addMessage("assistant", "", true);
 
     // Capture the session ID synchronously from the SSE stream.
@@ -384,7 +387,6 @@ export default function ChatPage() {
         // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
           const nonce = ++extractNonceRef.current;
-          setIsExtracting(true);
           const [partial, fsData] = await Promise.all([
             extractContext(capturedSessionId),
             getFirestoreData(capturedSessionId),
@@ -395,17 +397,30 @@ export default function ChatPage() {
             if (fsData) setSrsData(fsData);
             setIsExtracting(false);
           }
+        } else {
+          setIsExtracting(false);
         }
       },
       (err) => {
         finalizeMessage(assistantId);
         setError(err);
         setIsStreaming(false);
+        setIsExtracting(false);
       },
       // onFinalizing — backend has detected ≥ 90% completeness and started the pipeline
       () => {
         setFinalizingStatus("finalizing");
         setActiveTab("Analysis");
+      },
+      // onFieldUpdate — mid-stream field fill from the pre-stream quick extract
+      (key, value) => {
+        setRsPartial((prev) => ({
+          completeness: prev?.completeness ?? 0,
+          fields: {
+            ...(prev?.fields ?? {}),
+            [key]: { filled: true, value },
+          },
+        }));
       },
     );
   }

@@ -9,19 +9,15 @@ Two functions:
 import json
 import time
 
-import google.generativeai as genai
+from google import genai
 
 from config import GOOGLE_API_KEY, MODEL_BPMN
 from logger import get_logger
 from prompts.bpmn import BPMN_GENERATION_PROMPT, COMPLETENESS_PROMPT
 
-genai.configure(api_key=GOOGLE_API_KEY)
+_genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
-
-
-def _get_model() -> genai.GenerativeModel:
-    return genai.GenerativeModel(MODEL_BPMN)
 
 
 async def check_completeness(conversation_text: str) -> dict:
@@ -30,17 +26,16 @@ async def check_completeness(conversation_text: str) -> dict:
     Score 0–100 reflecting how much RS information has been gathered.
     Falls back to {"score": 0, "missing": ["Unable to evaluate"]} on error.
     """
-    model = _get_model()
     prompt = COMPLETENESS_PROMPT.format(conversation=conversation_text)
 
     try:
         logger.info(f"Model call started: model={MODEL_BPMN} caller=check_completeness")
         _t0 = time.perf_counter()
-        response = model.generate_content(prompt)
+        response = _genai_client.models.generate_content(model=MODEL_BPMN, contents=prompt)
         logger.info(
             f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s"
         )
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
         # Strip accidental markdown fences
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -53,16 +48,15 @@ async def check_completeness(conversation_text: str) -> dict:
 
 async def generate_bpmn_diagram(conversation_text: str) -> str:
     """Return a Mermaid flowchart string representing the To-Be BPMN process."""
-    model = _get_model()
     prompt = BPMN_GENERATION_PROMPT.format(conversation=conversation_text)
 
     logger.info(f"Model call started: model={MODEL_BPMN} caller=generate_bpmn_diagram")
     _t0 = time.perf_counter()
-    response = model.generate_content(prompt)
+    response = _genai_client.models.generate_content(model=MODEL_BPMN, contents=prompt)
     logger.info(
         f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s"
     )
-    mermaid = response.text.strip()
+    mermaid = (response.text or "").strip()
 
     # Strip markdown fences if the model wrapped the output anyway
     if mermaid.startswith("```"):

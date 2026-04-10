@@ -22,7 +22,7 @@ import asyncio
 import json
 import time
 
-import google.generativeai as genai
+from google import genai
 
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
 from google.adk.agents import Agent
@@ -30,7 +30,7 @@ from logger import get_logger
 from prompts.agent import DISCOVERY_SYSTEM_PROMPT
 from prompts.context import DISCOVERY_EXTRACTION_PROMPT
 
-genai.configure(api_key=GOOGLE_API_KEY)
+_genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
@@ -53,10 +53,6 @@ discovery_agent = Agent(
 # TODO: replace the existing extract_rs_context() in context/extractor.py
 #       with this function once the 22-field schema is finalized.
 #       The old 8-field extractor can be kept temporarily for frontend backwards compat.
-
-
-def _get_discovery_model() -> genai.GenerativeModel:
-    return genai.GenerativeModel(MODEL_DISCOVERY)
 
 
 async def extract_discovery_fields(conversation_text: str) -> dict:
@@ -83,7 +79,6 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
 
     logger.debug("Extracting discovery fields from conversation transcript")
     try:
-        model = _get_discovery_model()
         prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
             "{conversation}", conversation_text
         )
@@ -91,11 +86,15 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
             f"Model call started: model={MODEL_DISCOVERY} caller=extract_discovery_fields"
         )
         _t0 = time.perf_counter()
-        response = await asyncio.to_thread(model.generate_content, prompt)
+        response = await asyncio.to_thread(
+            _genai_client.models.generate_content,
+            model=MODEL_DISCOVERY,
+            contents=prompt,
+        )
         logger.info(
             f"Model call completed: model={MODEL_DISCOVERY} elapsed={time.perf_counter() - _t0:.2f}s"
         )
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
 
         # Strip markdown fences the model sometimes adds despite instructions
         if raw.startswith("```"):

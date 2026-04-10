@@ -79,9 +79,13 @@ const SECTIONS: Section[] = [
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
-function PlaceholderCard({ label }: { label: string }) {
+function PlaceholderCard({ label, pulsing = false }: { label: string; pulsing?: boolean }) {
   return (
-    <div className="rounded border-2 border-dashed border-gray-200 bg-gray-50 px-3 py-2.5">
+    <div
+      className={`rounded border-2 border-dashed border-gray-200 px-3 py-2.5 ${
+        pulsing ? "animate-shimmer" : "bg-gray-50"
+      }`}
+    >
       <div className="flex items-center gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
           {label}
@@ -113,9 +117,11 @@ function FilledCard({ label, value }: { label: string; value: string }) {
 function SectionGroup({
   section,
   fields,
+  isExtracting = false,
 }: {
   section: Section;
   fields: RsPartialData["fields"] | undefined;
+  isExtracting?: boolean;
 }) {
   const filledCount = section.fields.filter((f) => {
     const entry = fields?.[f.key];
@@ -148,7 +154,7 @@ function SectionGroup({
           return isFilled ? (
             <FilledCard key={f.key} label={f.label} value={entry!.value!} />
           ) : (
-            <PlaceholderCard key={f.key} label={f.label} />
+            <PlaceholderCard key={f.key} label={f.label} pulsing={isExtracting} />
           );
         })}
       </div>
@@ -262,6 +268,7 @@ export default function RsLiveTemplate({
             key={section.number}
             section={section}
             fields={rsPartial?.fields}
+            isExtracting={isExtracting}
           />
         ))}
       </div>

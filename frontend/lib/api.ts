@@ -14,12 +14,15 @@ export interface DocumentResponse {
  * Send a message and stream the response via SSE.
  *
  * Callbacks:
- *   onChunk      — each text piece from the assistant
- *   onSessionId  — fires once with the session ID (first SSE event)
- *   onFinalizing — fires when the backend detects ≥ 90% completeness and starts
- *                  the finalizer pipeline; the UI should show a "finalizing" state
- *   onDone       — stream ended normally
- *   onError      — network or server error
+ *   onChunk       — each text piece from the assistant
+ *   onSessionId   — fires once with the session ID (first SSE event)
+ *   onFinalizing  — fires when the backend detects ≥ 90% completeness and starts
+ *                   the finalizer pipeline; the UI should show a "finalizing" state
+ *   onFieldUpdate — fires mid-stream when the pre-stream quick extract detects a
+ *                   newly filled (or changed) RS field. Lets the right panel fill
+ *                   progressively before the agent's text reply arrives.
+ *   onDone        — stream ended normally
+ *   onError       — network or server error
  */
 export async function streamChat(
   message: string,
@@ -28,8 +31,8 @@ export async function streamChat(
   onSessionId: (id: string) => void,
   onDone: () => void,
   onError: (err: string) => void,
-  // TODO: wire onFinalizing in page.tsx once backend emits {"event": "finalizing"}
   onFinalizing?: () => void,
+  onFieldUpdate?: (key: string, value: string) => void,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
@@ -65,9 +68,10 @@ export async function streamChat(
         const parsed = JSON.parse(payload);
         if (parsed.session_id) onSessionId(parsed.session_id);
         if (parsed.text) onChunk(parsed.text);
-        // TODO: handle finalizing event from backend
-        // Backend emits: data: {"event": "finalizing"}
         if (parsed.event === "finalizing") onFinalizing?.();
+        if (parsed.field_update && typeof parsed.field_update.key === "string") {
+          onFieldUpdate?.(parsed.field_update.key, parsed.field_update.value ?? "");
+        }
       } catch {
         // ignore malformed lines
       }

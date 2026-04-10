@@ -9,13 +9,13 @@ completeness score and per-field { filled, content } data.
 import json
 import time
 
-import google.generativeai as genai
+from google import genai
 
 from config import GOOGLE_API_KEY, MODEL_CONTEXT
 from logger import get_logger
 from prompts.context import RS_EXTRACTION_PROMPT
 
-genai.configure(api_key=GOOGLE_API_KEY)
+_genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
@@ -30,10 +30,6 @@ EMPTY_SECTIONS: dict = {
     "4_data_systems": {"filled": False, "content": None},
     "4_integrations_access": {"filled": False, "content": None},
 }
-
-
-def _get_model() -> genai.GenerativeModel:
-    return genai.GenerativeModel(MODEL_CONTEXT)
 
 
 async def extract_rs_context(conversation_text: str) -> dict:
@@ -55,17 +51,16 @@ async def extract_rs_context(conversation_text: str) -> dict:
 
     logger.debug("Extracting RS context from conversation transcript")
     try:
-        model = _get_model()
         prompt = RS_EXTRACTION_PROMPT.format(conversation=conversation_text)
         logger.info(
             f"Model call started: model={MODEL_CONTEXT} caller=extract_rs_context"
         )
         _t0 = time.perf_counter()
-        response = model.generate_content(prompt)
+        response = _genai_client.models.generate_content(model=MODEL_CONTEXT, contents=prompt)
         logger.info(
             f"Model call completed: model={MODEL_CONTEXT} elapsed={time.perf_counter() - _t0:.2f}s"
         )
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
 
         # Strip markdown fences the model may add despite instructions
         if raw.startswith("```"):

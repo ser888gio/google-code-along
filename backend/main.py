@@ -253,6 +253,71 @@ async def chat_stream(req: ChatRequest):
         # First, send the session_id so the client can track it
         yield f'data: {{"session_id": "{session_id}"}}\n\n'
 
+        # ── Pre-stream quick extract ──────────────────────────────────────
+        # Before the agent starts responding, run a fast Gemini Flash extract
+        # on the conversation-so-far + the new user message. Diff against the
+        # previously persisted discovery state and emit a `field_update` SSE
+        # event for each newly-filled (or changed) field. This lets the right
+        # panel fill in progressively *before* the agent's reply starts
+        # streaming — the user sees immediate feedback that their input was
+        # heard. Hard-capped at 4s so the agent never stalls if Gemini is
+        # slow or down.
+        try:
+            loop = asyncio.get_running_loop()
+            prev_state = await loop.run_in_executor(
+                None, get_discovery_state, session_id
+            )
+            prev_fields = (prev_state or {}).get("fields") or {}
+
+            tail_lines: list[str] = []
+            if session and session.events:
+                for event in session.events[-12:]:  # last ~6 turns
+                    if not event.content or not event.content.parts:
+                        continue
+                    role = event.content.role or "unknown"
+                    text = "".join(
+                        p.text for p in event.content.parts if p.text
+                    ).strip()
+                    if text:
+                        label = "User" if role == "user" else "Consultant"
+                        tail_lines.append(f"{label}: {text}")
+            tail_lines.append(f"User: {req.message}")
+            tail_text = "\n".join(tail_lines)
+
+            new_state = await asyncio.wait_for(
+                extract_discovery_fields(tail_text),
+                timeout=4.0,
+            )
+            new_fields = new_state.get("fields") or {}
+
+            emitted = 0
+            for key, entry in new_fields.items():
+                if not entry or not entry.get("filled"):
+                    continue
+                new_value = entry.get("value")
+                if new_value is None:
+                    continue
+                prev_entry = prev_fields.get(key) or {}
+                prev_filled = bool(prev_entry.get("filled"))
+                prev_value = prev_entry.get("value")
+                if (not prev_filled) or (prev_value != new_value):
+                    payload = json.dumps(
+                        {"field_update": {"key": key, "value": new_value}}
+                    )
+                    yield f"data: {payload}\n\n"
+                    emitted += 1
+            logger.info(
+                f"Pre-stream field_update: session={session_id} emitted={emitted}"
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Pre-stream extract timed out (>4s): session={session_id} — skipping field_update events"
+            )
+        except Exception as exc:
+            logger.warning(
+                f"Pre-stream extract failed: session={session_id} {exc}"
+            )
+
         reply_parts: list[str] = []
         try:
             async for event in runner.run_async(
