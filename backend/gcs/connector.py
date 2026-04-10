@@ -1,5 +1,7 @@
 from config import GCS_BUCKET_NAME as BUCKET_NAME
 from google.cloud import storage
+import os
+from typing import Optional
 
 
 def _client() -> storage.Client:
@@ -28,11 +30,16 @@ def write_file(
     path: str,
     data: bytes | str,
     content_type: str = "application/octet-stream",
-    bucket_name: str = BUCKET_NAME,
+    bucket_name: str | None = None, # Change default to None
 ) -> str:
-    """Upload *data* to *path* and return the gs:// URI."""
+    # Fallback to the environment variable if no name is provided
+    if bucket_name is None:
+        bucket_name = os.getenv("BUCKET_NAME", "").strip().strip("/")
+
     if isinstance(data, str):
         data = data.encode("utf-8")
+    
+    # This is where the "Bucket names must start/end..." error is thrown
     blob = _client().bucket(bucket_name).blob(path)
     blob.upload_from_string(data, content_type=content_type)
     return f"gs://{bucket_name}/{path}"
