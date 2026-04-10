@@ -23,7 +23,7 @@ FIRESTORE_COLLECTION: str = os.getenv("FIRESTORE_COLLECTION", "")
 FIRESTORE_DATABASE: str = os.getenv("FIRESTORE_DATABASE", "")
 
 # Audio model for bidirectional voice streaming via Live API
-MODEL_AUDIO = "gemini-live-2.5-flash-native-audio"
+MODEL_AUDIO = "gemini-3.1-flash-live-preview"
 
 # Region for the Live API
 AUDIO_REGION = os.getenv("GOOGLE_CLOUD_AUDIO_REGION", "europe-west1")
