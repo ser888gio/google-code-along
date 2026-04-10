@@ -8,7 +8,7 @@ Discovery Session structure, ready to be rendered into a Word document.
 import json
 import os
 
-import google.generativeai as genai
+from google import genai
 
 from google.adk.sessions import InMemorySessionService, Session
 
@@ -54,9 +54,8 @@ Conversation:
 """
 
 
-def _get_model() -> genai.GenerativeModel:
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY", ""))
-    return genai.GenerativeModel(_MODEL_NAME)
+def _get_client() -> genai.Client:
+    return genai.Client(api_key=os.getenv("GOOGLE_API_KEY", ""))
 
 
 def _extract_conversation_text(session: Session) -> str:
@@ -96,10 +95,10 @@ async def compile_srs_json_from_session(
         return None
 
     try:
-        model = _get_model()
+        client = _get_client()
         prompt = SRS_EXTRACTION_PROMPT.format(conversation=conversation_text)
-        response = model.generate_content(prompt)
-        raw = response.text.strip()
+        response = client.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        raw = (response.text or "").strip()
 
         # Strip markdown fences if present
         if raw.startswith("```"):

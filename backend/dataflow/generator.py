@@ -9,19 +9,15 @@ Two functions:
 import json
 import time
 
-import google.generativeai as genai
+from google import genai
 
 from config import GOOGLE_API_KEY, MODEL_DATAFLOW
 from logger import get_logger
 from prompts.dataflow import DATAFLOW_COMPLETENESS_PROMPT, DATAFLOW_GENERATION_PROMPT
 
-genai.configure(api_key=GOOGLE_API_KEY)
+_genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
-
-
-def _get_model() -> genai.GenerativeModel:
-    return genai.GenerativeModel(MODEL_DATAFLOW)
 
 
 async def check_dfd_completeness(conversation_text: str) -> dict:
@@ -30,7 +26,6 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
     Score 0–100 reflecting how ready the conversation is to produce a DFD.
     Falls back to {"score": 0, "missing": ["Unable to evaluate"]} on error.
     """
-    model = _get_model()
     prompt = DATAFLOW_COMPLETENESS_PROMPT.format(conversation=conversation_text)
 
     try:
@@ -38,11 +33,11 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
             f"Model call started: model={MODEL_DATAFLOW} caller=check_dfd_completeness"
         )
         _t0 = time.perf_counter()
-        response = model.generate_content(prompt)
+        response = _genai_client.models.generate_content(model=MODEL_DATAFLOW, contents=prompt)
         logger.info(
             f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
         )
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -54,18 +49,17 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
 
 async def generate_dataflow_diagram(conversation_text: str) -> str:
     """Return a Mermaid flowchart LR string representing the system as a DFD."""
-    model = _get_model()
     prompt = DATAFLOW_GENERATION_PROMPT.format(conversation=conversation_text)
 
     logger.info(
         f"Model call started: model={MODEL_DATAFLOW} caller=generate_dataflow_diagram"
     )
     _t0 = time.perf_counter()
-    response = model.generate_content(prompt)
+    response = _genai_client.models.generate_content(model=MODEL_DATAFLOW, contents=prompt)
     logger.info(
         f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
     )
-    mermaid = response.text.strip()
+    mermaid = (response.text or "").strip()
 
     # Strip markdown fences if the model wrapped the output
     if mermaid.startswith("```"):

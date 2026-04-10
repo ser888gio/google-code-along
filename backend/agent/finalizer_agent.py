@@ -35,7 +35,7 @@ import json
 import os
 import time
 
-import google.generativeai as genai
+from google import genai
 
 from config import GOOGLE_API_KEY, MODEL_FINALIZER, TEXT_EXTENSIONS
 from firestore.writer import (
@@ -47,7 +47,7 @@ from google.adk.agents import Agent
 from logger import get_logger
 from prompts.agent import FINALIZER_SYSTEM_PROMPT
 
-genai.configure(api_key=GOOGLE_API_KEY)
+_genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
 
@@ -143,20 +143,22 @@ async def run_finalizer(
         logger.debug(
             f"Calling Gemini model={MODEL_FINALIZER} for final analysis: session_id={session_id}"
         )
-        model = genai.GenerativeModel(MODEL_FINALIZER)
-
         # Run blocking generate_content() in a thread so we don't freeze the event loop
         logger.info(
             f"Model call started: model={MODEL_FINALIZER} caller=run_finalizer session_id={session_id}"
         )
         _t0 = time.perf_counter()
-        response = await asyncio.to_thread(model.generate_content, prompt)
+        response = await asyncio.to_thread(
+            _genai_client.models.generate_content,
+            model=MODEL_FINALIZER,
+            contents=prompt,
+        )
         logger.info(
             f"Model call completed: model={MODEL_FINALIZER} elapsed={time.perf_counter() - _t0:.2f}s session_id={session_id}"
         )
 
         # 4. Parse JSON output
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
