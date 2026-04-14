@@ -62,5 +62,3 @@ REQ_ID_PATTERN: re.Pattern = re.compile(r"^((?:FR|NFR)-\d{3})")
 
 # File extensions treated as readable plain text when the finalizer reads uploads
 TEXT_EXTENSIONS: frozenset[str] = frozenset({".txt", ".md", ".json", ".csv"})
-
-

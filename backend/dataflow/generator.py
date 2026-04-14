@@ -33,7 +33,9 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
             f"Model call started: model={MODEL_DATAFLOW} caller=check_dfd_completeness"
         )
         _t0 = time.perf_counter()
-        response = _genai_client.models.generate_content(model=MODEL_DATAFLOW, contents=prompt)
+        response = _genai_client.models.generate_content(
+            model=MODEL_DATAFLOW, contents=prompt
+        )
         logger.info(
             f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
         )
@@ -55,7 +57,9 @@ async def generate_dataflow_diagram(conversation_text: str) -> str:
         f"Model call started: model={MODEL_DATAFLOW} caller=generate_dataflow_diagram"
     )
     _t0 = time.perf_counter()
-    response = _genai_client.models.generate_content(model=MODEL_DATAFLOW, contents=prompt)
+    response = _genai_client.models.generate_content(
+        model=MODEL_DATAFLOW, contents=prompt
+    )
     logger.info(
         f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
     )

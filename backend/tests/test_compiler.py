@@ -15,6 +15,7 @@ from generation.compiler import compile_rs_from_session, RS_MARKER
 # Helpers to build mock session objects
 # ---------------------------------------------------------------------------
 
+
 def _make_part(text: str):
     part = MagicMock()
     part.text = text

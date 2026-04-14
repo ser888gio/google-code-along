@@ -10,9 +10,7 @@ a live GCP/Vertex AI connection. They verify that:
   - /document returns the markdown and ready=True after [GENERATE_RS] appears
   - /document/pdf returns a valid PDF when a document is ready
   - /document/pdf returns 404 when no document has been generated
-"""
 
-"""
 google.adk stubs are installed by conftest.py before collection — no stubs needed here.
 """
 
@@ -173,7 +171,7 @@ async def test_chat_stream_sends_session_id_event(app_with_mocks):
     assert resp.status_code == 200
     raw = resp.text
     # First SSE event must carry session_id
-    lines = [l for l in raw.split("\n") if l.startswith("data: ")]
+    lines = [line for line in raw.split("\n") if line.startswith("data: ")]
     first_data = json.loads(lines[0][6:])
     assert "session_id" in first_data
 
@@ -197,8 +195,8 @@ async def test_chat_stream_contains_text_chunk(app_with_mocks):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/chat/stream", json={"message": "Hello"})
 
-    lines = [l for l in resp.text.split("\n") if l.startswith("data: ") and l != "data: [DONE]"]
-    text_events = [json.loads(l[6:]) for l in lines if "{" in l]
+    lines = [line for line in resp.text.split("\n") if line.startswith("data: ") and line != "data: [DONE]"]
+    text_events = [json.loads(line[6:]) for line in lines if "{" in line]
     text_chunks = [e["text"] for e in text_events if "text" in e]
     assert len(text_chunks) > 0
     assert any("Hello" in chunk or "Consultant" in chunk for chunk in text_chunks)

@@ -19,7 +19,6 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.requests import Request
 from firestore import (
@@ -40,7 +39,7 @@ from generation import (
     markdown_to_pdf,
     srs_json_to_docx,
 )
-from google.adk.agents.live_request_queue import LiveRequestQueue
+from google.adk.agents.live_request_queue import LiveRequestQueue  
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -50,8 +49,6 @@ from google.genai.types import (
     AudioTranscriptionConfig,
     Blob,
     Content,
-    LiveConnectConfig,
-    Modality,
     Part,
     SpeechConfig,
     VoiceConfig,
@@ -65,13 +62,6 @@ logger = get_logger(__name__)
 
 app = FastAPI(title="RS Generator API")
 logger.info(f"RS Generator API initializing (app_name={APP_NAME})")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Restrict in production
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.exception_handler(Exception)
@@ -159,6 +149,9 @@ async def upload_file(
     session_id: str = Form(...),
 ):
     """Upload a file to GCS under sessions/{session_id}/{filename}."""
+    if not file.filename:
+        raise ValueError("Filename is missing")
+
     destination = f"sessions/{session_id}/{file.filename}"
     contents = await file.read()
     logger.info(
@@ -1248,7 +1241,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                     assistant_transcript_final = ""
 
         except WebSocketDisconnect:
-            logger.debug(f"[WS] Client disconnected during downstream")
+            logger.debug("[WS] Client disconnected during downstream")
         except GenaiAPIError as e:
             # Code 1000 = normal WebSocket close (user toggled voice off or navigated away)
             if "1000" in str(e):

@@ -31,7 +31,9 @@ async def check_completeness(conversation_text: str) -> dict:
     try:
         logger.info(f"Model call started: model={MODEL_BPMN} caller=check_completeness")
         _t0 = time.perf_counter()
-        response = _genai_client.models.generate_content(model=MODEL_BPMN, contents=prompt)
+        response = _genai_client.models.generate_content(
+            model=MODEL_BPMN, contents=prompt
+        )
         logger.info(
             f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s"
         )
@@ -62,7 +64,7 @@ async def generate_bpmn_diagram(conversation_text: str) -> str:
     if mermaid.startswith("```"):
         lines = mermaid.splitlines()
         # Remove first and last fence lines
-        inner = [l for l in lines if not l.strip().startswith("```")]
+        inner = [line for line in lines if not line.strip().startswith("```")]
         mermaid = "\n".join(inner).strip()
 
     return mermaid

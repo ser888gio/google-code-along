@@ -11,9 +11,7 @@ Simulates a complete user journey through the RS Generator pipeline:
   7. /document/pdf delivers a valid, non-empty PDF containing expected headings
 
 All external services (ADK runner, Gemini) are mocked.
-"""
 
-"""
 google.adk stubs are installed by conftest.py before collection — no stubs needed here.
 """
 

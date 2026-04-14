@@ -8,7 +8,12 @@ Verifies that:
   - Edge cases (empty input, only headings, special characters) are handled
 """
 
-from generation.pdf_export import markdown_to_pdf, _inline_markdown, _parse_markdown_to_flowables, _build_styles
+from generation.pdf_export import (
+    markdown_to_pdf,
+    _inline_markdown,
+    _parse_markdown_to_flowables,
+    _build_styles,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -78,9 +83,7 @@ def test_pdf_contains_expected_section_headings():
     styles = _build_styles()
     flowables = _parse_markdown_to_flowables(SAMPLE_RS, styles)
     # Collect all text from Paragraph flowables
-    texts = " ".join(
-        f.text for f in flowables if isinstance(f, Paragraph)
-    )
+    texts = " ".join(f.text for f in flowables if isinstance(f, Paragraph))
     for heading in [
         "Executive Summary",
         "Functional Requirements",
@@ -96,9 +99,7 @@ def test_pdf_contains_requirement_ids():
 
     styles = _build_styles()
     flowables = _parse_markdown_to_flowables(SAMPLE_RS, styles)
-    texts = " ".join(
-        f.text for f in flowables if isinstance(f, Paragraph)
-    )
+    texts = " ".join(f.text for f in flowables if isinstance(f, Paragraph))
     assert "FR-001" in texts
     assert "NFR-001" in texts
 
