@@ -20,9 +20,14 @@ from google.cloud import firestore
 
 _COLLECTION = FIRESTORE_COLLECTION
 
+_firestore_client: firestore.Client | None = None
+
 
 def _client() -> firestore.Client:
-    return firestore.Client(project=GCP_PROJECT, database=FIRESTORE_DATABASE)
+    global _firestore_client
+    if _firestore_client is None:
+        _firestore_client = firestore.Client(project=GCP_PROJECT, database=FIRESTORE_DATABASE)
+    return _firestore_client
 
 
 def _srs_to_doc(session_id: str, srs: dict[str, Any]) -> dict[str, Any]:

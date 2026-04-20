@@ -6,13 +6,12 @@ Discovery Session structure, ready to be rendered into a Word document.
 """
 
 import json
-import os
 
 from google import genai
 
+from config import GOOGLE_API_KEY, MODEL_SRS_COMPILER
 from google.adk.sessions import InMemorySessionService, Session
-
-_MODEL_NAME = "gemini-2.0-flash-001"
+from utils import extract_conversation_text
 
 SRS_EXTRACTION_PROMPT = """\
 You are an expert technical writer. Given the following conversation between a user and an \
@@ -54,22 +53,7 @@ Conversation:
 """
 
 
-def _get_client() -> genai.Client:
-    return genai.Client(api_key=os.getenv("GOOGLE_API_KEY", ""))
-
-
-def _extract_conversation_text(session: Session) -> str:
-    """Flatten a session's events into a plain text transcript."""
-    lines: list[str] = []
-    for event in session.events or []:
-        if not event.content or not event.content.parts:
-            continue
-        role = event.content.role or "unknown"
-        text = "".join(p.text for p in event.content.parts if p.text).strip()
-        if text:
-            label = "User" if role == "user" else "Consultant"
-            lines.append(f"{label}: {text}")
-    return "\n".join(lines)
+_genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 
 async def compile_srs_json_from_session(
@@ -90,14 +74,13 @@ async def compile_srs_json_from_session(
     if session is None:
         return None
 
-    conversation_text = _extract_conversation_text(session)
+    conversation_text = extract_conversation_text(session)
     if not conversation_text.strip():
         return None
 
     try:
-        client = _get_client()
         prompt = SRS_EXTRACTION_PROMPT.format(conversation=conversation_text)
-        response = client.models.generate_content(model=_MODEL_NAME, contents=prompt)
+        response = _genai_client.models.generate_content(model=MODEL_SRS_COMPILER, contents=prompt)
         raw = (response.text or "").strip()
 
         # Strip markdown fences if present

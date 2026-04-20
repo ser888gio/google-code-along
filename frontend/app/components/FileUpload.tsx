@@ -1,12 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { uploadFile } from "../../lib/api";
-
-interface UploadedFile {
-  filename: string;
-  gcs_path: string;
-}
+import { uploadFile, UploadedFile } from "../../lib/api";
 
 interface FileUploadProps {
   sessionId: string | null;

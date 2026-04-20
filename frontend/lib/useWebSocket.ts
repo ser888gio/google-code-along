@@ -91,12 +91,10 @@ export function useWebSocket(options: {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("[useWebSocket] Connected");
       updateState("connected");
     };
 
-    ws.onclose = (event) => {
-      console.log(`[useWebSocket] Closed: code=${event.code} reason=${event.reason}`);
+    ws.onclose = () => {
       wsRef.current = null;
       updateState("disconnected");
     };

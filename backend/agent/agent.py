@@ -53,18 +53,7 @@ class _ApiKeyGemini(Gemini):
 # Text orchestrator agent
 # ---------------------------------------------------------------------------
 
-# Research tools are wired directly on the orchestrator so it can call them inline
-# during the conversation without the indirection of a sub-agent hop.
-#
-# Discovery tracking and finalization are handled outside the ADK runner:
-#   - main.py calls extract_discovery_fields() after every turn (fire-and-forget)
-#   - main.py detects [FINALIZING] marker and calls run_finalizer() as a background task
-#
-# TODO (future): wire AgentTool(agent=research_agent) when the research sub-agent
-#       needs to do multi-step retrieval (read a specific GCS document after listing).
-#       For the demo the three function tools below are sufficient.
-
-orchestrator = Agent(
+rs_agent = Agent(
     name="business_analyst_orchestrator",
     description=(
         "AI Business Analyst that guides users through a structured discovery session "
@@ -75,10 +64,6 @@ orchestrator = Agent(
     instruction=ORCHESTRATOR_SYSTEM_PROMPT,
     tools=RESEARCH_TOOLS,  # search_past_analyses, list_knowledge_base_docs, search_vertex_ai
 )
-
-# Keep legacy alias so existing main.py import does not break during transition
-# TODO: remove this alias once main.py is updated to import `orchestrator` directly
-rs_agent = orchestrator
 
 
 # ---------------------------------------------------------------------------

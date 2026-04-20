@@ -37,35 +37,19 @@ import time
 
 from google import genai
 
-from config import GOOGLE_API_KEY, MODEL_FINALIZER, TEXT_EXTENSIONS
+from config import GOOGLE_API_KEY, GCS_PREFIX_SESSIONS, MODEL_FINALIZER, TEXT_EXTENSIONS
 from firestore.writer import (
     set_finalization_error,
     upsert_final_analysis,
 )
-from gcs.connector import BUCKET_NAME, list_files, read_file, write_file
-from google.adk.agents import Agent
+from gcs.connector import get_bucket_name, list_files, read_file, write_file
 from logger import get_logger
 from prompts.agent import FINALIZER_SYSTEM_PROMPT
+from utils import sanitize_gcs_segment
 
 _genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 logger = get_logger(__name__)
-
-# The ADK Agent definition is kept for reference and future ADK-native multi-agent
-# wiring.  The actual demo pipeline uses run_finalizer() with a direct Gemini call
-# (Option B from the architecture notes) because it runs as a background asyncio.Task
-# outside the main ADK runner loop.
-finalizer_agent = Agent(
-    name="finalizer_agent",
-    description=(
-        "Synthesizes all collected context from a discovery session into a complete "
-        "IT use case analysis with technology recommendation, team profile, priority "
-        "tier classification, and risk assessment. Stores the result to GCS."
-    ),
-    model=MODEL_FINALIZER,
-    instruction=FINALIZER_SYSTEM_PROMPT,
-    tools=[],
-)
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +212,8 @@ async def read_session_uploads(session_id: str) -> dict:
     TODO: skip files > 500 KB to stay within Gemini context limits.
     """
 
-    prefix = f"sessions/{session_id}/"
+    safe_session_id = sanitize_gcs_segment(session_id, field_name="session_id")
+    prefix = f"{GCS_PREFIX_SESSIONS}/{safe_session_id}/"
     paths = list_files(prefix=prefix)
 
     files = []
@@ -236,7 +221,7 @@ async def read_session_uploads(session_id: str) -> dict:
         filename = path.split("/")[-1]
         if not filename:
             continue
-        gcs_path = f"gs://{BUCKET_NAME}/{path}"
+        gcs_path = f"gs://{get_bucket_name()}/{path}"
         text_content = None
         ext = os.path.splitext(filename)[1].lower()
         try:
@@ -273,26 +258,12 @@ async def save_final_analysis(session_id: str, analysis: dict) -> str:
           Target: analyses/{session_id}/final_analysis.docx
     """
 
-    path = f"analyses/{session_id}/final_analysis.json"
+    safe_session_id = sanitize_gcs_segment(session_id, field_name="session_id")
+    path = f"analyses/{safe_session_id}/final_analysis.json"
     data = json.dumps(analysis, ensure_ascii=False, indent=2)
     gcs_uri = await asyncio.to_thread(write_file, path, data, "application/json")
     logger.info(f"Final analysis saved to GCS: {gcs_uri}")
     return gcs_uri
-
-
-# ---------------------------------------------------------------------------
-# Firestore update — called from run_finalizer() after GCS write
-# ---------------------------------------------------------------------------
-
-
-def upsert_final_analysis_to_firestore(session_id: str, analysis: dict) -> None:
-    """Thin wrapper — delegates to firestore.writer.upsert_final_analysis().
-
-    Kept as a named function here so it can be imported by tests
-    and called directly if needed outside run_finalizer().
-    """
-
-    upsert_final_analysis(session_id, analysis)
 
 
 # ---------------------------------------------------------------------------

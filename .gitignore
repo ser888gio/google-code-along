@@ -4,3 +4,12 @@ TASKS.md
 .claude/
 .claude
 /gcp-key.json
+
+# Environment files — never commit real secrets
+backend/.env
+frontend/.env
+frontend/.env.local
+**/.env.local
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/

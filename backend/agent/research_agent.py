@@ -30,12 +30,9 @@ Bucket layout this agent reads from:
 
 import json
 
-from config import MODEL_RESEARCH
 from gcs.connector import list_files, read_text
-from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 from logger import get_logger
-from prompts.agent import RESEARCH_SYSTEM_PROMPT
 
 logger = get_logger(__name__)
 
@@ -180,17 +177,3 @@ RESEARCH_TOOLS = [
     FunctionTool(func=search_past_analyses),
     FunctionTool(func=list_knowledge_base_docs),
 ]
-
-# ADK Agent definition kept for reference and future multi-agent wiring.
-# The demo pipeline uses RESEARCH_TOOLS directly on the orchestrator.
-research_agent = Agent(
-    name="research_agent",
-    description=(
-        "Searches the curated knowledge base (GCS + Vertex AI Search) and past "
-        "finalized analyses to find similar use cases, technology guidelines, and "
-        "reference material relevant to the current discovery session."
-    ),
-    model=MODEL_RESEARCH,
-    instruction=RESEARCH_SYSTEM_PROMPT,
-    tools=RESEARCH_TOOLS,
-)

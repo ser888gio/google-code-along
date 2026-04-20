@@ -1,14 +1,14 @@
 import asyncio
 import base64
 import json
-import traceback
+import os
 import uuid
 
 from agent import rs_agent, audio_agent
 from agent.discovery_agent import extract_discovery_fields
 from agent.finalizer_agent import run_finalizer
 from bpmn import check_completeness, generate_bpmn_diagram
-from config import APP_NAME, FINALIZING_MARKER, MODEL_AUDIO
+from config import APP_NAME, FINALIZING_MARKER, GCS_PREFIX_SESSIONS, MODEL_AUDIO
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
 from fastapi import (
     FastAPI,
@@ -25,7 +25,6 @@ from starlette.requests import Request
 from firestore import (
     append_conversation_turn,
     get_conversation_history,
-    get_direct_fields,
     get_discovery_state,
     get_final_analysis,
     get_srs_fields,
@@ -59,16 +58,22 @@ from google.genai.types import (
 from logger import get_logger, setup_logging
 from pydantic import BaseModel
 from session_bridge import SessionBridge
+from utils import extract_conversation_text, sanitize_gcs_filename, sanitize_gcs_segment
 
 setup_logging()
 logger = get_logger(__name__)
 
 app = FastAPI(title="RS Generator API")
+
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    allow_credentials=True,
 )
 logger.info(f"RS Generator API initializing (app_name={APP_NAME})")
 
@@ -119,7 +124,6 @@ session_bridge = SessionBridge(
 # (common in voice mode where turn_complete events arrive faster than
 # the ~40s extraction call can finish).
 _extract_locks: dict[str, asyncio.Lock] = {}
-_extract_inflight: dict[str, asyncio.Task] = {}
 
 
 # --- Request / response models ---
@@ -162,6 +166,9 @@ class SessionUploadsResponse(BaseModel):
     files: list[SessionUpload]
 
 
+_MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
 @app.post("/upload", response_model=UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
@@ -169,12 +176,23 @@ async def upload_file(
 ):
     """Upload a file to GCS under sessions/{session_id}/{filename}."""
     if not file.filename:
-        raise ValueError("Filename is missing")
+        raise HTTPException(status_code=400, detail="Filename is missing")
 
-    destination = f"sessions/{session_id}/{file.filename}"
+    try:
+        safe_session_id = sanitize_gcs_segment(session_id, field_name="session_id")
+        safe_filename = sanitize_gcs_filename(file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    destination = f"{GCS_PREFIX_SESSIONS}/{safe_session_id}/{safe_filename}"
     contents = await file.read()
+    if len(contents) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024*1024)} MB.",
+        )
     logger.info(
-        f"Upload received: file={file.filename} size={len(contents)}B session_id={session_id}"
+        f"Upload received: file={safe_filename} size={len(contents)}B session_id={safe_session_id}"
     )
     gcs_path = write_file(
         path=destination,
@@ -182,18 +200,23 @@ async def upload_file(
         content_type=file.content_type or "application/octet-stream",
     )
     logger.debug(f"File uploaded to GCS: {gcs_path}")
-    return UploadResponse(gcs_path=gcs_path, filename=file.filename)
+    return UploadResponse(gcs_path=gcs_path, filename=safe_filename)
 
 
 @app.get("/uploads/{session_id}", response_model=SessionUploadsResponse)
 async def session_uploads(session_id: str):
     """List files stored in GCS under sessions/{session_id}/."""
-    prefix = f"sessions/{session_id}/"
+    try:
+        safe_session_id = sanitize_gcs_segment(session_id, field_name="session_id")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    prefix = f"{GCS_PREFIX_SESSIONS}/{safe_session_id}/"
     try:
         paths = list_files(prefix=prefix)
     except Exception as exc:
         logger.error(
-            f"Failed to list session uploads: session_id={session_id} error={exc}",
+            f"Failed to list session uploads: session_id={safe_session_id} error={exc}",
             exc_info=True,
         )
         raise HTTPException(
@@ -210,7 +233,7 @@ async def session_uploads(session_id: str):
         for path in paths
         if path.split("/")[-1]
     ]
-    return SessionUploadsResponse(session_id=session_id, files=files)
+    return SessionUploadsResponse(session_id=safe_session_id, files=files)
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -222,13 +245,13 @@ async def chat(req: ChatRequest):
 
     # Ensure session exists
     session = await session_service.get_session(
-        app_name="rs_generator",
+        app_name=APP_NAME,
         user_id=req.user_id,
         session_id=session_id,
     )
     if session is None:
         session = await session_service.create_session(
-            app_name="rs_generator",
+            app_name=APP_NAME,
             user_id=req.user_id,
             session_id=session_id,
         )
@@ -270,13 +293,13 @@ async def chat_stream(req: ChatRequest):
     logger.debug(f"Stream chat request: session_id={session_id} user_id={req.user_id}")
 
     session = await session_service.get_session(
-        app_name="rs_generator",
+        app_name=APP_NAME,
         user_id=req.user_id,
         session_id=session_id,
     )
     if session is None:
         session = await session_service.create_session(
-            app_name="rs_generator",
+            app_name=APP_NAME,
             user_id=req.user_id,
             session_id=session_id,
         )
@@ -379,7 +402,7 @@ async def chat_stream(req: ChatRequest):
                 f"Streaming error for session_id={session_id}: {exc}",
                 exc_info=True,
             )
-            yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'error': 'An internal error occurred. Please try again.'})}\n\n"
 
         full_reply = "".join(reply_parts)
         logger.info(
@@ -522,20 +545,6 @@ async def download_docx(req: SessionRef):
 # --- BPMN diagram generation ---
 
 
-def _extract_conversation_text(session) -> str:
-    """Flatten a session's events into a plain text transcript."""
-    lines: list[str] = []
-    for event in session.events or []:
-        if not event.content or not event.content.parts:
-            continue
-        role = event.content.role or "unknown"
-        text = "".join(p.text for p in event.content.parts if p.text).strip()
-        if text:
-            label = "User" if role == "user" else "Consultant"
-            lines.append(f"{label}: {text}")
-    return "\n".join(lines)
-
-
 class BpmnRequest(BaseModel):
     session_id: str
     user_id: str = "default_user"
@@ -557,11 +566,9 @@ async def bpmn_generate(req: BpmnRequest):
         session_id=req.session_id,
     )
     if session is None:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    conversation_text = _extract_conversation_text(session)
+    conversation_text = extract_conversation_text(session)
 
     completeness = await check_completeness(conversation_text)
     score: int = completeness.get("score", 0)
@@ -601,11 +608,9 @@ async def dataflow_generate(req: DataflowRequest):
         session_id=req.session_id,
     )
     if session is None:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    conversation_text = _extract_conversation_text(session)
+    conversation_text = extract_conversation_text(session)
 
     completeness = await check_dfd_completeness(conversation_text)
     score: int = completeness.get("score", 0)
@@ -731,7 +736,7 @@ async def context_extract(req: ContextRequest):
             logger.warning(f"Session disappeared during extraction: session_id={sid}")
             return {"completeness": 0, "fields": {}}
 
-        conversation_text = _extract_conversation_text(session)
+        conversation_text = extract_conversation_text(session)
         logger.info(
             f"Conversation text for extraction: session_id={sid} "
             f"events={len(session.events)} text_len={len(conversation_text)} "
@@ -953,12 +958,14 @@ async def _run_turn_postprocessing(
 
     # 1. Persist conversation turn to Firestore
     if user_text or assistant_text:
-        loop.run_in_executor(
-            None,
-            append_conversation_turn,
-            session_id,
-            user_text or "(voice input)",
-            assistant_text,
+        asyncio.create_task(
+            asyncio.get_event_loop().run_in_executor(
+                None,
+                append_conversation_turn,
+                session_id,
+                user_text or "(voice input)",
+                assistant_text,
+            )
         )
 
     # 2. If [FINALIZING] detected, launch the finalizer pipeline
@@ -977,7 +984,7 @@ async def _run_turn_postprocessing(
             session_id=session_id,
         )
         conversation_text = (
-            _extract_conversation_text(session_snap)
+            extract_conversation_text(session_snap)
             if session_snap
             else (
                 fallback_transcript
@@ -1151,8 +1158,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                     continue
 
         except Exception as e:
-            logger.error(f"[WS] Upstream error: {e}")
-            traceback.print_exc()
+            logger.error(f"[WS] Upstream error: {e}", exc_info=True)
         finally:
             live_request_queue.close()
             logger.debug(f"[WS] Upstream closed: user={user_id} session={session_id}")
@@ -1261,7 +1267,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                     # CRITICAL: Inject voice transcript into orchestrator's ADK
                     # session BEFORE sending turn_complete to the frontend.
                     # The frontend fires POST /context/extract on turn_complete,
-                    # which reads _extract_conversation_text() from the session.
+                    # which reads extract_conversation_text() from the session.
                     # If we defer injection to a background task, the extraction
                     # runs on a stale session snapshot that lacks the voice data.
                     try:
@@ -1336,23 +1342,21 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                     f"[WS] Gemini Live session closed normally: session={session_id}"
                 )
             else:
-                logger.error(f"[WS] Gemini Live API error: {e}")
-                traceback.print_exc()
+                logger.error(f"[WS] Gemini Live API error: {e}", exc_info=True)
                 try:
                     await websocket.send_text(
-                        json.dumps({"type": "error", "message": str(e)})
+                        json.dumps({"type": "error", "message": "A voice API error occurred. Please try again."})
                     )
                 except Exception:
                     pass
         except Exception as e:
-            logger.error(f"[WS] Downstream error: {e}")
-            traceback.print_exc()
+            logger.error(f"[WS] Downstream error: {e}", exc_info=True)
             try:
                 await websocket.send_text(
                     json.dumps(
                         {
                             "type": "error",
-                            "message": str(e),
+                            "message": "An internal error occurred. Please reconnect.",
                         }
                     )
                 )
@@ -1368,7 +1372,6 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
             downstream_task(),
         )
     except Exception as e:
-        logger.error(f"[WS] Connection error: {e}")
-        traceback.print_exc()
+        logger.error(f"[WS] Connection error: {e}", exc_info=True)
     finally:
         logger.info(f"[WS] Connection closed: user={user_id} session={session_id}")

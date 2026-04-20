@@ -1,10 +1,16 @@
+import os
+
 from config import GCS_BUCKET_NAME as BUCKET_NAME
 from google.cloud import storage
-import os
+
+_storage_client: storage.Client | None = None
 
 
 def _client() -> storage.Client:
-    return storage.Client()
+    global _storage_client
+    if _storage_client is None:
+        _storage_client = storage.Client()
+    return _storage_client
 
 
 def get_bucket_name(bucket_name: str | None = None) -> str:

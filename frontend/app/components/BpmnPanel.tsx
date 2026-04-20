@@ -1,55 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { generateBpmn } from "../../lib/api";
+import MermaidDiagram from "./MermaidDiagram";
 
 // ─── Mermaid renderer ─────────────────────────────────────────────────────────
-
-function MermaidDiagram({ chart }: { chart: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function render() {
-      if (!ref.current || !chart) return;
-      try {
-        const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: "neutral",
-          flowchart: { curve: "basis", padding: 20 },
-        });
-
-        const id = `mermaid-${Math.random().toString(36).slice(2)}`;
-        const { svg } = await mermaid.render(id, chart);
-        if (!cancelled && ref.current) {
-          ref.current.innerHTML = svg;
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Render error");
-        }
-      }
-    }
-
-    setError(null);
-    render();
-    return () => { cancelled = true; };
-  }, [chart]);
-
-  if (error) {
-    return (
-      <div className="rounded border border-red-200 bg-[#fff5f5] p-4 text-sm text-red-700">
-        <p className="mb-1 font-semibold">Diagram render error</p>
-        <pre className="whitespace-pre-wrap text-xs">{error}</pre>
-      </div>
-    );
-  }
-
-  return <div ref={ref} className="w-full overflow-auto" />;
-}
 
 // ─── Completeness gate modal ───────────────────────────────────────────────────
 
@@ -228,7 +183,7 @@ export default function BpmnPanel({ sessionId }: { sessionId: string | null }) {
 
         {mermaidChart ? (
           <div className="rounded border border-gray-200 bg-white p-4 shadow-sm">
-            <MermaidDiagram chart={mermaidChart} />
+            <MermaidDiagram chart={mermaidChart} idPrefix="mermaid-bpmn" />
           </div>
         ) : (
           !apiError && (

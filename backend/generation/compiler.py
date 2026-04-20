@@ -48,4 +48,3 @@ async def compile_rs_from_session(
             return rs_body.strip()
 
     return None
-    return None

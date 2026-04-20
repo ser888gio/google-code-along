@@ -40,9 +40,6 @@ MODEL_DISCOVERY = "gemini-3.1-pro-preview"
 # Research agent: retrieval + summarisation, no deep reasoning needed
 MODEL_RESEARCH = "gemini-3.1-pro-preview"
 
-# Legacy 8-field RS context extractor
-MODEL_CONTEXT = "gemini-3.1-pro-preview"
-
 # BPMN / DataFlow diagram generation
 MODEL_BPMN = "gemini-3.1-pro-preview"
 MODEL_DATAFLOW = "gemini-3.1-pro-preview"

@@ -1,3 +1,2 @@
-from .extractor import extract_rs_context
-
-__all__ = ["extract_rs_context"]
+# Legacy 8-field context extractor removed — use extract_discovery_fields()
+# from agent.discovery_agent for the current 22-field schema.

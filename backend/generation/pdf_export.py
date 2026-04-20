@@ -9,6 +9,7 @@ bullet lists, and requirement IDs (FR-001, NFR-001).
 import io
 import re
 
+from config import REQ_ID_PATTERN as _REQ_ID_PATTERN
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -96,10 +97,6 @@ def _inline_markdown(text: str) -> str:
     text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
     text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"<i>\1</i>", text)
     return text
-
-
-# Pattern for requirement IDs like FR-001, NFR-002
-_REQ_ID_PATTERN = re.compile(r"^((?:FR|NFR)-\d{3})")
 
 
 def _parse_markdown_to_flowables(markdown: str, styles: dict) -> list:
@@ -202,5 +199,4 @@ def markdown_to_pdf(markdown: str) -> bytes:
 
     doc.build(flowables)
     return buffer.getvalue()
-
 

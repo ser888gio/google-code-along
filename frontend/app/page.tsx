@@ -209,17 +209,59 @@ function RsDocumentPanel({
   );
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const WELCOME_MESSAGE: Message = {
+  id: "welcome",
+  role: "assistant",
+  text: "Welcome to your Business Analyst session. I'm your AI consultant — I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
+  streaming: false,
+};
+
+// Fields that must never be AI-extracted (numeric/financial — user must type them).
+const DIRECT_INPUT_KEYS = new Set([
+  "saved_time_hours_per_year", "cost_saving", "revenue_increase",
+  "comments", "attachments",
+]);
+
+// Fields the AI can *suggest* but only if the user hasn't typed a value yet.
+const SUGGESTABLE_DIRECT_KEYS = new Set([
+  "use_case_title", "department", "requestor", "product_owner",
+]);
+
+/**
+ * Merge an AI-extracted partial state into the previous state, preserving
+ * user-typed direct-input fields and suggestable fields that have been set.
+ */
+function mergePartialFields(
+  prev: RsPartialData | null,
+  incoming: RsPartialData,
+  directFields: Record<string, string>,
+): RsPartialData {
+  return {
+    completeness: incoming.completeness,
+    fields: {
+      ...incoming.fields,
+      // Keep any field already marked filled (including SSE pre-fills)
+      ...Object.fromEntries(
+        Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
+      ),
+      // Preserve direct-input and user-typed suggestable fields
+      ...Object.fromEntries(
+        Object.entries(prev?.fields ?? {}).filter(
+          ([k]) =>
+            DIRECT_INPUT_KEYS.has(k) ||
+            (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== ""),
+        )
+      ),
+    },
+  };
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      text: "Welcome to your Business Analyst session. I'm your AI consultant — I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
-      streaming: false,
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -238,17 +280,6 @@ export default function ChatPage() {
   const [directFields, setDirectFields] = useState<Record<string, string>>({});
   // Debounce timer ref for persisting direct fields to the backend
   const directFieldDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Fields that must never be AI-extracted (numeric/financial — user must type them).
-  const DIRECT_INPUT_KEYS = new Set([
-    "saved_time_hours_per_year", "cost_saving", "revenue_increase",
-    "comments", "attachments",
-  ]);
-
-  // Fields the AI can *suggest* but only if the user hasn't typed a value yet.
-  const SUGGESTABLE_DIRECT_KEYS = new Set([
-    "use_case_title", "department", "requestor", "product_owner",
-  ]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -318,23 +349,7 @@ export default function ChatPage() {
           ]).then(([partial, fsData]) => {
             if (nonce === extractNonceRef.current) {
               if (partial) {
-                setRsPartial((prev) => ({
-                  completeness: partial.completeness,
-                  fields: {
-                    ...partial.fields,
-                    ...Object.fromEntries(
-                      Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
-                    ),
-                    // Preserve fields the user has already typed (direct-input keys + non-empty directFields)
-                    ...Object.fromEntries(
-                      Object.entries(prev?.fields ?? {}).filter(
-                        ([k]) => DIRECT_INPUT_KEYS.has(k) || (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== "")
-                      )
-                    ),
-                  },
-                }));
-
-                // Pre-fill suggestable fields if user hasn't typed yet
+                setRsPartial((prev) => mergePartialFields(prev, partial, directFields));
                 setDirectFields((prevDirect) => {
                   const updates: Record<string, string> = {};
                   for (const k of SUGGESTABLE_DIRECT_KEYS) {
@@ -521,24 +536,7 @@ export default function ChatPage() {
           // Only apply if a newer turn hasn't already superseded this one
           if (nonce === extractNonceRef.current) {
             if (partial) {
-              setRsPartial((prev) => ({
-                completeness: partial.completeness,
-                fields: {
-                  ...partial.fields,
-                  // Keep any field already marked filled by SSE events
-                  ...Object.fromEntries(
-                    Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
-                  ),
-                  // Preserve fields the user has already typed (direct-input keys + non-empty directFields)
-                  ...Object.fromEntries(
-                    Object.entries(prev?.fields ?? {}).filter(
-                      ([k]) => DIRECT_INPUT_KEYS.has(k) || (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== "")
-                    )
-                  ),
-                },
-              }));
-
-              // Pre-fill suggestable fields if user hasn't typed yet
+              setRsPartial((prev) => mergePartialFields(prev, partial, directFields));
               setDirectFields((prevDirect) => {
                 const updates: Record<string, string> = {};
                 for (const k of SUGGESTABLE_DIRECT_KEYS) {
@@ -646,13 +644,6 @@ export default function ChatPage() {
       setActiveTab("Analysis");
     }
   }
-
-  const WELCOME_MESSAGE: Message = {
-    id: "welcome",
-    role: "assistant",
-    text: "Welcome to your Business Analyst session. I'm your AI consultant — I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
-    streaming: false,
-  };
 
   function newConversation() {
     setMessages([WELCOME_MESSAGE]);
