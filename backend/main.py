@@ -665,7 +665,11 @@ async def context_extract(req: ContextRequest):
         async with lock:
             # The first caller has finished and persisted the result.
             loop = asyncio.get_running_loop()
-            saved = await loop.run_in_executor(None, get_discovery_state, sid)
+            try:
+                saved = await loop.run_in_executor(None, get_discovery_state, sid)
+            except Exception as exc:
+                logger.warning(f"Firestore get_discovery_state (coalesced) failed: session_id={sid} {exc}")
+                saved = None
             if saved:
                 logger.info(
                     f"Returning coalesced extraction result: session_id={sid} completeness={saved.get('completeness')}%"
@@ -702,7 +706,11 @@ async def context_extract(req: ContextRequest):
 
         # Fire-and-forget: persist discovery state + full SRS to Firestore
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, upsert_discovery_state, sid, result)
+        try:
+            await loop.run_in_executor(None, upsert_discovery_state, sid, result)
+        except Exception as exc:
+            logger.warning(f"Firestore upsert_discovery_state failed: session_id={sid} {exc}")
+
         asyncio.create_task(
             _persist_srs_to_firestore(
                 session_id=sid,
@@ -711,7 +719,11 @@ async def context_extract(req: ContextRequest):
         )
 
         # Return merged state: direct fields overlay AI-extracted fields
-        merged = await loop.run_in_executor(None, get_discovery_state, sid)
+        try:
+            merged = await loop.run_in_executor(None, get_discovery_state, sid)
+        except Exception as exc:
+            logger.warning(f"Firestore get_discovery_state failed: session_id={sid} {exc}")
+            merged = None
         if merged:
             return {"completeness": merged["completeness"], "fields": merged["fields"]}
         return {"completeness": result["completeness"], "fields": result["fields"]}

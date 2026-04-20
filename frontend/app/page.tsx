@@ -67,16 +67,26 @@ function MessageBubble({ msg }: { msg: Message }) {
   );
 }
 
-// ─── Error Card ───────────────────────────────────────────────────────────────
+// ─── Error Toast ──────────────────────────────────────────────────────────────
 
-function ErrorCard({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+function ErrorToast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 6000);
+    return () => clearTimeout(t);
+  }, [message, onDismiss]);
+
   return (
-    <div className="rounded border border-red-200 bg-[#fff5f5] px-4 py-3">
-      <div className="mb-1 flex items-center justify-between">
-        <span className="text-[11px] font-bold uppercase tracking-widest text-red-600">ERROR</span>
-        <button onClick={onDismiss} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+    <div className="fixed bottom-6 right-6 z-50 flex max-w-sm items-start gap-3 rounded-lg border border-red-300 bg-white px-4 py-3 shadow-lg">
+      <svg className="mt-0.5 shrink-0 text-red-500" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <div className="flex-1">
+        <p className="text-[11px] font-bold uppercase tracking-widest text-red-600">Something went wrong</p>
+        <p className="mt-0.5 text-sm text-gray-700">{message}</p>
       </div>
-      <p className="text-sm text-red-700">{message}</p>
+      <button onClick={onDismiss} className="shrink-0 text-gray-400 hover:text-gray-600">✕</button>
     </div>
   );
 }
@@ -738,7 +748,6 @@ export default function ChatPage() {
           {messages.map((msg) => (
             <MessageBubble key={msg.id} msg={msg} />
           ))}
-          {error && <ErrorCard message={error} onDismiss={() => setError(null)} />}
           <div ref={bottomRef} />
         </div>
 
@@ -884,6 +893,7 @@ export default function ChatPage() {
           isExtracting={isExtracting}
         />
       </div>
+      {error && <ErrorToast message={error} onDismiss={() => setError(null)} />}
     </div>
   );
 }
