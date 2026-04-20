@@ -19,6 +19,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.requests import Request
 from firestore import (
@@ -61,6 +62,12 @@ setup_logging()
 logger = get_logger(__name__)
 
 app = FastAPI(title="RS Generator API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 logger.info(f"RS Generator API initializing (app_name={APP_NAME})")
 
 
