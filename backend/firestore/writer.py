@@ -124,8 +124,32 @@ def list_sessions() -> list[dict[str, Any]]:
     results = []
     for doc in client.collection(_COLLECTION).stream():
         data = doc.to_dict()
-        messages = data.get("messages", [])
-        preview = next((m["text"] for m in messages if m.get("role") == "user"), None)
+
+        # Prefer the project name (use_case_title) as the conversation label.
+        # Fall back to the discovery_state_json fields, then the first user message.
+        preview: str | None = None
+        direct_json = data.get("direct_fields_json")
+        if direct_json:
+            try:
+                direct = json.loads(direct_json)
+                preview = direct.get("use_case_title") or None
+            except (json.JSONDecodeError, AttributeError):
+                pass
+        if not preview:
+            discovery_json = data.get("discovery_state_json")
+            if discovery_json:
+                try:
+                    discovery = json.loads(discovery_json)
+                    fields = discovery.get("fields", {})
+                    title_entry = fields.get("use_case_title", {})
+                    if title_entry.get("filled"):
+                        preview = title_entry.get("value") or None
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+        if not preview:
+            messages = data.get("messages", [])
+            preview = next((m["text"] for m in messages if m.get("role") == "user"), None)
+
         results.append(
             {
                 "session_id": data.get("session_id") or doc.id,
