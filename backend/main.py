@@ -958,14 +958,12 @@ async def _run_turn_postprocessing(
 
     # 1. Persist conversation turn to Firestore
     if user_text or assistant_text:
-        asyncio.create_task(
-            asyncio.get_event_loop().run_in_executor(
-                None,
-                append_conversation_turn,
-                session_id,
-                user_text or "(voice input)",
-                assistant_text,
-            )
+        loop.run_in_executor(
+            None,
+            append_conversation_turn,
+            session_id,
+            user_text or "(voice input)",
+            assistant_text,
         )
 
     # 2. If [FINALIZING] detected, launch the finalizer pipeline
