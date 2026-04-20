@@ -54,15 +54,28 @@ function MessageBubble({ msg }: { msg: Message }) {
     );
   }
 
+  const isThinking = msg.streaming && !msg.text;
+
   return (
     <div className="rounded border border-gray-200 bg-white px-4 py-3">
       <div className="mb-1 text-[11px] font-bold uppercase tracking-widest text-gray-500">AI CONSULTANT</div>
-      <p className="whitespace-pre-wrap text-sm text-gray-800">
-        {msg.text}
-        {msg.streaming && (
-          <span className="ml-0.5 inline-block h-4 w-1.5 animate-[blink_1s_step-end_infinite] bg-gray-400 align-middle" />
-        )}
-      </p>
+      {isThinking ? (
+        <p className="text-sm italic text-gray-400">
+          Thinking
+          <span className="inline-flex gap-0.5 ml-0.5 align-middle">
+            <span className="animate-[blink_1.2s_step-end_infinite] [animation-delay:0s]">.</span>
+            <span className="animate-[blink_1.2s_step-end_infinite] [animation-delay:0.4s]">.</span>
+            <span className="animate-[blink_1.2s_step-end_infinite] [animation-delay:0.8s]">.</span>
+          </span>
+        </p>
+      ) : (
+        <p className="whitespace-pre-wrap text-sm text-gray-800">
+          {msg.text}
+          {msg.streaming && (
+            <span className="ml-0.5 inline-block h-4 w-1.5 animate-[blink_1s_step-end_infinite] bg-gray-400 align-middle" />
+          )}
+        </p>
+      )}
     </div>
   );
 }
