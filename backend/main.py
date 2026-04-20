@@ -25,11 +25,13 @@ from starlette.requests import Request
 from firestore import (
     append_conversation_turn,
     get_conversation_history,
+    get_direct_fields,
     get_discovery_state,
     get_final_analysis,
     get_srs_fields,
     list_sessions,
     set_finalization_pending,
+    upsert_direct_fields,
     upsert_discovery_state,
     upsert_srs_fields,
 )
@@ -708,6 +710,10 @@ async def context_extract(req: ContextRequest):
             )
         )
 
+        # Return merged state: direct fields overlay AI-extracted fields
+        merged = await loop.run_in_executor(None, get_discovery_state, sid)
+        if merged:
+            return {"completeness": merged["completeness"], "fields": merged["fields"]}
         return {"completeness": result["completeness"], "fields": result["fields"]}
 
 
@@ -727,6 +733,30 @@ async def discovery_state(session_id: str):
         )
         return {"completeness": saved["completeness"], "fields": saved["fields"]}
     logger.debug(f"No saved discovery state for session_id={session_id}")
+    return {"completeness": 0, "fields": {}}
+
+
+class DirectFieldsPatch(BaseModel):
+    fields: dict[str, str]
+
+
+@app.patch("/discovery/{session_id}/fields", response_model=ContextResponse)
+async def patch_direct_fields(session_id: str, body: DirectFieldsPatch):
+    """Directly set field values, bypassing AI extraction.
+
+    These values are stored in a separate Firestore key (direct_fields_json)
+    so subsequent AI extraction runs never erase them.  The merged state
+    (direct + AI) is returned so the frontend can update completeness
+    immediately without a separate polling call.
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, upsert_direct_fields, session_id, body.fields)
+    logger.info(
+        f"Direct fields patched: session_id={session_id} keys={list(body.fields.keys())}"
+    )
+    merged = await loop.run_in_executor(None, get_discovery_state, session_id)
+    if merged:
+        return {"completeness": merged["completeness"], "fields": merged["fields"]}
     return {"completeness": 0, "fields": {}}
 
 

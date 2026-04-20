@@ -8,6 +8,10 @@ interface FieldDef {
   key: string;
   label: string;
   required: boolean;
+  /** If true, the user fills this field directly — AI extraction is bypassed. */
+  directInput?: boolean;
+  /** Use a textarea instead of a single-line input (only relevant when directInput=true). */
+  multiline?: boolean;
 }
 
 interface Section {
@@ -21,10 +25,10 @@ const SECTIONS: Section[] = [
     number: 1,
     title: "Identity & Current State",
     fields: [
-      { key: "use_case_title",  label: "Use Case Title",             required: true },
-      { key: "department",      label: "Customer Department",         required: true },
-      { key: "requestor",       label: "Requestor",                   required: true },
-      { key: "product_owner",   label: "Product Owner",               required: true },
+      { key: "use_case_title",  label: "Use Case Title",             required: true,  directInput: true },
+      { key: "department",      label: "Customer Department",         required: true,  directInput: true },
+      { key: "requestor",       label: "Requestor",                   required: true,  directInput: true },
+      { key: "product_owner",   label: "Product Owner",               required: true,  directInput: true },
       { key: "process_as_is",   label: "Process Description / As-Is", required: true },
       { key: "process_context", label: "Process Context",             required: true },
       { key: "trigger",         label: "Trigger",                     required: true },
@@ -41,9 +45,9 @@ const SECTIONS: Section[] = [
     number: 3,
     title: "Value & ROI",
     fields: [
-      { key: "saved_time_hours_per_year", label: "Saved Time (hours/year)", required: false },
-      { key: "cost_saving",               label: "Cost Saving",              required: false },
-      { key: "revenue_increase",          label: "Revenue Increase",         required: false },
+      { key: "saved_time_hours_per_year", label: "Saved Time (hours/year)", required: false, directInput: true },
+      { key: "cost_saving",               label: "Cost Saving",              required: false, directInput: true },
+      { key: "revenue_increase",          label: "Revenue Increase",         required: false, directInput: true },
       { key: "impacted_users",            label: "Impacted Users",           required: true  },
       { key: "add_value",                 label: "Added Value",              required: true  },
     ],
@@ -71,8 +75,8 @@ const SECTIONS: Section[] = [
     number: 6,
     title: "Additional",
     fields: [
-      { key: "comments",    label: "Comments",    required: false },
-      { key: "attachments", label: "Attachments", required: false },
+      { key: "comments",    label: "Comments",    required: false, directInput: true, multiline: true },
+      { key: "attachments", label: "Attachments", required: false, directInput: true },
     ],
   },
 ];
@@ -112,18 +116,69 @@ function FilledCard({ label, value }: { label: string; value: string }) {
   );
 }
 
+function EditableCard({
+  label,
+  fieldKey,
+  value,
+  onChange,
+  multiline = false,
+}: {
+  label: string;
+  fieldKey: string;
+  value: string;
+  onChange: (key: string, value: string) => void;
+  multiline?: boolean;
+}) {
+  return (
+    <div className="rounded border border-blue-200 bg-white px-3 py-2.5 shadow-sm">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-[#1a3a2a]">
+          {label}
+        </span>
+        <span className="ml-auto shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
+          Direct
+        </span>
+      </div>
+      {multiline ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(fieldKey, e.target.value)}
+          placeholder={`Enter ${label.toLowerCase()}…`}
+          rows={2}
+          className="w-full resize-none text-sm leading-relaxed text-gray-700 outline-none placeholder-gray-300"
+        />
+      ) : (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(fieldKey, e.target.value)}
+          placeholder={`Enter ${label.toLowerCase()}…`}
+          className="w-full text-sm text-gray-700 outline-none placeholder-gray-300"
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Section group ────────────────────────────────────────────────────────────
 
 function SectionGroup({
   section,
   fields,
+  directFields,
+  onDirectFieldChange,
   isExtracting = false,
 }: {
   section: Section;
   fields: RsPartialData["fields"] | undefined;
+  directFields: Record<string, string>;
+  onDirectFieldChange: (key: string, value: string) => void;
   isExtracting?: boolean;
 }) {
   const filledCount = section.fields.filter((f) => {
+    if (f.directInput) {
+      return (directFields[f.key] ?? "").trim() !== "";
+    }
     const entry = fields?.[f.key];
     return entry?.filled === true && entry.value != null && entry.value.trim() !== "";
   }).length;
@@ -145,6 +200,19 @@ function SectionGroup({
 
       <div className="space-y-1.5 pl-2">
         {section.fields.map((f) => {
+          if (f.directInput) {
+            return (
+              <EditableCard
+                key={f.key}
+                label={f.label}
+                fieldKey={f.key}
+                value={directFields[f.key] ?? ""}
+                onChange={onDirectFieldChange}
+                multiline={f.multiline}
+              />
+            );
+          }
+
           const entry = fields?.[f.key];
           const isFilled =
             entry?.filled === true &&
@@ -244,11 +312,15 @@ function CompletenessHeader({
 
 export default function RsLiveTemplate({
   rsPartial,
+  directFields,
   onGenerateFull,
+  onDirectFieldChange,
   isExtracting = false,
 }: {
   rsPartial: RsPartialData | null;
+  directFields: Record<string, string>;
   onGenerateFull: () => void;
+  onDirectFieldChange: (key: string, value: string) => void;
   isExtracting?: boolean;
 }) {
   const completeness = rsPartial?.completeness ?? 0;
@@ -268,6 +340,8 @@ export default function RsLiveTemplate({
             key={section.number}
             section={section}
             fields={rsPartial?.fields}
+            directFields={directFields}
+            onDirectFieldChange={onDirectFieldChange}
             isExtracting={isExtracting}
           />
         ))}

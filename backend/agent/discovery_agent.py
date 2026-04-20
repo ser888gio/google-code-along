@@ -132,8 +132,6 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
 # ---------------------------------------------------------------------------
 # Field schema — single source of truth for all 22 fields
 # ---------------------------------------------------------------------------
-# TODO: verify these key names align exactly with what the finalizer and frontend expect.
-#       If the frontend RsLiveTemplate component uses different keys, update one side only.
 
 FIELD_SCHEMA: dict[str, dict] = {
     # Section 1 — Identity & Current State

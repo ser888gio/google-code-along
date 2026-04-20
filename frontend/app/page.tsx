@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, getDiscoveryState, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, RsPartialData, SrsData, SessionSummary, FinalAnalysis } from "../lib/api";
+import { streamChat, extractContext, getDiscoveryState, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, patchDirectFields, RsPartialData, SrsData, SessionSummary, FinalAnalysis } from "../lib/api";
 import { useAudioRecorder } from "../lib/useAudioRecorder";
 import { useAudioPlayer } from "../lib/useAudioPlayer";
 import { useWebSocket, WsServerMessage } from "../lib/useWebSocket";
@@ -87,6 +87,8 @@ function RsDocumentPanel({
   activeTab,
   onTabChange,
   rsPartial,
+  directFields,
+  onDirectFieldChange,
   sessionId,
   onGenerateFull,
   srsData,
@@ -97,6 +99,8 @@ function RsDocumentPanel({
   activeTab: RsTab;
   onTabChange: (t: RsTab) => void;
   rsPartial: RsPartialData | null;
+  directFields: Record<string, string>;
+  onDirectFieldChange: (key: string, value: string) => void;
   sessionId: string | null;
   onGenerateFull: () => void;
   srsData: SrsData | null;
@@ -137,7 +141,13 @@ function RsDocumentPanel({
       {/* Content area */}
       <div className="flex-1 overflow-hidden bg-gray-50">
         {activeTab === "Preview" ? (
-          <RsLiveTemplate rsPartial={rsPartial} onGenerateFull={onGenerateFull} isExtracting={isExtracting} />
+          <RsLiveTemplate
+            rsPartial={rsPartial}
+            directFields={directFields}
+            onGenerateFull={onGenerateFull}
+            onDirectFieldChange={onDirectFieldChange}
+            isExtracting={isExtracting}
+          />
         ) : activeTab === "BPMN" ? (
           <BpmnPanel sessionId={sessionId} />
         ) : activeTab === "Data" ? (
@@ -202,6 +212,16 @@ export default function ChatPage() {
   const [finalAnalysis, setFinalAnalysis] = useState<FinalAnalysis | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>("text");
+  const [directFields, setDirectFields] = useState<Record<string, string>>({});
+  // Debounce timer ref for persisting direct fields to the backend
+  const directFieldDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fields filled directly by the user — AI extraction must not overwrite them.
+  const DIRECT_INPUT_KEYS = new Set([
+    "use_case_title", "department", "requestor", "product_owner",
+    "saved_time_hours_per_year", "cost_saving", "revenue_increase",
+    "comments", "attachments",
+  ]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -277,6 +297,10 @@ export default function ChatPage() {
                     ...partial.fields,
                     ...Object.fromEntries(
                       Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
+                    ),
+                    // Direct-input fields are never overwritten by AI extraction
+                    ...Object.fromEntries(
+                      Object.entries(prev?.fields ?? {}).filter(([k]) => DIRECT_INPUT_KEYS.has(k))
                     ),
                   },
                 }));
@@ -369,6 +393,23 @@ export default function ChatPage() {
     );
   }
 
+  function handleDirectFieldChange(key: string, value: string) {
+    setDirectFields((prev) => ({ ...prev, [key]: value }));
+
+    // Update completeness optimistically: re-read from backend after debounce
+    if (directFieldDebounceRef.current) clearTimeout(directFieldDebounceRef.current);
+    directFieldDebounceRef.current = setTimeout(async () => {
+      if (!sessionId) return;
+      const merged = await patchDirectFields(sessionId, { [key]: value });
+      if (merged) {
+        setRsPartial((prev) => ({
+          completeness: merged.completeness,
+          fields: prev?.fields ?? {},
+        }));
+      }
+    }, 600);
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || isStreaming) return;
@@ -417,6 +458,10 @@ export default function ChatPage() {
                   ...Object.fromEntries(
                     Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
                   ),
+                  // Direct-input fields are never overwritten by AI extraction
+                  ...Object.fromEntries(
+                    Object.entries(prev?.fields ?? {}).filter(([k]) => DIRECT_INPUT_KEYS.has(k))
+                  ),
                 },
               }));
             }
@@ -439,7 +484,9 @@ export default function ChatPage() {
         setActiveTab("Analysis");
       },
       // onFieldUpdate — mid-stream field fill from the pre-stream quick extract
+      // Skip direct-input fields — those are set by the user, not the AI.
       (key, value) => {
+        if (DIRECT_INPUT_KEYS.has(key)) return;
         setRsPartial((prev) => ({
           completeness: prev?.completeness ?? 0,
           fields: {
@@ -485,6 +532,7 @@ export default function ChatPage() {
     setSrsData(null);
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
+    setDirectFields({});
     setHistoryOpen(false);
 
     // Restore Preview panel and check for completed analysis in parallel
@@ -493,7 +541,17 @@ export default function ChatPage() {
       getAnalysis(sid),
       getFirestoreData(sid),
     ]);
-    if (savedDiscovery) setRsPartial(savedDiscovery);
+    if (savedDiscovery) {
+      setRsPartial(savedDiscovery);
+      // Restore direct fields from saved state
+      const restored: Record<string, string> = {};
+      for (const key of ["use_case_title", "department", "requestor", "product_owner",
+        "saved_time_hours_per_year", "cost_saving", "revenue_increase", "comments", "attachments"]) {
+        const entry = savedDiscovery.fields[key];
+        if (entry?.filled && entry.value) restored[key] = entry.value;
+      }
+      setDirectFields(restored);
+    }
     if (fsData) setSrsData(fsData);
     if (analysisResult.status === "complete" && analysisResult.analysis) {
       setFinalAnalysis(analysisResult.analysis);
@@ -514,6 +572,7 @@ export default function ChatPage() {
     setSessionId(null);
     setRsPartial(null);
     setSrsData(null);
+    setDirectFields({});
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
     setHistoryOpen(false);
@@ -815,6 +874,8 @@ export default function ChatPage() {
           activeTab={activeTab}
           onTabChange={setActiveTab}
           rsPartial={rsPartial}
+          directFields={directFields}
+          onDirectFieldChange={handleDirectFieldChange}
           sessionId={sessionId}
           onGenerateFull={handleGenerateFull}
           srsData={srsData}

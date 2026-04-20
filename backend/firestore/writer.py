@@ -235,8 +235,82 @@ def upsert_discovery_state(session_id: str, discovery: dict) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Direct-input fields — set by the user in the UI, never overwritten by AI
+# ---------------------------------------------------------------------------
+
+# Required fields for completeness calculation (mirrors FIELD_SCHEMA in discovery_agent.py)
+_REQUIRED_FIELDS: list[str] = [
+    "use_case_title", "department", "requestor", "product_owner",
+    "process_as_is", "process_context", "trigger", "purpose_to_be",
+    "impacted_users", "add_value", "time_criticality", "strategic_impact",
+    "systems_and_tools", "document_types", "data_security_classification",
+    "solution_type",
+]
+
+
+def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
+    """Merge *direct* key-value pairs into *state* in-place and recompute completeness."""
+    fields = state.setdefault("fields", {})
+    for key, value in direct.items():
+        if value is not None and str(value).strip():
+            fields[key] = {"filled": True, "value": value}
+        elif key in fields and not fields[key].get("filled"):
+            # Keep null entry consistent
+            fields[key] = {"filled": False, "value": None}
+    filled_required = sum(
+        1 for k in _REQUIRED_FIELDS if fields.get(k, {}).get("filled", False)
+    )
+    state["completeness"] = round((filled_required / len(_REQUIRED_FIELDS)) * 100)
+
+
+def upsert_direct_fields(session_id: str, fields: dict[str, str]) -> None:
+    """Persist user-entered direct field values for *session_id*.
+
+    Stored separately from AI-extracted state so subsequent AI extraction
+    runs never erase values the user typed manually.
+    Uses a read-modify-write so earlier direct values are not lost.
+    """
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    existing_json = snap.to_dict().get("direct_fields_json") if snap.exists else None
+    try:
+        existing: dict[str, str] = json.loads(existing_json) if existing_json else {}
+    except Exception:
+        existing = {}
+    existing.update({k: v for k, v in fields.items() if v is not None})
+    ref.set(
+        {
+            "session_id": session_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "direct_fields_json": json.dumps(existing, ensure_ascii=False),
+        },
+        merge=True,
+    )
+
+
+def get_direct_fields(session_id: str) -> dict[str, str]:
+    """Return the directly-set field values for *session_id* (empty dict if none)."""
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    if not snap.exists:
+        return {}
+    json_str = snap.to_dict().get("direct_fields_json")
+    if not json_str:
+        return {}
+    try:
+        return json.loads(json_str)
+    except Exception:
+        return {}
+
+
 def get_discovery_state(session_id: str) -> dict | None:
     """Return the last saved discovery state for *session_id*, or None.
+
+    Merges directly-set fields on top of AI-extracted fields so the caller
+    always gets a unified view.  Direct fields are never overwritten by AI.
 
     Returns the parsed dict: {completeness, fields, missing_priority},
     or None if nothing has been saved yet.
@@ -246,13 +320,26 @@ def get_discovery_state(session_id: str) -> dict | None:
     snap = ref.get()
     if not snap.exists:
         return None
-    json_str = snap.to_dict().get("discovery_state_json")
-    if not json_str:
+    data = snap.to_dict()
+    ai_json = data.get("discovery_state_json")
+    direct_json = data.get("direct_fields_json")
+
+    if not ai_json and not direct_json:
         return None
+
     try:
-        return json.loads(json_str)
+        state: dict = json.loads(ai_json) if ai_json else {"completeness": 0, "fields": {}, "missing_priority": []}
     except Exception:
-        return None
+        state = {"completeness": 0, "fields": {}, "missing_priority": []}
+
+    if direct_json:
+        try:
+            direct: dict[str, str] = json.loads(direct_json)
+            _merge_direct_fields(state, direct)
+        except Exception:
+            pass
+
+    return state
 
 
 def set_finalization_error(session_id: str) -> None:

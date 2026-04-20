@@ -118,6 +118,31 @@ export interface RsPartialData {
 }
 
 /**
+ * Directly set field values for a session, bypassing AI extraction.
+ * These values are stored separately and survive subsequent AI extractions.
+ * Returns the merged state (direct + AI) with updated completeness.
+ */
+export async function patchDirectFields(
+  sessionId: string,
+  fields: Record<string, string>,
+): Promise<RsPartialData | null> {
+  try {
+    const res = await fetch(
+      `${API_URL}/discovery/${encodeURIComponent(sessionId)}/fields`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fields }),
+      },
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetch the last persisted 22-field discovery state for a session.
  * Used when loading a historical session to restore the Preview panel instantly
  * without re-running Gemini extraction.
