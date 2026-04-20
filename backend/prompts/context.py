@@ -20,9 +20,8 @@ You are analyzing a business requirements conversation between a user and an AI 
 Your task is to extract all information that has been confirmed by the user and map it to
 the 22 required IT use case form fields listed below.
 
-IMPORTANT — the following fields are filled directly by the user in the UI form and must
-NOT be extracted from the conversation. Always return them as {"filled": false, "value": null}:
-  use_case_title, department, requestor, product_owner,
+IMPORTANT — the following fields contain numeric/financial data that must NOT be guessed
+from conversation. Always return them as {"filled": false, "value": null}:
   saved_time_hours_per_year, cost_saving, revenue_increase, comments, attachments.
 
 Return ONLY valid JSON — no markdown fences, no commentary, no explanation.

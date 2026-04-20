@@ -226,11 +226,15 @@ export default function ChatPage() {
   // Debounce timer ref for persisting direct fields to the backend
   const directFieldDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fields filled directly by the user — AI extraction must not overwrite them.
+  // Fields that must never be AI-extracted (numeric/financial — user must type them).
   const DIRECT_INPUT_KEYS = new Set([
-    "use_case_title", "department", "requestor", "product_owner",
     "saved_time_hours_per_year", "cost_saving", "revenue_increase",
     "comments", "attachments",
+  ]);
+
+  // Fields the AI can *suggest* but only if the user hasn't typed a value yet.
+  const SUGGESTABLE_DIRECT_KEYS = new Set([
+    "use_case_title", "department", "requestor", "product_owner",
   ]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -308,12 +312,25 @@ export default function ChatPage() {
                     ...Object.fromEntries(
                       Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
                     ),
-                    // Direct-input fields are never overwritten by AI extraction
+                    // Preserve fields the user has already typed (direct-input keys + non-empty directFields)
                     ...Object.fromEntries(
-                      Object.entries(prev?.fields ?? {}).filter(([k]) => DIRECT_INPUT_KEYS.has(k))
+                      Object.entries(prev?.fields ?? {}).filter(
+                        ([k]) => DIRECT_INPUT_KEYS.has(k) || (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== "")
+                      )
                     ),
                   },
                 }));
+
+                // Pre-fill suggestable fields if user hasn't typed yet
+                setDirectFields((prevDirect) => {
+                  const updates: Record<string, string> = {};
+                  for (const k of SUGGESTABLE_DIRECT_KEYS) {
+                    if (!(prevDirect[k] ?? "").trim() && partial.fields[k]?.filled && partial.fields[k]?.value) {
+                      updates[k] = partial.fields[k].value as string;
+                    }
+                  }
+                  return Object.keys(updates).length ? { ...prevDirect, ...updates } : prevDirect;
+                });
               }
               if (fsData) setSrsData(fsData);
               setIsExtracting(false);
@@ -468,12 +485,25 @@ export default function ChatPage() {
                   ...Object.fromEntries(
                     Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
                   ),
-                  // Direct-input fields are never overwritten by AI extraction
+                  // Preserve fields the user has already typed (direct-input keys + non-empty directFields)
                   ...Object.fromEntries(
-                    Object.entries(prev?.fields ?? {}).filter(([k]) => DIRECT_INPUT_KEYS.has(k))
+                    Object.entries(prev?.fields ?? {}).filter(
+                      ([k]) => DIRECT_INPUT_KEYS.has(k) || (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== "")
+                    )
                   ),
                 },
               }));
+
+              // Pre-fill suggestable fields if user hasn't typed yet
+              setDirectFields((prevDirect) => {
+                const updates: Record<string, string> = {};
+                for (const k of SUGGESTABLE_DIRECT_KEYS) {
+                  if (!(prevDirect[k] ?? "").trim() && partial.fields[k]?.filled && partial.fields[k]?.value) {
+                    updates[k] = partial.fields[k].value as string;
+                  }
+                }
+                return Object.keys(updates).length ? { ...prevDirect, ...updates } : prevDirect;
+              });
             }
             if (fsData) setSrsData(fsData);
             setIsExtracting(false);
@@ -494,7 +524,7 @@ export default function ChatPage() {
         setActiveTab("Analysis");
       },
       // onFieldUpdate — mid-stream field fill from the pre-stream quick extract
-      // Skip direct-input fields — those are set by the user, not the AI.
+      // Skip financial direct-input fields. Suggestable fields pre-fill only if user hasn't typed.
       (key, value) => {
         if (DIRECT_INPUT_KEYS.has(key)) return;
         setRsPartial((prev) => ({
@@ -504,6 +534,9 @@ export default function ChatPage() {
             [key]: { filled: true, value },
           },
         }));
+        if (SUGGESTABLE_DIRECT_KEYS.has(key) && !(directFields[key] ?? "").trim()) {
+          setDirectFields((prev) => ({ ...prev, [key]: value }));
+        }
       },
     );
   }
