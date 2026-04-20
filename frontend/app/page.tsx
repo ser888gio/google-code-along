@@ -263,7 +263,17 @@ export default function ChatPage() {
             getFirestoreData(sessionId),
           ]).then(([partial, fsData]) => {
             if (nonce === extractNonceRef.current) {
-              if (partial) setRsPartial(partial);
+              if (partial) {
+                setRsPartial((prev) => ({
+                  completeness: partial.completeness,
+                  fields: {
+                    ...partial.fields,
+                    ...Object.fromEntries(
+                      Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
+                    ),
+                  },
+                }));
+              }
               if (fsData) setSrsData(fsData);
               setIsExtracting(false);
             }
@@ -361,9 +371,6 @@ export default function ChatPage() {
 
     addMessage("user", text);
     setIsStreaming(true);
-    // Start shimmering placeholders immediately — stays true until the
-    // post-turn full /context/extract finishes in onDone.
-    setIsExtracting(true);
     const assistantId = addMessage("assistant", "", true);
 
     // Capture the session ID synchronously from the SSE stream.
@@ -386,6 +393,7 @@ export default function ChatPage() {
 
         // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
+          setIsExtracting(true);
           const nonce = ++extractNonceRef.current;
           const [partial, fsData] = await Promise.all([
             extractContext(capturedSessionId),
@@ -393,7 +401,18 @@ export default function ChatPage() {
           ]);
           // Only apply if a newer turn hasn't already superseded this one
           if (nonce === extractNonceRef.current) {
-            if (partial) setRsPartial(partial);
+            if (partial) {
+              setRsPartial((prev) => ({
+                completeness: partial.completeness,
+                fields: {
+                  ...partial.fields,
+                  // Keep any field already marked filled by SSE events
+                  ...Object.fromEntries(
+                    Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
+                  ),
+                },
+              }));
+            }
             if (fsData) setSrsData(fsData);
             setIsExtracting(false);
           }
