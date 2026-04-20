@@ -179,7 +179,14 @@ function RsDocumentPanel({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "welcome",
+      role: "assistant",
+      text: "Welcome to your Business Analyst session. I'm your AI consultant — I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
+      streaming: false,
+    },
+  ]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -495,8 +502,15 @@ export default function ChatPage() {
     }
   }
 
+  const WELCOME_MESSAGE: Message = {
+    id: "welcome",
+    role: "assistant",
+    text: "Welcome to your Business Analyst session. I'm your AI consultant — I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
+    streaming: false,
+  };
+
   function newConversation() {
-    setMessages([]);
+    setMessages([WELCOME_MESSAGE]);
     setSessionId(null);
     setRsPartial(null);
     setSrsData(null);
@@ -662,11 +676,6 @@ export default function ChatPage() {
 
         {/* Message thread */}
         <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-          {messages.length === 0 && (
-            <p className="pt-6 text-center text-xs text-gray-400">
-              Start a conversation to build your specification.
-            </p>
-          )}
           {messages.map((msg) => (
             <MessageBubble key={msg.id} msg={msg} />
           ))}
