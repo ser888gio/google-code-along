@@ -76,7 +76,7 @@ const SECTIONS: Section[] = [
     title: "Additional",
     fields: [
       { key: "comments",    label: "Comments",    required: false, directInput: true, multiline: true },
-      { key: "attachments", label: "Attachments", required: false, directInput: true },
+      { key: "attachments", label: "Attachments", required: false, directInput: true, multiline: true },
     ],
   },
 ];

@@ -7,14 +7,21 @@ def _client() -> storage.Client:
     return storage.Client()
 
 
+def get_bucket_name(bucket_name: str | None = None) -> str:
+    """Resolve the configured GCS bucket name."""
+    return (bucket_name or os.getenv("BUCKET_NAME") or BUCKET_NAME).strip().strip("/")
+
+
 def list_files(prefix: str = "", bucket_name: str = BUCKET_NAME) -> list[str]:
     """List all blob names under *prefix* in the bucket."""
+    bucket_name = get_bucket_name(bucket_name)
     blobs = _client().list_blobs(bucket_name, prefix=prefix)
     return [blob.name for blob in blobs]
 
 
 def read_file(path: str, bucket_name: str = BUCKET_NAME) -> bytes:
     """Download a blob and return its raw bytes."""
+    bucket_name = get_bucket_name(bucket_name)
     return _client().bucket(bucket_name).blob(path).download_as_bytes()
 
 
@@ -31,9 +38,7 @@ def write_file(
     content_type: str = "application/octet-stream",
     bucket_name: str | None = None,  # Change default to None
 ) -> str:
-    # Fallback to the environment variable if no name is provided
-    if bucket_name is None:
-        bucket_name = os.getenv("BUCKET_NAME", "").strip().strip("/")
+    bucket_name = get_bucket_name(bucket_name)
 
     if isinstance(data, str):
         data = data.encode("utf-8")
@@ -46,9 +51,11 @@ def write_file(
 
 def delete_file(path: str, bucket_name: str = BUCKET_NAME) -> None:
     """Delete the blob at *path*."""
+    bucket_name = get_bucket_name(bucket_name)
     _client().bucket(bucket_name).blob(path).delete()
 
 
 def file_exists(path: str, bucket_name: str = BUCKET_NAME) -> bool:
     """Return True if the blob exists."""
+    bucket_name = get_bucket_name(bucket_name)
     return _client().bucket(bucket_name).blob(path).exists()

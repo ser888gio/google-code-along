@@ -35,7 +35,7 @@ from firestore import (
     upsert_discovery_state,
     upsert_srs_fields,
 )
-from gcs import write_file
+from gcs import get_bucket_name, list_files, write_file
 from generation import (
     compile_rs_from_session,
     compile_srs_json_from_session,
@@ -152,6 +152,16 @@ class UploadResponse(BaseModel):
     filename: str
 
 
+class SessionUpload(BaseModel):
+    filename: str
+    gcs_path: str
+
+
+class SessionUploadsResponse(BaseModel):
+    session_id: str
+    files: list[SessionUpload]
+
+
 @app.post("/upload", response_model=UploadResponse)
 async def upload_file(
     file: UploadFile = File(...),
@@ -173,6 +183,34 @@ async def upload_file(
     )
     logger.debug(f"File uploaded to GCS: {gcs_path}")
     return UploadResponse(gcs_path=gcs_path, filename=file.filename)
+
+
+@app.get("/uploads/{session_id}", response_model=SessionUploadsResponse)
+async def session_uploads(session_id: str):
+    """List files stored in GCS under sessions/{session_id}/."""
+    prefix = f"sessions/{session_id}/"
+    try:
+        paths = list_files(prefix=prefix)
+    except Exception as exc:
+        logger.error(
+            f"Failed to list session uploads: session_id={session_id} error={exc}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Could not list uploaded files for this session.",
+        ) from exc
+
+    bucket_name = get_bucket_name()
+    files = [
+        SessionUpload(
+            filename=path.split("/")[-1],
+            gcs_path=f"gs://{bucket_name}/{path}",
+        )
+        for path in paths
+        if path.split("/")[-1]
+    ]
+    return SessionUploadsResponse(session_id=session_id, files=files)
 
 
 @app.post("/chat", response_model=ChatResponse)

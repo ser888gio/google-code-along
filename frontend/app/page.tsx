@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, getDiscoveryState, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, patchDirectFields, RsPartialData, SrsData, SessionSummary, FinalAnalysis } from "../lib/api";
+import { streamChat, extractContext, getDiscoveryState, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, getSessionUploads, patchDirectFields, RsPartialData, SrsData, SessionSummary, FinalAnalysis, UploadedFile } from "../lib/api";
 import { useAudioRecorder } from "../lib/useAudioRecorder";
 import { useAudioPlayer } from "../lib/useAudioPlayer";
 import { useWebSocket, WsServerMessage } from "../lib/useWebSocket";
@@ -415,6 +415,12 @@ export default function ChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [input]);
 
+  useEffect(() => {
+    if (!sessionId) return;
+    refreshSessionUploads(sessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+
   function addMessage(role: Role, text: string, streaming = false): string {
     const id = crypto.randomUUID();
     setMessages((prev) => [...prev, { id, role, text, streaming }]);
@@ -431,6 +437,31 @@ export default function ChatPage() {
     setMessages((prev) =>
       prev.map((m) => (m.id === id ? { ...m, streaming: false } : m))
     );
+  }
+
+  function formatUploadAttachments(files: UploadedFile[]): string {
+    return files.map((file) => file.gcs_path).join("\n");
+  }
+
+  async function refreshSessionUploads(sid: string, fallbackFiles: UploadedFile[] = []) {
+    const files = await getSessionUploads(sid);
+    const visibleFiles = files.length > 0 ? files : fallbackFiles;
+    if (visibleFiles.length === 0) return;
+
+    const attachments = formatUploadAttachments(visibleFiles);
+    setDirectFields((prev) =>
+      prev.attachments === attachments ? prev : { ...prev, attachments }
+    );
+
+    const merged = await patchDirectFields(sid, { attachments });
+    if (merged) setRsPartial(merged);
+  }
+
+  async function handleFileUploaded(file: UploadedFile) {
+    if (sessionId) {
+      await refreshSessionUploads(sessionId, [file]);
+    }
+    setUploadOpen(false);
   }
 
   function handleDirectFieldChange(key: string, value: string) {
@@ -910,7 +941,7 @@ export default function ChatPage() {
                   ✕
                 </button>
               </div>
-              <FileUpload sessionId={sessionId} onUploaded={() => { setUploadOpen(false); }} />
+              <FileUpload sessionId={sessionId} onUploaded={handleFileUploaded} />
             </div>
           </div>
         )}

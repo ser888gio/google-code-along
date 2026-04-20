@@ -10,6 +10,11 @@ export interface DocumentResponse {
   ready: boolean;
 }
 
+export interface UploadedFile {
+  filename: string;
+  gcs_path: string;
+}
+
 /**
  * Send a message and stream the response via SSE.
  *
@@ -238,7 +243,7 @@ export async function uploadFile(
   file: File,
   sessionId: string,
   onProgress?: (percent: number) => void
-): Promise<{ gcs_path: string; filename: string }> {
+): Promise<UploadedFile> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("session_id", sessionId);
@@ -265,6 +270,20 @@ export async function uploadFile(
     xhr.onerror = () => reject(new Error("Network error during upload"));
     xhr.send(formData);
   });
+}
+
+/**
+ * List files stored in GCS for a session.
+ */
+export async function getSessionUploads(sessionId: string): Promise<UploadedFile[]> {
+  try {
+    const res = await fetch(`${API_URL}/uploads/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return [];
+    const body: { session_id: string; files: UploadedFile[] } = await res.json();
+    return body.files ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /**
