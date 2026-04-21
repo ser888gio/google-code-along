@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { streamChat, extractContext, getDiscoveryState, downloadPdf, getFirestoreData, getSessions, getHistory, getAnalysis, getSessionUploads, patchDirectFields, RsPartialData, SrsData, SessionSummary, FinalAnalysis, UploadedFile } from "../lib/api";
+import { streamChat, extractContext, getDiscoveryState, downloadPdf, downloadRsTemplateDocx, getFirestoreData, getSessions, getHistory, getAnalysis, getSessionUploads, patchDirectFields, RsPartialData, SrsData, SessionSummary, FinalAnalysis, UploadedFile } from "../lib/api";
 import { useAudioRecorder } from "../lib/useAudioRecorder";
 import { useAudioPlayer } from "../lib/useAudioPlayer";
 import { useWebSocket, WsServerMessage } from "../lib/useWebSocket";
@@ -593,7 +593,7 @@ export default function ChatPage() {
   async function handleGenerateFull() {
     if (!sessionId) return;
     try {
-      await downloadPdf(sessionId);
+      await downloadRsTemplateDocx(sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate document");
     }

@@ -39,6 +39,7 @@ from generation import (
     compile_rs_from_session,
     compile_srs_json_from_session,
     markdown_to_pdf,
+    rs_template_to_docx,
     srs_json_to_docx,
 )
 from google.adk.agents.live_request_queue import LiveRequestQueue  
@@ -538,6 +539,39 @@ async def download_docx(req: SessionRef):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={
             "Content-Disposition": "attachment; filename=requirement_specification.docx"
+        },
+    )
+
+
+@app.post("/document/rs-template/docx")
+async def download_rs_template_docx(req: SessionRef):
+    """Generate a Word doc from the 22 RSLiveTemplate fields, save to GCS, and return for download."""
+    loop = asyncio.get_running_loop()
+    state = await loop.run_in_executor(None, get_discovery_state, req.session_id)
+
+    fields: dict = {}
+    if state:
+        fields = state.get("fields", {})
+
+    docx_bytes = rs_template_to_docx(fields)
+
+    gcs_path = f"{GCS_PREFIX_SESSIONS}/{req.session_id}/rs_template.docx"
+    await loop.run_in_executor(
+        None,
+        lambda: write_file(
+            gcs_path,
+            docx_bytes,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+    )
+    logger.info(f"RS template DOCX saved to GCS: {gcs_path}")
+
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={
+            "Content-Disposition": "attachment; filename=rs_template.docx",
+            "X-GCS-Path": f"gs://{get_bucket_name()}/{gcs_path}",
         },
     )
 

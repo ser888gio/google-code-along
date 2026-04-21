@@ -87,6 +87,30 @@ export async function streamChat(
 }
 
 /**
+ * Generate a Word doc from the 22 RSLiveTemplate fields, save to GCS, and trigger download.
+ */
+export async function downloadRsTemplateDocx(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_URL}/document/rs-template/docx`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "rs_template.docx";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Trigger Word document download by posting to /document/docx and saving the blob.
  */
 export async function downloadPdf(sessionId: string): Promise<void> {
