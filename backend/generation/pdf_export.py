@@ -8,6 +8,7 @@ bullet lists, and requirement IDs (FR-001, NFR-001).
 
 import io
 import re
+from xml.sax.saxutils import escape
 
 from config import REQ_ID_PATTERN as _REQ_ID_PATTERN
 from reportlab.lib.enums import TA_CENTER
@@ -90,6 +91,7 @@ def _build_styles() -> dict[str, ParagraphStyle]:
 
 def _inline_markdown(text: str) -> str:
     """Convert inline markdown (bold, italic) to ReportLab XML tags."""
+    text = escape(text)
     # Bold: **text** or __text__
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
