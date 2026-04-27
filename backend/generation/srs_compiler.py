@@ -6,12 +6,15 @@ Discovery Session structure, ready to be rendered into a Word document.
 """
 
 import json
+import logging
 
 from google import genai
 
 from config import GOOGLE_API_KEY, MODEL_SRS_COMPILER
 from google.adk.sessions import InMemorySessionService, Session
 from utils import extract_conversation_text
+
+logger = logging.getLogger(__name__)
 
 SRS_EXTRACTION_PROMPT = """\
 You are an expert technical writer. Given the following conversation between a user and an \
@@ -79,7 +82,7 @@ async def compile_srs_json_from_session(
         return None
 
     try:
-        prompt = SRS_EXTRACTION_PROMPT.format(conversation=conversation_text)
+        prompt = SRS_EXTRACTION_PROMPT.replace("{conversation}", conversation_text)
         response = _genai_client.models.generate_content(
             model=MODEL_SRS_COMPILER, contents=prompt
         )
@@ -94,4 +97,5 @@ async def compile_srs_json_from_session(
 
         return json.loads(raw)
     except Exception:
+        logger.error("SRS compilation failed", exc_info=True)
         return None
