@@ -76,6 +76,7 @@ def validate_config(*, strict: bool | None = None) -> list[str]:
         if not (_PRODUCTION_REQUIRED_CONFIG[name] or "").strip()
     ]
 
+
 # Audio model for bidirectional voice streaming via Live API
 MODEL_AUDIO = "gemini-3.1-flash-live-preview"
 

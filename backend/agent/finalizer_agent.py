@@ -314,7 +314,7 @@ async def save_final_analysis(session_id: str, analysis: dict) -> str:
 
 FINAL_ANALYSIS_SCHEMA = {
     "use_case_form": {
-        # All 22 fields from FIELD_SCHEMA in discovery_agent.py
+        # All 22 fields from FIELD_SCHEMA in field_schema.py
     },
     "technology_recommendation": {
         "primary": str,  # e.g. "Microsoft Power Platform"

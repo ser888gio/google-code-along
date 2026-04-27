@@ -8,11 +8,8 @@ import uuid
 import weakref
 from datetime import datetime, timezone
 
-from agent import rs_agent, audio_agent
+from agent import audio_agent, rs_agent
 from agent.discovery_agent import (
-    FIELD_LABELS,
-    REQUIRED_FIELDS,
-    FIELD_SCHEMA,
     extract_discovery_fields,
     initialize_workflow_state,
     is_not_applicable_allowed,
@@ -48,12 +45,12 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from starlette.requests import Request
+from field_schema import FIELD_LABELS, FIELD_SCHEMA, REQUIRED_FIELDS
 from firestore import (
     append_conversation_turn,
-    get_direct_fields,
     get_conversation_history,
     get_deferred_fields,
+    get_direct_fields,
     get_discovery_state,
     get_final_analysis,
     get_srs_fields,
@@ -64,8 +61,8 @@ from firestore import (
     upsert_deferred_fields,
     upsert_direct_fields,
     upsert_discovery_state,
-    upsert_workflow_state,
     upsert_srs_fields,
+    upsert_workflow_state,
 )
 from gcs import get_bucket_name, list_files, write_file
 from generation import (
@@ -92,6 +89,7 @@ from google.genai.types import (
 from logger import get_logger, setup_logging
 from pydantic import BaseModel
 from session_bridge import SessionBridge
+from starlette.requests import Request
 from utils import extract_conversation_text, sanitize_gcs_filename, sanitize_gcs_segment
 
 setup_logging()

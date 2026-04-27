@@ -25,7 +25,6 @@ import time
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
 from field_schema import (
     EMPTY_FIELDS,
-    FIELD_LABELS,
     FIELD_SCHEMA,
     OPTIONAL_FIELDS,
     REQUIRED_FIELDS,

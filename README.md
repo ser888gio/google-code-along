@@ -6,19 +6,37 @@ An interactive AI persona that guides business users through defining their need
 
 ## Features
 
-- **Conversational Discovery:** Chat with an expert AI business consultant (Google ADK + Gemini 1.5 Pro) to map out "As-Is" and "To-Be" specifications.
-- **Automated Diagramming:** Generates BPMN and Dataflow diagrams on the fly from conversational context using Mermaid.js.
-- **Document Export:** Compiles the live session context into standard Document formats (PDF, Word).
-- **Live Sync & Context:** Extracts core project context continuously and syncs document sections in real-time using Firestore.
-- **Document Uploads:** Ingest specific user context by uploading source documents to Google Cloud Storage for multimodal processing.
+- **Conversational Discovery:** Chat with an expert AI business consultant (Google ADK + Gemini 2.5 Pro) to map out "As-Is" and "To-Be" specifications.
+- **Live RS Template:** A sidebar panel tracks and fills all 22 RS fields across 6 sections in real time as the conversation progresses.
+- **Automated Diagramming:** Generates BPMN and Dataflow diagrams from conversational context, rendered client-side with Mermaid.js.
+- **Document Export:** Compiles the session into standard PDF and Word (DOCX) outputs.
+- **Firestore Persistence:** Session state and RS fields are synced continuously to Firestore so progress survives page reloads.
+- **Document Uploads:** Upload source documents to Google Cloud Storage for multimodal context extraction via Gemini.
 
 ## Structure
 
 ```text
 /
-├── frontend/   # Next.js 16 app with React 19, Tailwind CSS, & Mermaid
-├── backend/    # Python FastAPI with Google ADK, agents, compilers, and diagrams
-└── docs/       # Project planning and active to-do lists
+├── frontend/                              # Next.js app — React, Tailwind CSS, Mermaid.js
+│   └── app/
+│       ├── components/RsLiveTemplate.tsx  # live RS sidebar component
+│       └── generated/rsSchema.ts         # AUTO-GENERATED — do not edit by hand
+├── backend/                              # Python — Google ADK, FastAPI, Gemini API
+│   ├── field_schema.py                   # canonical RS field definitions (single source of truth)
+│   └── scripts/generate_frontend_schema.py  # regenerates frontend/app/generated/rsSchema.ts
+└── docs/                                 # project planning documents
+```
+
+## RS Field Schema
+
+All 22 RS fields (across 6 sections) are defined once in `backend/field_schema.py`. The frontend TypeScript types and constants are generated from this file — **never edit `frontend/app/generated/rsSchema.ts` by hand**.
+
+To regenerate after changing `field_schema.py`:
+
+```bash
+cd backend
+.venv/Scripts/python scripts/generate_frontend_schema.py   # Windows
+# .venv/bin/python scripts/generate_frontend_schema.py    # Mac/Linux
 ```
 
 ## Getting Started
@@ -27,18 +45,23 @@ An interactive AI persona that guides business users through defining their need
 
 Enable the following APIs in your GCP project:
 
-- Vertex AI API
 - Cloud Storage API
-- Discovery Engine API (for Vertex AI Search)
-- Firestore API (if utilizing live document tracking)
+- Firestore API
+- Gemini API (via `GOOGLE_API_KEY`)
 
 ### Backend
 
+The backend requires Python 3.12. Always use the project's virtual environment — never the global interpreter.
+
 ```bash
 cd backend
-pip install -r requirements.txt
-cp .env.example .env   # Fill in your GCP project details, GCS bucket out, etc.
-uvicorn main:app --reload
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt   # Windows
+# .venv/bin/python -m pip install -r requirements.txt    # Mac/Linux
+
+cp .env.example .env   # fill in GOOGLE_API_KEY, GCS bucket, Firestore project, etc.
+
+.venv/Scripts/python -m uvicorn main:app --reload
 ```
 
 ### Frontend
@@ -46,91 +69,20 @@ uvicorn main:app --reload
 ```bash
 cd frontend
 npm install
-cp .env.local.example .env.local   # Fill in NEXT_PUBLIC_API_URL
+cp .env.local.example .env.local   # fill in NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL
 npm run dev
 ```
 
 ## Running Tests
 
-There are extensive tests in both the backend and frontend.
-
-**Backend tests:**
+**Backend:**
 
 ```bash
 cd backend
-pytest tests/
+.venv/Scripts/python -m pytest tests/
 ```
 
-**Frontend tests:**
-
-```bash
-cd frontend
-npm run test
-```
-# AI Business Consultant — RS Generator
-
-Monorepo for the AI-Assisted Requirement Specification Generator.
-
-An interactive AI persona that guides business users through defining their needs and automatically generates coherent, standardized Requirement Specification (RS) documents, complete with auto-generated system diagrams.
-
-## Features
-
-- **Conversational Discovery:** Chat with an expert AI business consultant (Google ADK + Gemini 1.5 Pro) to map out "As-Is" and "To-Be" specifications.
-- **Automated Diagramming:** Generates BPMN and Dataflow diagrams on the fly from conversational context using Mermaid.js.
-- **Document Export:** Compiles the live session context into standard Document formats (PDF, Word).
-- **Live Sync & Context:** Extracts core project context continuously and syncs document sections in real-time using Firestore.
-- **Document Uploads:** Ingest specific user context by uploading source documents to Google Cloud Storage for multimodal processing.
-
-## Structure
-
-```text
-/
-├── frontend/   # Next.js 16 app with React 19, Tailwind CSS, & Mermaid
-├── backend/    # Python FastAPI with Google ADK, agents, compilers, and diagrams
-└── docs/       # Project planning and active to-do lists
-```
-
-## Getting Started
-
-### Prerequisites
-
-Enable the following APIs in your GCP project:
-
-- Vertex AI API
-- Cloud Storage API
-- Discovery Engine API (for Vertex AI Search)
-- Firestore API (if utilizing live document tracking)
-
-### Backend
-
-```bash
-cd backend
-pip install -r requirements.txt
-cp .env.example .env   # Fill in your GCP project details, GCS bucket out, etc.
-uvicorn main:app --reload
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-cp .env.local.example .env.local   # Fill in NEXT_PUBLIC_API_URL
-npm run dev
-```
-
-## Running Tests
-
-There are extensive tests in both the backend and frontend.
-
-**Backend tests:**
-
-```bash
-cd backend
-pytest tests/
-```
-
-**Frontend tests:**
+**Frontend:**
 
 ```bash
 cd frontend

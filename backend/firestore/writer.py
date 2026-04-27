@@ -32,8 +32,11 @@ _firestore_client: firestore.Client | None = None
 def _client() -> firestore.Client:
     global _firestore_client
     if _firestore_client is None:
+        require_config_value("GCP_PROJECT", GCP_PROJECT, "using Firestore")
         require_config_value("FIRESTORE_COLLECTION", _COLLECTION, "using Firestore")
-        require_config_value("FIRESTORE_DATABASE", FIRESTORE_DATABASE, "using Firestore")
+        require_config_value(
+            "FIRESTORE_DATABASE", FIRESTORE_DATABASE, "using Firestore"
+        )
         _firestore_client = firestore.Client(
             project=GCP_PROJECT, database=FIRESTORE_DATABASE
         )
@@ -279,6 +282,7 @@ def upsert_discovery_state(session_id: str, discovery: dict) -> None:
 # ---------------------------------------------------------------------------
 # Direct-input fields — set by the user in the UI, never overwritten by AI
 # ---------------------------------------------------------------------------
+
 
 def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
     """Merge *direct* key-value pairs into *state* in-place and recompute completeness."""

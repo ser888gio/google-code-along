@@ -12,7 +12,7 @@ DISCOVERY_EXTRACTION_PROMPT — new 22-field extractor used by discovery_agent
 # TODO: finalize field descriptions below once the exact PDF form field labels
 #       are confirmed with the business team.
 # TODO: tune the completeness scoring rules once we know which fields are truly
-#       blocking vs. nice-to-have (see FIELD_SCHEMA in discovery_agent.py).
+#       blocking vs. nice-to-have (see FIELD_SCHEMA in field_schema.py).
 
 DISCOVERY_EXTRACTION_PROMPT = """\
 You are analyzing a business requirements conversation between a user and an AI Business Analyst.

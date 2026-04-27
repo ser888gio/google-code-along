@@ -1,4 +1,5 @@
-from config import GCS_BUCKET_NAME as BUCKET_NAME, require_config_value
+from config import GCS_BUCKET_NAME as BUCKET_NAME
+from config import require_config_value
 from google.cloud import storage
 
 _storage_client: storage.Client | None = None
