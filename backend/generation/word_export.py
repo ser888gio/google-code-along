@@ -10,6 +10,7 @@ import io
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import RGBColor
+from field_schema import RS_TEMPLATE_SECTIONS
 
 
 def _set_heading_color(paragraph, color: tuple[int, int, int]):
@@ -43,68 +44,6 @@ def _add_placeholder(doc: Document, text: str):
         doc.add_paragraph(content)
 
 
-_RS_TEMPLATE_SECTIONS = [
-    (
-        1,
-        "Identity & Current State",
-        [
-            ("use_case_title", "Use Case Title (EN)"),
-            ("department", "Customer Department"),
-            ("requestor", "Requestor"),
-            ("product_owner", "Product Owner"),
-            ("process_as_is", "Process Description / As-Is"),
-            ("process_context", "Process Context"),
-            ("trigger", "Trigger"),
-        ],
-    ),
-    (
-        2,
-        "Target State",
-        [
-            ("purpose_to_be", "Purpose / To-Be"),
-        ],
-    ),
-    (
-        3,
-        "Value & ROI",
-        [
-            ("saved_time_hours_per_year", "Saved Time (hours/year)"),
-            ("cost_saving", "Cost Saving"),
-            ("revenue_increase", "Revenue Increase"),
-            ("impacted_users", "Impacted Users"),
-            ("add_value", "Added Value"),
-        ],
-    ),
-    (
-        4,
-        "Priority & Risk",
-        [
-            ("time_criticality", "Time Criticality"),
-            ("strategic_impact", "Strategic Impact"),
-            ("risk_avoidance", "Risk Avoidance"),
-        ],
-    ),
-    (
-        5,
-        "Technical Context",
-        [
-            ("systems_and_tools", "Systems & Tools Involved"),
-            ("document_types", "Types of Documents Involved"),
-            ("data_security_classification", "Data Security Classification"),
-            ("solution_type", "Solution Type"),
-        ],
-    ),
-    (
-        6,
-        "Additional",
-        [
-            ("comments", "Comments"),
-            ("attachments", "Attachments (GCS paths)"),
-        ],
-    ),
-]
-
-
 def rs_template_to_docx(fields: dict) -> bytes:
     """Convert the 22 RSLiveTemplate discovery fields to a .docx file.
 
@@ -120,7 +59,7 @@ def rs_template_to_docx(fields: dict) -> bytes:
 
     doc.add_paragraph()
 
-    for sec_num, sec_title, sec_fields in _RS_TEMPLATE_SECTIONS:
+    for sec_num, sec_title, sec_fields in RS_TEMPLATE_SECTIONS:
         _add_section_heading(doc, f"{sec_num}. {sec_title}", 1)
         for key, label in sec_fields:
             _add_section_heading(doc, label, 2)

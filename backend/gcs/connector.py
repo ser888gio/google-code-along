@@ -1,4 +1,4 @@
-from config import GCS_BUCKET_NAME as BUCKET_NAME
+from config import GCS_BUCKET_NAME as BUCKET_NAME, require_config_value
 from google.cloud import storage
 
 _storage_client: storage.Client | None = None
@@ -13,7 +13,9 @@ def _client() -> storage.Client:
 
 def get_bucket_name(bucket_name: str | None = None) -> str:
     """Resolve the configured GCS bucket name."""
-    return (bucket_name or BUCKET_NAME).strip().strip("/")
+    return require_config_value(
+        "GCS_BUCKET_NAME", bucket_name or BUCKET_NAME, "using GCS storage"
+    ).strip("/")
 
 
 def list_files(prefix: str = "", bucket_name: str = BUCKET_NAME) -> list[str]:

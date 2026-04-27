@@ -9,8 +9,14 @@ import time
 import unicodedata
 from typing import Literal, TypedDict
 
-from agent.discovery_agent import FIELD_LABELS, FIELD_SCHEMA
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
+from field_schema import (
+    DEFERRED_ANSWER_PATTERNS,
+    DIRECT_FIELD_KEYS,
+    DIRECT_FIELD_TERMS,
+    FIELD_LABELS,
+    FIELD_SCHEMA,
+)
 from logger import get_logger
 from prompts.context import ACTIVE_FIELD_CLASSIFIER_PROMPT
 from utils import format_prompt_data_lines
@@ -32,54 +38,6 @@ class ClassifierResult(TypedDict):
     proactive_fields: dict[str, dict]
 
 
-DIRECT_FIELD_KEYS = {
-    "use_case_title",
-    "department",
-    "requestor",
-    "product_owner",
-    "saved_time_hours_per_year",
-    "cost_saving",
-    "revenue_increase",
-    "comments",
-    "attachments",
-}
-
-_DIRECT_FIELD_TERMS = {
-    "use_case_title": ["use case title", "nazev", "title"],
-    "department": ["department", "oddeleni", "utvar", "business unit"],
-    "requestor": ["requestor", "zadatel", "zadavatel"],
-    "product_owner": [
-        "product owner",
-        "produktovy vlastnik",
-        "vlastnik produktu",
-        "owner",
-    ],
-    "saved_time_hours_per_year": ["saved time", "uspora casu", "hours"],
-    "cost_saving": ["cost saving", "naklady", "uspora nakladu"],
-    "revenue_increase": ["revenue", "vynos", "trzby"],
-    "comments": ["comment", "poznamka"],
-    "attachments": ["attachment", "priloha"],
-}
-
-_DEFERRED_PATTERNS = [
-    r"\bnevim\b",
-    r"\bnetusim\b",
-    r"\bneznam\b",
-    r"\bzjistim\b.*\bpozdeji\b",
-    r"\bdoplnim(?:e)?\b.*\bpozdeji\b",
-    r"\bpreskocit\b",
-    r"\bted\b.*\bnevim\b",
-    r"\bzatim\b.*\bneni\b.*\bjasne\b",
-    r"\bto\b.*\bzatim\b.*\bjedno\b",
-    r"\bnemame\b.*\burceno\b",
-    r"\bunknown\b",
-    r"\bdon'?t\s+know\b",
-    r"\bnot\s+sure\b",
-    r"\btbd\b",
-    r"\bn/a\b",
-]
-
-
 def normalize_for_match(value: str) -> str:
     """Lowercase, remove diacritics, and compact whitespace for matching."""
     normalized = unicodedata.normalize("NFD", value.lower())
@@ -90,7 +48,7 @@ def normalize_for_match(value: str) -> str:
 def is_deferred_answer(text: str) -> bool:
     """Return whether text means the user chose to defer the field."""
     normalized = normalize_for_match(text)
-    return any(re.search(pattern, normalized) for pattern in _DEFERRED_PATTERNS)
+    return any(re.search(pattern, normalized) for pattern in DEFERRED_ANSWER_PATTERNS)
 
 
 def clean_direct_answer_value(text: str) -> str:
@@ -116,7 +74,7 @@ def is_plausible_direct_answer(text: str) -> bool:
 def mentions_other_direct_field(active_field: str, text: str) -> bool:
     """Return whether a reply appears to include another direct field by name."""
     normalized = normalize_for_match(text)
-    for field_key, terms in _DIRECT_FIELD_TERMS.items():
+    for field_key, terms in DIRECT_FIELD_TERMS.items():
         if field_key == active_field:
             continue
         if any(term in normalized for term in terms):

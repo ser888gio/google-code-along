@@ -1,85 +1,7 @@
 "use client";
 
 import { RsPartialData } from "../../lib/api";
-
-// ─── Field schema (mirrors FIELD_SCHEMA in backend/agent/discovery_agent.py) ──
-
-interface FieldDef {
-  key: string;
-  label: string;
-  required: boolean;
-  /** If true, the user fills this field directly — AI extraction is bypassed. */
-  directInput?: boolean;
-  /** Use a textarea instead of a single-line input (only relevant when directInput=true). */
-  multiline?: boolean;
-}
-
-interface Section {
-  number: number;
-  title: string;
-  fields: FieldDef[];
-}
-
-const SECTIONS: Section[] = [
-  {
-    number: 1,
-    title: "Identity & Current State",
-    fields: [
-      { key: "use_case_title",  label: "Use Case Title",             required: true,  directInput: true },
-      { key: "department",      label: "Customer Department",         required: true,  directInput: true },
-      { key: "requestor",       label: "Requestor",                   required: true,  directInput: true },
-      { key: "product_owner",   label: "Product Owner",               required: true,  directInput: true },
-      { key: "process_as_is",   label: "Process Description / As-Is", required: true },
-      { key: "process_context", label: "Process Context",             required: true },
-      { key: "trigger",         label: "Trigger",                     required: true },
-    ],
-  },
-  {
-    number: 2,
-    title: "Target State",
-    fields: [
-      { key: "purpose_to_be", label: "Purpose / To-Be", required: true },
-    ],
-  },
-  {
-    number: 3,
-    title: "Value & ROI",
-    fields: [
-      { key: "saved_time_hours_per_year", label: "Saved Time (hours/year)", required: false, directInput: true },
-      { key: "cost_saving",               label: "Cost Saving",              required: false, directInput: true },
-      { key: "revenue_increase",          label: "Revenue Increase",         required: false, directInput: true },
-      { key: "impacted_users",            label: "Impacted Users",           required: true  },
-      { key: "add_value",                 label: "Added Value",              required: true  },
-    ],
-  },
-  {
-    number: 4,
-    title: "Priority & Risk",
-    fields: [
-      { key: "time_criticality",  label: "Time Criticality",  required: true  },
-      { key: "strategic_impact",  label: "Strategic Impact",  required: true  },
-      { key: "risk_avoidance",    label: "Risk Avoidance",    required: false },
-    ],
-  },
-  {
-    number: 5,
-    title: "Technical Context",
-    fields: [
-      { key: "systems_and_tools",            label: "Systems & Tools Involved",       required: true },
-      { key: "document_types",               label: "Types of Documents Involved",    required: true },
-      { key: "data_security_classification", label: "Data Security Classification",   required: true },
-      { key: "solution_type",                label: "Solution Type",                  required: true },
-    ],
-  },
-  {
-    number: 6,
-    title: "Additional",
-    fields: [
-      { key: "comments",    label: "Comments",    required: false, directInput: true, multiline: true },
-      { key: "attachments", label: "Attachments", required: false, directInput: true, multiline: true },
-    ],
-  },
-];
+import { RS_SECTIONS, Section } from "../generated/rsSchema";
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
@@ -335,7 +257,7 @@ export default function RsLiveTemplate({
       )}
 
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
-        {SECTIONS.map((section) => (
+        {RS_SECTIONS.map((section) => (
           <SectionGroup
             key={section.number}
             section={section}

@@ -15,7 +15,13 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from config import FIRESTORE_COLLECTION, FIRESTORE_DATABASE, GCP_PROJECT
+from config import (
+    FIRESTORE_COLLECTION,
+    FIRESTORE_DATABASE,
+    GCP_PROJECT,
+    require_config_value,
+)
+from field_schema import REQUIRED_FIELDS
 from google.cloud import firestore
 
 _COLLECTION = FIRESTORE_COLLECTION
@@ -26,6 +32,8 @@ _firestore_client: firestore.Client | None = None
 def _client() -> firestore.Client:
     global _firestore_client
     if _firestore_client is None:
+        require_config_value("FIRESTORE_COLLECTION", _COLLECTION, "using Firestore")
+        require_config_value("FIRESTORE_DATABASE", FIRESTORE_DATABASE, "using Firestore")
         _firestore_client = firestore.Client(
             project=GCP_PROJECT, database=FIRESTORE_DATABASE
         )
@@ -272,27 +280,6 @@ def upsert_discovery_state(session_id: str, discovery: dict) -> None:
 # Direct-input fields — set by the user in the UI, never overwritten by AI
 # ---------------------------------------------------------------------------
 
-# Required fields for completeness calculation (mirrors FIELD_SCHEMA in discovery_agent.py)
-_REQUIRED_FIELDS: list[str] = [
-    "use_case_title",
-    "department",
-    "requestor",
-    "product_owner",
-    "process_as_is",
-    "process_context",
-    "trigger",
-    "purpose_to_be",
-    "impacted_users",
-    "add_value",
-    "time_criticality",
-    "strategic_impact",
-    "systems_and_tools",
-    "document_types",
-    "data_security_classification",
-    "solution_type",
-]
-
-
 def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
     """Merge *direct* key-value pairs into *state* in-place and recompute completeness."""
     fields = state.setdefault("fields", {})
@@ -303,9 +290,9 @@ def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
             # Keep null entry consistent
             fields[key] = {"filled": False, "value": None}
     filled_required = sum(
-        1 for k in _REQUIRED_FIELDS if fields.get(k, {}).get("filled", False)
+        1 for k in REQUIRED_FIELDS if fields.get(k, {}).get("filled", False)
     )
-    state["completeness"] = round((filled_required / len(_REQUIRED_FIELDS)) * 100)
+    state["completeness"] = round((filled_required / len(REQUIRED_FIELDS)) * 100)
 
 
 def upsert_direct_fields(session_id: str, fields: dict[str, str]) -> None:

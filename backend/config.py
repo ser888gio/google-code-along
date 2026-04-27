@@ -22,6 +22,60 @@ GCS_PREFIX_KNOWLEDGE_BASE = "knowledge_base"  # knowledge_base/{category}/
 FIRESTORE_COLLECTION: str = os.getenv("FIRESTORE_COLLECTION", "")
 FIRESTORE_DATABASE: str = os.getenv("FIRESTORE_DATABASE", "")
 
+APP_ENV: str = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+_PRODUCTION_ENVS = {"production", "prod", "staging"}
+_LOCAL_OPTIONAL_CONFIG = {
+    "GCP_PROJECT",
+    "GCS_BUCKET_NAME",
+    "FIRESTORE_COLLECTION",
+    "FIRESTORE_DATABASE",
+}
+_PRODUCTION_REQUIRED_CONFIG = {
+    "GOOGLE_API_KEY": GOOGLE_API_KEY,
+    "GCP_PROJECT": GCP_PROJECT,
+    "GCS_BUCKET_NAME": GCS_BUCKET_NAME,
+    "FIRESTORE_COLLECTION": FIRESTORE_COLLECTION,
+    "FIRESTORE_DATABASE": FIRESTORE_DATABASE,
+}
+
+
+def require_config_value(name: str, value: str | None, usage: str) -> str:
+    """Return a stripped config value or raise a clear setup error."""
+    resolved = (value or "").strip()
+    if not resolved:
+        raise RuntimeError(f"{name} is not configured; set {name} before {usage}.")
+    return resolved
+
+
+def validate_config(*, strict: bool | None = None) -> list[str]:
+    """Validate runtime config and return dev-mode warnings.
+
+    Production/staging requires all cloud config. Local development only requires
+    GOOGLE_API_KEY at startup; cloud-only settings fail clearly when those
+    integrations are used.
+    """
+    is_strict = APP_ENV in _PRODUCTION_ENVS if strict is None else strict
+    required = dict(_PRODUCTION_REQUIRED_CONFIG)
+    if not is_strict:
+        required = {"GOOGLE_API_KEY": GOOGLE_API_KEY}
+
+    missing = [name for name, value in required.items() if not (value or "").strip()]
+    if missing:
+        raise RuntimeError(
+            "Missing required configuration: "
+            + ", ".join(sorted(missing))
+            + ". Set the corresponding environment variables before startup."
+        )
+
+    if is_strict:
+        return []
+
+    return [
+        f"{name} is not set; related cloud integration endpoints will fail until configured."
+        for name in sorted(_LOCAL_OPTIONAL_CONFIG)
+        if not (_PRODUCTION_REQUIRED_CONFIG[name] or "").strip()
+    ]
+
 # Audio model for bidirectional voice streaming via Live API
 MODEL_AUDIO = "gemini-3.1-flash-live-preview"
 

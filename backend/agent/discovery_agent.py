@@ -23,6 +23,13 @@ import json
 import time
 
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
+from field_schema import (
+    EMPTY_FIELDS,
+    FIELD_LABELS,
+    FIELD_SCHEMA,
+    OPTIONAL_FIELDS,
+    REQUIRED_FIELDS,
+)
 from google import genai
 from google.adk.agents import Agent
 from logger import get_logger
@@ -130,89 +137,6 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
         logger.warning(f"extract_discovery_fields failed: {exc}")
         return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
 
-
-# ---------------------------------------------------------------------------
-# Field schema — single source of truth for all 22 fields
-# ---------------------------------------------------------------------------
-
-FIELD_SCHEMA: dict[str, dict] = {
-    # Section 1 — Identity & Current State
-    "use_case_title": {"label": "Use Case Title (EN)", "required": True, "section": 1},
-    "department": {"label": "Customer Department", "required": True, "section": 1},
-    "requestor": {"label": "Requestor", "required": True, "section": 1},
-    "product_owner": {"label": "Product Owner", "required": True, "section": 1},
-    "process_as_is": {
-        "label": "Process Description / As-Is",
-        "required": True,
-        "section": 1,
-    },
-    "process_context": {"label": "Process Context", "required": True, "section": 1},
-    "trigger": {"label": "Trigger", "required": True, "section": 1},
-    # Section 2 — Target State
-    "purpose_to_be": {"label": "Purpose / To-Be", "required": True, "section": 2},
-    # Section 3 — Value & ROI
-    "saved_time_hours_per_year": {
-        "label": "Saved Time (hours/year)",
-        "required": False,
-        "section": 3,
-    },  # approximate OK
-    "cost_saving": {
-        "label": "Cost Saving",
-        "required": False,
-        "section": 3,
-    },  # approximate OK
-    "revenue_increase": {
-        "label": "Revenue Increase",
-        "required": False,
-        "section": 3,
-    },  # approximate OK
-    "impacted_users": {"label": "Impacted Users", "required": True, "section": 3},
-    "add_value": {"label": "Added Value", "required": True, "section": 3},
-    # Section 4 — Priority & Risk
-    "time_criticality": {"label": "Time Criticality", "required": True, "section": 4},
-    "strategic_impact": {"label": "Strategic Impact", "required": True, "section": 4},
-    "risk_avoidance": {
-        "label": "Risk Avoidance",
-        "required": False,
-        "section": 4,
-    },  # approximate OK
-    # Section 5 — Technical Context
-    "systems_and_tools": {
-        "label": "Systems & Tools Involved",
-        "required": True,
-        "section": 5,
-    },
-    "document_types": {
-        "label": "Types of Documents Involved",
-        "required": True,
-        "section": 5,
-    },
-    "data_security_classification": {
-        "label": "Data Security Classification",
-        "required": True,
-        "section": 5,
-    },
-    "solution_type": {"label": "Solution Type", "required": True, "section": 5},
-    # Free-form (optional — not counted toward completeness score)
-    "comments": {"label": "Comments", "required": False, "section": 6},
-    "attachments": {
-        "label": "Attachments (GCS paths)",
-        "required": False,
-        "section": 6,
-    },
-}
-
-# Pre-built empty state — used as fallback and as the initial state in the frontend
-# TODO: frontend RsLiveTemplate should switch from its current hardcoded 8-section
-#       structure to rendering this FIELD_SCHEMA dynamically grouped by section number
-EMPTY_FIELDS: dict = {key: {"filled": False, "value": None} for key in FIELD_SCHEMA}
-
-# Fields that count toward the completeness score (required=True, not optional)
-# TODO: confirm with team whether ROI fields (cost_saving, saved_time, revenue_increase)
-#       should be required or optional for the completeness gate (currently optional)
-REQUIRED_FIELDS = [k for k, v in FIELD_SCHEMA.items() if v["required"]]
-FIELD_LABELS = {key: value["label"] for key, value in FIELD_SCHEMA.items()}
-OPTIONAL_FIELDS = [k for k, v in FIELD_SCHEMA.items() if not v["required"]]
 
 WORKFLOW_PHASES = {
     "discovery",

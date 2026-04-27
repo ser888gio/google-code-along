@@ -2,18 +2,7 @@
 
 from collections.abc import Mapping
 
-
-DIRECT_FIELD_LABELS: dict[str, str] = {
-    "use_case_title": "Use Case Title",
-    "department": "Customer Department",
-    "requestor": "Requestor",
-    "product_owner": "Product Owner",
-    "saved_time_hours_per_year": "Saved Time (hours/year)",
-    "cost_saving": "Cost Saving",
-    "revenue_increase": "Revenue Increase",
-    "comments": "Comments",
-    "attachments": "Attachments",
-}
+from field_schema import DIRECT_FIELD_LABELS
 
 
 def clean_direct_fields(fields: Mapping[str, object] | None) -> dict[str, str]:

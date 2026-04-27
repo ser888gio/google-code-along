@@ -28,7 +28,13 @@ from answer_classifier import (
 )
 from answer_quality import rate_answer
 from bpmn import check_completeness, generate_bpmn_diagram
-from config import APP_NAME, FINALIZING_MARKER, GCS_PREFIX_SESSIONS, MODEL_AUDIO
+from config import (
+    APP_NAME,
+    FINALIZING_MARKER,
+    GCS_PREFIX_SESSIONS,
+    MODEL_AUDIO,
+    validate_config,
+)
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
 from direct_field_context import build_augmented_user_message, merge_direct_fields
 from fastapi import (
@@ -104,6 +110,13 @@ app.add_middleware(
     allow_credentials=True,
 )
 logger.info(f"RS Generator API initializing (app_name={APP_NAME})")
+
+
+@app.on_event("startup")
+async def validate_runtime_config() -> None:
+    """Fail fast with explicit config errors before serving traffic."""
+    for warning in validate_config():
+        logger.warning(warning)
 
 
 @app.exception_handler(Exception)
