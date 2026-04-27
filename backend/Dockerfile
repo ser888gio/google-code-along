@@ -3,7 +3,8 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements.txt is generated from the root uv.lock with `uv export`.
+RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
 COPY . .
 

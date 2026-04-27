@@ -45,39 +45,30 @@ deploy_frontend() {
     FRONTEND_IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$FRONTEND_SERVICE_NAME:latest"
 
     echo "Building and pushing the frontend Docker image..."
-    # Temporarily create a Dockerfile for the frontend
-    cat > frontend/Dockerfile << EOL
-# Use the official Node.js 20 image.
-FROM node:20-slim
-
-# Create and change to the app directory.
-WORKDIR /app
-
-# Copy application dependency manifests to the container image.
-# A wildcard is used to ensure both package.json AND package-lock.json are copied.
-# Copying this first prevents re-running npm install on every code change.
-COPY package*.json ./
-
-# Install production dependencies.
-RUN npm install
-
-# Copy local code to the container image.
-COPY . .
-
-# Build the Next.js app.
-RUN npm run build
-
-# Set the environment variable for the backend URL
-ENV NEXT_PUBLIC_API_URL=$BACKEND_URL
-
-# Run the web service on container startup.
-CMD ["npm", "start"]
+    FRONTEND_BUILD_CONFIG="$(mktemp)"
+    cat > "$FRONTEND_BUILD_CONFIG" << EOL
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --build-arg
+      - NEXT_PUBLIC_API_URL=$BACKEND_URL
+      - --build-arg
+      - NEXT_PUBLIC_WS_URL=wss://${BACKEND_URL#https://}
+      - "-t"
+      - "$FRONTEND_IMAGE_TAG"
+      - "."
+images:
+  - $FRONTEND_IMAGE_TAG
 EOL
-
-    gcloud builds submit frontend --tag $FRONTEND_IMAGE_TAG --default-buckets-behavior=regional-user-owned-bucket
-
-    # Clean up the temporary Dockerfile
-    rm frontend/Dockerfile
+    if ! gcloud builds submit frontend \
+        --config "$FRONTEND_BUILD_CONFIG" \
+        --default-buckets-behavior=regional-user-owned-bucket
+    then
+        rm -f "$FRONTEND_BUILD_CONFIG"
+        return 1
+    fi
+    rm -f "$FRONTEND_BUILD_CONFIG"
 
     echo "Deploying the frontend to Cloud Run..."
     gcloud run deploy $FRONTEND_SERVICE_NAME \
