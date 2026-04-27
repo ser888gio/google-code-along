@@ -97,6 +97,7 @@ def _inline_markdown(text: str) -> str:
     text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
     # Italic: *text* or _text_
     text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
+    # re.DOTALL is intentionally absent — single-line matching only, no cross-line italics.
     text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"<i>\1</i>", text)
     return text
 

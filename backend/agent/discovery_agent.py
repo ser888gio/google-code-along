@@ -79,6 +79,8 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
 
     logger.debug("Extracting discovery fields from conversation transcript")
     try:
+        # Use .replace() not .format() — user transcript may contain literal braces
+        # that would cause a KeyError if str.format() tried to interpret them.
         prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
             "{conversation}", format_prompt_data_lines(conversation_text)
         )

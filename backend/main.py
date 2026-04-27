@@ -124,6 +124,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # --- ADK runner setup ---
 
+# NOTE: ADK sessions are in-memory only. A backend restart drops all live sessions.
+# Firestore persists conversation history and discovery state, so /context/extract
+# can reconstruct context after a restart, but any in-flight [FINALIZING] trigger
+# will be lost. Migrate to a persistent ADK session store before production.
 session_service = InMemorySessionService()
 
 runner = Runner(
@@ -132,7 +136,10 @@ runner = Runner(
     session_service=session_service,
 )
 
-# Audio runner for bidi voice streaming (uses native-audio model)
+# Audio runner for bidi voice streaming (uses native-audio model).
+# Intentionally shares session_service with the text runner so SessionBridge
+# can inject voice transcripts into the orchestrator's ADK session. The shared
+# service is by design — see SessionBridge below.
 audio_runner = Runner(
     app_name=APP_NAME,
     agent=audio_agent,

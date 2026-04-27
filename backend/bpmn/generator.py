@@ -26,7 +26,8 @@ async def check_completeness(conversation_text: str) -> dict:
     Score 0–100 reflecting how much RS information has been gathered.
     Falls back to {"score": 0, "missing": ["Unable to evaluate"]} on error.
     """
-    prompt = COMPLETENESS_PROMPT.format(conversation=conversation_text)
+    # Use .replace() not .format() — user transcript may contain literal braces.
+    prompt = COMPLETENESS_PROMPT.replace("{conversation}", conversation_text)
 
     try:
         logger.info(f"Model call started: model={MODEL_BPMN} caller=check_completeness")
@@ -50,7 +51,8 @@ async def check_completeness(conversation_text: str) -> dict:
 
 async def generate_bpmn_diagram(conversation_text: str) -> str:
     """Return a Mermaid flowchart string representing the To-Be BPMN process."""
-    prompt = BPMN_GENERATION_PROMPT.format(conversation=conversation_text)
+    # Use .replace() not .format() — user transcript may contain literal braces.
+    prompt = BPMN_GENERATION_PROMPT.replace("{conversation}", conversation_text)
 
     logger.info(f"Model call started: model={MODEL_BPMN} caller=generate_bpmn_diagram")
     _t0 = time.perf_counter()

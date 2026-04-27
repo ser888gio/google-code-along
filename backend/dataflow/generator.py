@@ -26,7 +26,8 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
     Score 0–100 reflecting how ready the conversation is to produce a DFD.
     Falls back to {"score": 0, "missing": ["Unable to evaluate"]} on error.
     """
-    prompt = DATAFLOW_COMPLETENESS_PROMPT.format(conversation=conversation_text)
+    # Use .replace() not .format() — user transcript may contain literal braces.
+    prompt = DATAFLOW_COMPLETENESS_PROMPT.replace("{conversation}", conversation_text)
 
     try:
         logger.info(
@@ -51,7 +52,8 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
 
 async def generate_dataflow_diagram(conversation_text: str) -> str:
     """Return a Mermaid flowchart LR string representing the system as a DFD."""
-    prompt = DATAFLOW_GENERATION_PROMPT.format(conversation=conversation_text)
+    # Use .replace() not .format() — user transcript may contain literal braces.
+    prompt = DATAFLOW_GENERATION_PROMPT.replace("{conversation}", conversation_text)
 
     logger.info(
         f"Model call started: model={MODEL_DATAFLOW} caller=generate_dataflow_diagram"
