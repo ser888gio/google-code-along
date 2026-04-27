@@ -13,6 +13,13 @@ import BpmnPanel from "./components/BpmnPanel";
 import DataflowPanel from "./components/DataflowPanel";
 import RsLiveTemplate from "./components/RsLiveTemplate";
 import FirestoreSrsPanel from "./components/FirestoreSrsPanel";
+import {
+  DEFERRED_DIRECT_ANSWER_PATTERNS,
+  DIRECT_CHAT_FIELD_PATTERNS,
+  DirectChatFieldKey,
+  STRICT_DIRECT_FIELD_KEYS,
+  SUGGESTABLE_DIRECT_FIELD_KEYS,
+} from "./generated/rsSchema";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -220,68 +227,11 @@ const WELCOME_MESSAGE: Message = {
   streaming: false,
 };
 
-// Fields that must never be AI-extracted (numeric/financial — user must type them).
-const DIRECT_INPUT_KEYS = new Set([
-  "saved_time_hours_per_year", "cost_saving", "revenue_increase",
-  "comments", "attachments",
-]);
+// Fields that must never be AI-extracted (numeric/financial or file-backed).
+const DIRECT_INPUT_KEYS = new Set<string>(STRICT_DIRECT_FIELD_KEYS);
 
-// Fields the AI can *suggest* but only if the user hasn't typed a value yet.
-const SUGGESTABLE_DIRECT_KEYS = new Set([
-  "use_case_title", "department", "requestor", "product_owner",
-]);
-
-type DirectChatFieldKey =
-  | "use_case_title"
-  | "department"
-  | "requestor"
-  | "product_owner";
-
-const DIRECT_CHAT_FIELD_PATTERNS: Array<{
-  key: DirectChatFieldKey;
-  patterns: RegExp[];
-}> = [
-  {
-    key: "product_owner",
-    patterns: [
-      /\bproduct\s+owner\b/,
-      /\bproduktov(?:y|eho)\s+vlastnik\b/,
-      /\bvlastnik\s+produktu\b/,
-    ],
-  },
-  {
-    key: "requestor",
-    patterns: [/\brequestor\b/, /\bzadatel\b/, /\bzadavatel\b/],
-  },
-  {
-    key: "department",
-    patterns: [/\bdepartment\b/, /\boddeleni\b/, /\butvar\b/, /\bbusiness\s+unit\b/],
-  },
-  {
-    key: "use_case_title",
-    patterns: [
-      /\buse\s+case\s+title\b/,
-      /\bnazev\b.*\buse\s+case\b/,
-      /\bnazev\b.*\bpripad\b/,
-    ],
-  },
-];
-
-const DEFERRED_DIRECT_ANSWER_PATTERNS = [
-  /\bnevim\b/,
-  /\bnetusim\b/,
-  /\bneznam\b/,
-  /\bdoplnim\b.*\bpozdeji\b/,
-  /\bpozdeji\b/,
-  /\bzatim\b.*\bne\b/,
-  /\bnemam\b/,
-  /\bunknown\b/,
-  /\bdon'?t\s+know\b/,
-  /\bnot\s+sure\b/,
-  /\blater\b/,
-  /\btbd\b/,
-  /\bn\/a\b/,
-];
+// Fields the AI can suggest but only if the user hasn't typed a value yet.
+const SUGGESTABLE_DIRECT_KEYS = new Set<string>(SUGGESTABLE_DIRECT_FIELD_KEYS);
 
 function normalizeForMatch(value: string): string {
   return value
@@ -295,7 +245,7 @@ function normalizeForMatch(value: string): string {
 function inferDirectChatFieldFromAssistant(text: string): DirectChatFieldKey | null {
   const normalized = normalizeForMatch(text);
   for (const field of DIRECT_CHAT_FIELD_PATTERNS) {
-    if (field.patterns.some((pattern) => pattern.test(normalized))) {
+    if (field.patterns.some((pattern) => new RegExp(pattern).test(normalized))) {
       return field.key;
     }
   }
@@ -304,7 +254,9 @@ function inferDirectChatFieldFromAssistant(text: string): DirectChatFieldKey | n
 
 function isDeferredDirectAnswer(text: string): boolean {
   const normalized = normalizeForMatch(text);
-  return DEFERRED_DIRECT_ANSWER_PATTERNS.some((pattern) => pattern.test(normalized));
+  return DEFERRED_DIRECT_ANSWER_PATTERNS.some((pattern) =>
+    new RegExp(pattern).test(normalized)
+  );
 }
 
 function cleanDirectAnswerValue(text: string): string {
