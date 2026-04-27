@@ -2,7 +2,7 @@
 name = "google-code-along"
 version = "0.1.0"
 description = "AI-powered Requirement Specification (RS) Generator"
-dependencies = []np
+dependencies = []
 requires-python = ">=3.12"
 
 [dependency-groups]
