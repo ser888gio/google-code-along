@@ -59,7 +59,7 @@ export default function MermaidDiagram({
       ref={ref}
       sandbox=""
       title="Generated Mermaid diagram"
-      className="h-[560px] w-full border-0"
+      className="h-140 w-full border-0"
     />
   );
 }

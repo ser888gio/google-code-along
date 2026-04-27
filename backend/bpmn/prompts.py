@@ -15,10 +15,10 @@ the following information has been captured:
 6. Start and end events / triggers                                     [10 points]
 
 Return ONLY valid JSON with this exact structure (no markdown, no explanation):
-{
+{{
   "score": <integer 0-100>,
   "missing": [<short string describing each missing area>]
-}
+}}
 
 Conversation:
 ---
@@ -35,7 +35,7 @@ Rules:
 - Model swimlane participants as `subgraph` blocks (one per actor/role).
 - Use rounded rectangles `([...])` for start/end events.
 - Use rectangles `[...]` for tasks/activities.
-- Use diamonds `{...}` for decision gateways.
+- Use diamonds `{{...}}` for decision gateways.
 - Label every arrow with a short action or condition where relevant.
 - Keep node IDs short (A, B, C... or descriptive like req1, approval1).
 - Do NOT include any explanation, markdown fences, or text outside the Mermaid diagram.
