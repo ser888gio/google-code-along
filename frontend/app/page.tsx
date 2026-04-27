@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { streamChat, extractContext, getDiscoveryState, downloadPdf, downloadRsTemplateDocx, getFirestoreData, getSessions, getHistory, getAnalysis, getSessionUploads, patchDirectFields, RsPartialData, SrsData, SessionSummary, FinalAnalysis, UploadedFile } from "../lib/api";
 import { useAudioRecorder } from "../lib/useAudioRecorder";
 import { useAudioPlayer } from "../lib/useAudioPlayer";
@@ -69,12 +71,12 @@ function MessageBubble({ msg }: { msg: Message }) {
           </span>
         </p>
       ) : (
-        <p className="whitespace-pre-wrap text-sm text-gray-800">
-          {msg.text}
+        <div className="text-sm text-gray-800 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_a]:text-[#4a6659] [&_a]:underline [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
           {msg.streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-[blink_1s_step-end_infinite] bg-gray-400 align-middle" />
           )}
-        </p>
+        </div>
       )}
     </div>
   );

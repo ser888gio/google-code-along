@@ -15,7 +15,9 @@
     "mermaid": "^11.13.0",
     "next": "16.1.7",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@storybook/addon-mcp": "^0.4.1",
