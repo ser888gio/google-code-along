@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import uuid
+import weakref
 from datetime import datetime, timezone
 
 from agent import rs_agent, audio_agent
@@ -158,7 +159,9 @@ session_bridge = SessionBridge(
 # Prevents multiple parallel Gemini extraction calls for the same session
 # (common in voice mode where turn_complete events arrive faster than
 # the ~40s extraction call can finish).
-_extract_locks: dict[str, asyncio.Lock] = {}
+# WeakValueDictionary so entries are evicted automatically once no request
+# holds a reference to the lock — no unbounded growth across sessions.
+_extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
 
 def _build_conversation_tail(session, latest_user_message: str, limit: int = 12) -> str:
@@ -1096,10 +1099,10 @@ async def context_extract(req: ContextRequest):
     # Ensure only one Gemini extraction runs per session at a time.
     # Additional callers wait for the lock and then read the freshly
     # persisted result from Firestore (avoids a second Gemini call).
-    if sid not in _extract_locks:
-        _extract_locks[sid] = asyncio.Lock()
-
-    lock = _extract_locks[sid]
+    new_lock = asyncio.Lock()
+    lock = _extract_locks.setdefault(sid, new_lock)
+    # Keep a strong local reference so the WeakValueDictionary entry stays
+    # alive for the duration of this request (del new_lock is fine here).
 
     if lock.locked():
         # Another extraction is already running for this session.
