@@ -31,6 +31,13 @@ def clean_direct_fields(fields: Mapping[str, object] | None) -> dict[str, str]:
     return cleaned
 
 
+def clean_deferred_fields(fields: list[str] | None) -> list[str]:
+    """Return known direct-input fields the user chose to defer."""
+    if not fields:
+        return []
+    return [key for key in fields if key in DIRECT_FIELD_LABELS]
+
+
 def merge_direct_fields(
     stored: Mapping[str, object] | None,
     incoming: Mapping[str, object] | None,
@@ -51,19 +58,33 @@ def merge_direct_fields(
     return merged
 
 
-def build_augmented_user_message(message: str, direct_fields: Mapping[str, str]) -> str:
+def build_augmented_user_message(
+    message: str,
+    direct_fields: Mapping[str, str],
+    deferred_fields: list[str] | None = None,
+) -> str:
     """Add hidden form context so the agent does not ask for fields already typed."""
     fields = clean_direct_fields(direct_fields)
-    if not fields:
+    deferred = clean_deferred_fields(deferred_fields)
+    if not fields and not deferred:
         return message
 
     lines = [
         "Context from the Requirements Specification form, entered manually by the user.",
-        "Treat these fields as already provided and do not ask for them again:",
     ]
-    for key, label in DIRECT_FIELD_LABELS.items():
-        value = fields.get(key)
-        if value:
-            lines.append(f"- {label}: {value}")
+    if fields:
+        lines.append("Treat these fields as already provided and do not ask for them again:")
+        for key, label in DIRECT_FIELD_LABELS.items():
+            value = fields.get(key)
+            if value:
+                lines.append(f"- {label}: {value}")
+
+    if deferred:
+        lines.append(
+            "The user deferred these fields. Do not ask for them again immediately; "
+            "revisit them near finalization if still required:"
+        )
+        for key in deferred:
+            lines.append(f"- {DIRECT_FIELD_LABELS[key]}")
 
     return "\n".join(lines) + f"\n\nUser message:\n{message}"

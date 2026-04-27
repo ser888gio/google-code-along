@@ -50,5 +50,17 @@ def test_augmented_user_message_tells_agent_not_to_reask_direct_fields():
     assert result.endswith("User message:\nMuzeme pokracovat?")
 
 
+def test_augmented_user_message_tells_agent_not_to_immediately_reask_deferred_fields():
+    result = build_augmented_user_message(
+        "Nevim, doplnim pozdeji.",
+        {},
+        ["product_owner", "not_a_field"],
+    )
+
+    assert "Product Owner" in result
+    assert "Do not ask for them again immediately" in result
+    assert "not_a_field" not in result
+
+
 def test_augmented_user_message_is_unchanged_without_direct_fields():
     assert build_augmented_user_message("Hello", {}) == "Hello"

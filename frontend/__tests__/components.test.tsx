@@ -20,12 +20,36 @@ import "@testing-library/jest-dom";
 jest.mock("../lib/api", () => ({
   streamChat: jest.fn(),
   extractContext: jest.fn().mockResolvedValue(null),
+  getDiscoveryState: jest.fn().mockResolvedValue(null),
   downloadPdf: jest.fn().mockResolvedValue(undefined),
+  downloadRsTemplateDocx: jest.fn().mockResolvedValue(undefined),
+  getFirestoreData: jest.fn().mockResolvedValue(null),
+  getSessions: jest.fn().mockResolvedValue([]),
+  getHistory: jest.fn().mockResolvedValue([]),
+  getAnalysis: jest.fn().mockResolvedValue({ status: "not_found" }),
+  getSessionUploads: jest.fn().mockResolvedValue([]),
+  patchDirectFields: jest.fn().mockResolvedValue(null),
 }));
 
 // Stub child components that have their own complex deps
 jest.mock("../app/components/FileUpload", () => () => <div data-testid="file-upload" />);
 jest.mock("../app/components/BpmnPanel", () => () => <div data-testid="bpmn-panel" />);
+jest.mock("../app/components/DataflowPanel", () => () => <div data-testid="dataflow-panel" />);
+jest.mock("../app/components/FirestoreSrsPanel", () => () => <div data-testid="firestore-panel" />);
+jest.mock("../app/components/AnalysisPanel", () => ({
+  __esModule: true,
+  default: () => <div data-testid="analysis-panel" />,
+  FinalizingOverlay: () => <div data-testid="finalizing-overlay" />,
+}));
+
+jest.mock("react-markdown", () => ({
+  __esModule: true,
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+jest.mock("remark-gfm", () => ({
+  __esModule: true,
+  default: jest.fn(),
+}));
 
 // Mock next/navigation (Next.js may inject this)
 jest.mock("next/navigation", () => ({
@@ -45,10 +69,11 @@ jest.mock("@skodaflow/web-library", () => ({
 }));
 
 import ChatPage from "../app/page";
-import { streamChat, extractContext } from "../lib/api";
+import { streamChat, extractContext, patchDirectFields } from "../lib/api";
 
 const mockStreamChat = streamChat as jest.Mock;
 const mockExtractContext = extractContext as jest.Mock;
+const mockPatchDirectFields = patchDirectFields as jest.Mock;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,10 +126,10 @@ describe("ChatPage — initial render", () => {
     expect(screen.getByText("Document Preprocessor")).toBeInTheDocument();
   });
 
-  it("renders the empty-state placeholder text", () => {
+  it("renders the welcome message", () => {
     renderPage();
     expect(
-      screen.getByText(/Start a conversation to build your specification/i)
+      screen.getByText(/Welcome to your Business Analyst session/i)
     ).toBeInTheDocument();
   });
 
@@ -124,11 +149,9 @@ describe("ChatPage — initial render", () => {
     expect(screen.getByPlaceholderText(/Describe your project/i)).toBeInTheDocument();
   });
 
-  it("renders the progress tracker with step labels", () => {
+  it("renders the Preview tab by default", () => {
     renderPage();
-    expect(screen.getByText("COMPLETION")).toBeInTheDocument();
-    expect(screen.getByText("VALIDATION")).toBeInTheDocument();
-    expect(screen.getByText("DONE")).toBeInTheDocument();
+    expect(screen.getAllByText("Requirements Specification").length).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -182,7 +205,7 @@ describe("ChatPage — message rendering", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("AI CONSULTANT")).toBeInTheDocument();
+      expect(screen.getAllByText("AI CONSULTANT").length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -271,7 +294,7 @@ describe("ChatPage — error state", () => {
     });
   });
 
-  it("shows ERROR label on the error card", async () => {
+  it("shows the error toast title", async () => {
     rejectStream("Some error");
     renderPage();
 
@@ -282,7 +305,7 @@ describe("ChatPage — error state", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("ERROR")).toBeInTheDocument();
+      expect(screen.getByText("Something went wrong")).toBeInTheDocument();
     });
   });
 
@@ -314,7 +337,7 @@ describe("ChatPage — error state", () => {
 // ---------------------------------------------------------------------------
 
 describe("ChatPage — tab bar", () => {
-  const TABS = ["Input", "Preview", "ER", "BPMN", "Flow", "Data", "Gantt", "Quality", "Summary"];
+  const TABS = ["Preview", "BPMN", "Data", "Database", "Analysis", "Summary"];
 
   it("renders all RS tabs", () => {
     renderPage();
@@ -323,21 +346,21 @@ describe("ChatPage — tab bar", () => {
     }
   });
 
-  it("clicking a non-Preview tab shows 'not yet available' message", async () => {
+  it("clicking Analysis before finalization shows the pending message", async () => {
     renderPage();
-    const erTab = screen.getByRole("button", { name: "ER" });
+    const analysisTab = screen.getByRole("button", { name: "Analysis" });
     await act(async () => {
-      fireEvent.click(erTab);
+      fireEvent.click(analysisTab);
     });
-    expect(screen.getByText(/ER.*not yet available/i)).toBeInTheDocument();
+    expect(screen.getByText(/Analysis will appear here/i)).toBeInTheDocument();
   });
 
   it("clicking Preview tab shows the requirements specification panel", async () => {
     renderPage();
     // Click away first, then back
-    const erTab = screen.getByRole("button", { name: "ER" });
+    const analysisTab = screen.getByRole("button", { name: "Analysis" });
     const previewTab = screen.getByRole("button", { name: "Preview" });
-    await act(async () => { fireEvent.click(erTab); });
+    await act(async () => { fireEvent.click(analysisTab); });
     await act(async () => { fireEvent.click(previewTab); });
     // "Requirements Specification" appears in both the tab bar label and the live template header
     expect(screen.getAllByText("Requirements Specification").length).toBeGreaterThanOrEqual(1);
@@ -345,17 +368,16 @@ describe("ChatPage — tab bar", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ProgressTracker
+// Conversation state
 // ---------------------------------------------------------------------------
 
-describe("ChatPage — progress tracker", () => {
-  it("step 1 is active on initial load (shows '1' in tracker)", () => {
+describe("ChatPage — conversation state", () => {
+  it("shows the requirements panel on initial load", () => {
     renderPage();
-    // Step 1 is active — step numbers 2 and 3 should be visible as text
-    expect(screen.getByText("COMPLETION")).toBeInTheDocument();
+    expect(screen.getAllByText("Requirements Specification").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("advances to step 2 when first message is sent", async () => {
+  it("keeps the sent message visible after the stream finishes", async () => {
     resolveStream();
     renderPage();
 
@@ -365,9 +387,8 @@ describe("ChatPage — progress tracker", () => {
       fireEvent.click(screen.getByRole("button", { name: /Send/i }));
     });
 
-    // After sending, step 2 (VALIDATION) should be active/done
     await waitFor(() => {
-      expect(screen.getByText("VALIDATION")).toBeInTheDocument();
+      expect(screen.getByText("First message")).toBeInTheDocument();
     });
   });
 });
@@ -388,36 +409,27 @@ describe("ChatPage — RS live template", () => {
     expect(screen.getAllByText("Requirements Specification").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows all 8 section labels as placeholders before any conversation", () => {
+  it("shows the current RS section labels before any conversation", () => {
     renderPage();
-    expect(screen.getByText("Executive Summary")).toBeInTheDocument();
-    expect(screen.getByText("Current State (As-Is)")).toBeInTheDocument();
-    expect(screen.getByText("Desired Future State (To-Be)")).toBeInTheDocument();
-    expect(screen.getByText("Scope")).toBeInTheDocument();
-    expect(screen.getByText("Functional Requirements")).toBeInTheDocument();
-    expect(screen.getByText("Non-Functional Requirements")).toBeInTheDocument();
-    expect(screen.getByText("Assumptions & Constraints")).toBeInTheDocument();
-    expect(screen.getByText("Open Questions")).toBeInTheDocument();
+    expect(screen.getByText("Identity & Current State")).toBeInTheDocument();
+    expect(screen.getByText("Target State")).toBeInTheDocument();
+    expect(screen.getByText("Value & ROI")).toBeInTheDocument();
+    expect(screen.getByText("Priority & Risk")).toBeInTheDocument();
+    expect(screen.getByText("Technical Context")).toBeInTheDocument();
+    expect(screen.getByText("Additional")).toBeInTheDocument();
   });
 
   it("shows placeholder text when rsPartial is null", () => {
     renderPage();
-    const placeholders = screen.getAllByText(/Gathering information/i);
-    expect(placeholders.length).toBe(8);
+    const placeholders = screen.getAllByText(/Gathering/i);
+    expect(placeholders.length).toBe(13);
   });
 
-  it("updates section content after a turn when extractContext returns data", async () => {
+  it("updates field content after a turn when extractContext returns data", async () => {
     mockExtractContext.mockResolvedValue({
       completeness: 35,
-      sections: {
-        executive_summary:           { filled: false, content: null },
-        current_state:               { filled: true,  content: "Team uses spreadsheets today." },
-        desired_future_state:        { filled: false, content: null },
-        scope:                       { filled: false, content: null },
-        functional_requirements:     { filled: false, content: null },
-        non_functional_requirements: { filled: false, content: null },
-        assumptions_and_constraints: { filled: false, content: null },
-        open_questions:              { filled: false, content: null },
+      fields: {
+        process_as_is: { filled: true, value: "Team uses spreadsheets today." },
       },
     });
     resolveStream("Great, let me note that down.");
@@ -438,5 +450,108 @@ describe("ChatPage — RS live template", () => {
     renderPage();
     expect(screen.getAllByText(/0%/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/80% to generate/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Direct chat field answers
+// ---------------------------------------------------------------------------
+
+describe("ChatPage — direct chat field answers", () => {
+  beforeEach(() => {
+    mockStreamChat.mockReset();
+    mockExtractContext.mockReset();
+    mockExtractContext.mockResolvedValue(null);
+    mockPatchDirectFields.mockReset();
+    mockPatchDirectFields.mockResolvedValue(null);
+  });
+
+  function resolveTwoTurns(firstReply: string, secondReply = "Dekuji.") {
+    mockStreamChat
+      .mockImplementationOnce(
+        async (
+          _message: string,
+          _sessionId: string | null,
+          onChunk: (text: string) => void,
+          onSessionId: (id: string) => void,
+          onDone: () => Promise<void>
+        ) => {
+          onSessionId("test-session");
+          onChunk(firstReply);
+          await onDone();
+        }
+      )
+      .mockImplementationOnce(
+        async (
+          _message: string,
+          _sessionId: string | null,
+          onChunk: (text: string) => void,
+          onSessionId: (id: string) => void,
+          onDone: () => Promise<void>
+        ) => {
+          onSessionId("test-session");
+          onChunk(secondReply);
+          await onDone();
+        }
+      );
+  }
+
+  it("fills Product Owner immediately when the user answers the direct question", async () => {
+    resolveTwoTurns("Kdo je Product Owner?");
+    renderPage();
+
+    const textarea = screen.getByPlaceholderText(/Describe your project/i);
+    await userEvent.type(textarea, "Potrebujeme novy use case.");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Kdo je Product Owner?")).toBeInTheDocument();
+    });
+
+    await userEvent.type(textarea, "Ales Priklad");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+    });
+
+    const productOwnerInput = screen.getByPlaceholderText(/Enter product owner/i) as HTMLInputElement;
+    expect(productOwnerInput.value).toBe("Ales Priklad");
+    expect(mockPatchDirectFields).toHaveBeenCalledWith("test-session", {
+      product_owner: "Ales Priklad",
+    });
+
+    const secondCallDirectFields = mockStreamChat.mock.calls[1][8];
+    expect(secondCallDirectFields).toEqual(
+      expect.objectContaining({ product_owner: "Ales Priklad" })
+    );
+  });
+
+  it("does not fill Product Owner when the user defers the answer", async () => {
+    resolveTwoTurns("Kdo je Product Owner?");
+    renderPage();
+
+    const textarea = screen.getByPlaceholderText(/Describe your project/i);
+    await userEvent.type(textarea, "Potrebujeme novy use case.");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Kdo je Product Owner?")).toBeInTheDocument();
+    });
+
+    await userEvent.type(textarea, "Nevim, doplnim pozdeji.");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+    });
+
+    const productOwnerInput = screen.getByPlaceholderText(/Enter product owner/i) as HTMLInputElement;
+    expect(productOwnerInput.value).toBe("");
+    expect(mockPatchDirectFields).not.toHaveBeenCalled();
+
+    const secondCallDirectFields = mockStreamChat.mock.calls[1][8];
+    expect(secondCallDirectFields?.product_owner).toBeUndefined();
+    expect(mockStreamChat.mock.calls[1][9]).toEqual(["product_owner"]);
   });
 });

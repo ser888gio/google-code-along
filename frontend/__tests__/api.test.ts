@@ -149,6 +149,55 @@ describe("streamChat", () => {
     const callBody = JSON.parse(fetch.mock.calls[0][1].body);
     expect(callBody.session_id).toBeNull();
   });
+
+  it("passes direct fields in the request body when provided", async () => {
+    const stream = buildStream(
+      'data: {"session_id": "existing"}\n\n',
+      "data: [DONE]\n\n"
+    );
+    const fetch = mockFetch(stream);
+    global.fetch = fetch;
+
+    await streamChat(
+      "Hello",
+      "existing",
+      jest.fn(),
+      jest.fn(),
+      jest.fn(),
+      jest.fn(),
+      undefined,
+      undefined,
+      { product_owner: "Jana Novak" }
+    );
+
+    const callBody = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(callBody.direct_fields).toEqual({ product_owner: "Jana Novak" });
+  });
+
+  it("passes deferred fields in the request body when provided", async () => {
+    const stream = buildStream(
+      'data: {"session_id": "existing"}\n\n',
+      "data: [DONE]\n\n"
+    );
+    const fetch = mockFetch(stream);
+    global.fetch = fetch;
+
+    await streamChat(
+      "Nevim",
+      "existing",
+      jest.fn(),
+      jest.fn(),
+      jest.fn(),
+      jest.fn(),
+      undefined,
+      undefined,
+      {},
+      ["product_owner"]
+    );
+
+    const callBody = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(callBody.deferred_fields).toEqual(["product_owner"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -214,15 +263,9 @@ describe("extractContext", () => {
   it("calls /context/extract with the session_id", async () => {
     const payload = {
       completeness: 40,
-      sections: {
-        executive_summary:           { filled: false, content: null },
-        current_state:               { filled: true,  content: "Some current state." },
-        desired_future_state:        { filled: false, content: null },
-        scope:                       { filled: false, content: null },
-        functional_requirements:     { filled: false, content: null },
-        non_functional_requirements: { filled: false, content: null },
-        assumptions_and_constraints: { filled: false, content: null },
-        open_questions:              { filled: false, content: null },
+      fields: {
+        process_as_is: { filled: true, value: "Some current state." },
+        product_owner: { filled: false, value: null },
       },
     };
     const fetch = jest.fn().mockResolvedValue({
@@ -241,7 +284,7 @@ describe("extractContext", () => {
       })
     );
     expect(result?.completeness).toBe(40);
-    expect(result?.sections.current_state.filled).toBe(true);
+    expect(result?.fields.process_as_is.filled).toBe(true);
   });
 
   it("returns null when the server responds with a non-OK status", async () => {
@@ -288,7 +331,7 @@ describe("downloadPdf", () => {
     jest.restoreAllMocks();
   });
 
-  it("calls /document/pdf with the session_id", async () => {
+  it("calls /document/docx with the session_id", async () => {
     const mockRes = {
       ok: true,
       blob: jest.fn().mockResolvedValue(new Blob(["pdf"], { type: "application/pdf" })),
@@ -299,7 +342,7 @@ describe("downloadPdf", () => {
     await downloadPdf("my-session");
 
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining("/document/pdf"),
+      expect.stringContaining("/document/docx"),
       expect.objectContaining({
         method: "POST",
         body: expect.stringContaining('"session_id":"my-session"'),

@@ -231,6 +231,95 @@ const SUGGESTABLE_DIRECT_KEYS = new Set([
   "use_case_title", "department", "requestor", "product_owner",
 ]);
 
+type DirectChatFieldKey =
+  | "use_case_title"
+  | "department"
+  | "requestor"
+  | "product_owner";
+
+const DIRECT_CHAT_FIELD_PATTERNS: Array<{
+  key: DirectChatFieldKey;
+  patterns: RegExp[];
+}> = [
+  {
+    key: "product_owner",
+    patterns: [
+      /\bproduct\s+owner\b/,
+      /\bproduktov(?:y|eho)\s+vlastnik\b/,
+      /\bvlastnik\s+produktu\b/,
+    ],
+  },
+  {
+    key: "requestor",
+    patterns: [/\brequestor\b/, /\bzadatel\b/, /\bzadavatel\b/],
+  },
+  {
+    key: "department",
+    patterns: [/\bdepartment\b/, /\boddeleni\b/, /\butvar\b/, /\bbusiness\s+unit\b/],
+  },
+  {
+    key: "use_case_title",
+    patterns: [
+      /\buse\s+case\s+title\b/,
+      /\bnazev\b.*\buse\s+case\b/,
+      /\bnazev\b.*\bpripad\b/,
+    ],
+  },
+];
+
+const DEFERRED_DIRECT_ANSWER_PATTERNS = [
+  /\bnevim\b/,
+  /\bnetusim\b/,
+  /\bneznam\b/,
+  /\bdoplnim\b.*\bpozdeji\b/,
+  /\bpozdeji\b/,
+  /\bzatim\b.*\bne\b/,
+  /\bnemam\b/,
+  /\bunknown\b/,
+  /\bdon'?t\s+know\b/,
+  /\bnot\s+sure\b/,
+  /\blater\b/,
+  /\btbd\b/,
+  /\bn\/a\b/,
+];
+
+function normalizeForMatch(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function inferDirectChatFieldFromAssistant(text: string): DirectChatFieldKey | null {
+  const normalized = normalizeForMatch(text);
+  for (const field of DIRECT_CHAT_FIELD_PATTERNS) {
+    if (field.patterns.some((pattern) => pattern.test(normalized))) {
+      return field.key;
+    }
+  }
+  return null;
+}
+
+function isDeferredDirectAnswer(text: string): boolean {
+  const normalized = normalizeForMatch(text);
+  return DEFERRED_DIRECT_ANSWER_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function cleanDirectAnswerValue(text: string): string {
+  return text
+    .trim()
+    .replace(/^(je to|it's|it is|jmenuje se|bude to)\s+/i, "")
+    .replace(/[.。]+$/, "")
+    .trim();
+}
+
+function isPlausibleDirectAnswer(text: string): boolean {
+  const value = cleanDirectAnswerValue(text);
+  return value.length > 0 && value.length <= 80 && !value.includes("\n") && !value.includes("?");
+}
+
 /**
  * Merge an AI-extracted partial state into the previous state, preserving
  * user-typed direct-input fields and suggestable fields that have been set.
@@ -280,6 +369,7 @@ export default function ChatPage() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [chatMode, setChatMode] = useState<ChatMode>("text");
   const [directFields, setDirectFields] = useState<Record<string, string>>({});
+  const [deferredDirectFields, setDeferredDirectFields] = useState<DirectChatFieldKey[]>([]);
   // Debounce timer ref for persisting direct fields to the backend
   const directFieldDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -293,6 +383,8 @@ export default function ChatPage() {
   const voiceTranscriptIdRef = useRef<string | null>(null);
   // Track the current user voice transcription message id
   const voiceUserTranscriptIdRef = useRef<string | null>(null);
+  // Track simple form fields the assistant just asked for so answers can fill instantly.
+  const pendingDirectChatFieldRef = useRef<DirectChatFieldKey | null>(null);
 
   // ─── Audio Player ──────────────────────────────────────────────────────────
   const audioPlayer = useAudioPlayer();
@@ -483,6 +575,9 @@ export default function ChatPage() {
 
   function handleDirectFieldChange(key: string, value: string) {
     setDirectFields((prev) => ({ ...prev, [key]: value }));
+    if (value.trim()) {
+      setDeferredDirectFields((prev) => prev.filter((field) => field !== key));
+    }
 
     // Update completeness optimistically: re-read from backend after debounce
     if (directFieldDebounceRef.current) clearTimeout(directFieldDebounceRef.current);
@@ -495,16 +590,65 @@ export default function ChatPage() {
     }, 600);
   }
 
+  function applyDirectChatAnswer(text: string): {
+    directFieldsForRequest: Record<string, string>;
+    deferredFieldsForRequest: DirectChatFieldKey[];
+  } {
+    const pendingKey = pendingDirectChatFieldRef.current;
+    if (!pendingKey || (directFields[pendingKey] ?? "").trim()) {
+      return {
+        directFieldsForRequest: directFields,
+        deferredFieldsForRequest: deferredDirectFields,
+      };
+    }
+
+    pendingDirectChatFieldRef.current = null;
+    if (isDeferredDirectAnswer(text) || !isPlausibleDirectAnswer(text)) {
+      const nextDeferredFields = Array.from(new Set([...deferredDirectFields, pendingKey]));
+      setDeferredDirectFields(nextDeferredFields);
+      return {
+        directFieldsForRequest: directFields,
+        deferredFieldsForRequest: nextDeferredFields,
+      };
+    }
+
+    const value = cleanDirectAnswerValue(text);
+    const nextDirectFields = { ...directFields, [pendingKey]: value };
+    const nextDeferredFields = deferredDirectFields.filter((field) => field !== pendingKey);
+    setDirectFields(nextDirectFields);
+    setDeferredDirectFields(nextDeferredFields);
+    setRsPartial((prev) => ({
+      completeness: prev?.completeness ?? 0,
+      fields: {
+        ...(prev?.fields ?? {}),
+        [pendingKey]: { filled: true, value },
+      },
+    }));
+
+    if (sessionId) {
+      void patchDirectFields(sessionId, { [pendingKey]: value }).then((merged) => {
+        if (merged) setRsPartial(merged);
+      });
+    }
+
+    return {
+      directFieldsForRequest: nextDirectFields,
+      deferredFieldsForRequest: nextDeferredFields,
+    };
+  }
+
   async function handleSend() {
     const text = input.trim();
     if (!text || isStreaming) return;
 
     setInput("");
     setError(null);
+    const { directFieldsForRequest, deferredFieldsForRequest } = applyDirectChatAnswer(text);
 
     addMessage("user", text);
     setIsStreaming(true);
     const assistantId = addMessage("assistant", "", true);
+    let assistantText = "";
 
     // Capture the session ID synchronously from the SSE stream.
     // React's sessionId state may still be null on the first turn when onDone fires.
@@ -514,6 +658,7 @@ export default function ChatPage() {
       text,
       sessionId,
       (chunk) => {
+        assistantText += chunk;
         appendToMessage(assistantId, chunk);
       },
       (id) => {
@@ -523,6 +668,7 @@ export default function ChatPage() {
       async () => {
         finalizeMessage(assistantId);
         setIsStreaming(false);
+        pendingDirectChatFieldRef.current = inferDirectChatFieldFromAssistant(assistantText);
 
         // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
@@ -535,7 +681,7 @@ export default function ChatPage() {
           // Only apply if a newer turn hasn't already superseded this one
           if (nonce === extractNonceRef.current) {
             if (partial) {
-              setRsPartial((prev) => mergePartialFields(prev, partial, directFields));
+              setRsPartial((prev) => mergePartialFields(prev, partial, directFieldsForRequest));
               setDirectFields((prevDirect) => {
                 const updates: Record<string, string> = {};
                 for (const k of SUGGESTABLE_DIRECT_KEYS) {
@@ -575,11 +721,13 @@ export default function ChatPage() {
             [key]: { filled: true, value },
           },
         }));
-        if (SUGGESTABLE_DIRECT_KEYS.has(key) && !(directFields[key] ?? "").trim()) {
+        if (SUGGESTABLE_DIRECT_KEYS.has(key) && !(directFieldsForRequest[key] ?? "").trim()) {
           setDirectFields((prev) => ({ ...prev, [key]: value }));
+          setDeferredDirectFields((prev) => prev.filter((field) => field !== key));
         }
       },
-      directFields,
+      directFieldsForRequest,
+      deferredFieldsForRequest,
     );
   }
 
@@ -618,6 +766,7 @@ export default function ChatPage() {
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
     setDirectFields({});
+    setDeferredDirectFields([]);
     setHistoryOpen(false);
 
     // Restore Preview panel and check for completed analysis in parallel
@@ -651,6 +800,7 @@ export default function ChatPage() {
     setRsPartial(null);
     setSrsData(null);
     setDirectFields({});
+    setDeferredDirectFields([]);
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
     setHistoryOpen(false);

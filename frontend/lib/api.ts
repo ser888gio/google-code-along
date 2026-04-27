@@ -39,6 +39,7 @@ export async function streamChat(
   onFinalizing?: () => void,
   onFieldUpdate?: (key: string, value: string) => void,
   directFields?: Record<string, string>,
+  deferredFields?: string[],
 ): Promise<void> {
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
@@ -47,6 +48,7 @@ export async function streamChat(
       message,
       session_id: sessionId,
       ...(directFields ? { direct_fields: directFields } : {}),
+      ...(deferredFields?.length ? { deferred_fields: deferredFields } : {}),
     }),
   });
 

@@ -137,6 +137,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     user_id: str = "default_user"
     direct_fields: dict[str, str] | None = None
+    deferred_fields: list[str] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -273,7 +274,11 @@ async def chat(req: ChatRequest):
         role="user",
         parts=[
             types.Part.from_text(
-                text=build_augmented_user_message(req.message, direct_fields)
+                text=build_augmented_user_message(
+                    req.message,
+                    direct_fields,
+                    req.deferred_fields,
+                )
             )
         ],
     )
@@ -330,7 +335,11 @@ async def chat_stream(req: ChatRequest):
         role="user",
         parts=[
             types.Part.from_text(
-                text=build_augmented_user_message(req.message, direct_fields)
+                text=build_augmented_user_message(
+                    req.message,
+                    direct_fields,
+                    req.deferred_fields,
+                )
             )
         ],
     )
