@@ -36,3 +36,18 @@ def extract_conversation_text(session: Session) -> str:
             label = "User" if role == "user" else "Consultant"
             lines.append(f"{label}: {text}")
     return "\n".join(lines)
+
+
+def format_prompt_data_lines(text: str, *, default_label: str = "Transcript line") -> str:
+    """Prefix free-form user-controlled prompt data with stable line labels."""
+    labeled_lines: list[str] = []
+    known_prefixes = ("User:", "Consultant:", "Assistant:", "AI:", "System:")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            labeled_lines.append("")
+        elif stripped.startswith(known_prefixes):
+            labeled_lines.append(stripped)
+        else:
+            labeled_lines.append(f"{default_label}: {stripped}")
+    return "\n".join(labeled_lines).strip()

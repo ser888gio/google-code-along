@@ -22,13 +22,13 @@ import asyncio
 import json
 import time
 
-from google import genai
-
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
+from google import genai
 from google.adk.agents import Agent
 from logger import get_logger
 from prompts.agent import DISCOVERY_SYSTEM_PROMPT
 from prompts.context import DISCOVERY_EXTRACTION_PROMPT
+from utils import format_prompt_data_lines
 
 _genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -80,7 +80,7 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
     logger.debug("Extracting discovery fields from conversation transcript")
     try:
         prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
-            "{conversation}", conversation_text
+            "{conversation}", format_prompt_data_lines(conversation_text)
         )
         logger.info(
             f"Model call started: model={MODEL_DISCOVERY} caller=extract_discovery_fields"

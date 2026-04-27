@@ -13,6 +13,7 @@ from agent.discovery_agent import FIELD_LABELS, FIELD_SCHEMA
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
 from logger import get_logger
 from prompts.context import ACTIVE_FIELD_CLASSIFIER_PROMPT
+from utils import format_prompt_data_lines
 
 logger = get_logger(__name__)
 
@@ -215,8 +216,14 @@ async def _classify_with_llm(
             .replace(
                 "{field_labels_json}", json.dumps(FIELD_LABELS, ensure_ascii=False)
             )
-            .replace("{conversation_tail}", conversation_tail)
-            .replace("{user_message}", message)
+            .replace(
+                "{conversation_tail}",
+                format_prompt_data_lines(conversation_tail),
+            )
+            .replace(
+                "{user_message}",
+                format_prompt_data_lines(message, default_label="Latest user line"),
+            )
         )
         logger.info(
             f"Model call started: model={MODEL_DISCOVERY} caller=classify_user_turn"
