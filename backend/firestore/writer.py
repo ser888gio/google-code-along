@@ -26,7 +26,9 @@ _firestore_client: firestore.Client | None = None
 def _client() -> firestore.Client:
     global _firestore_client
     if _firestore_client is None:
-        _firestore_client = firestore.Client(project=GCP_PROJECT, database=FIRESTORE_DATABASE)
+        _firestore_client = firestore.Client(
+            project=GCP_PROJECT, database=FIRESTORE_DATABASE
+        )
     return _firestore_client
 
 
@@ -153,7 +155,9 @@ def list_sessions() -> list[dict[str, Any]]:
                     pass
         if not preview:
             messages = data.get("messages", [])
-            preview = next((m["text"] for m in messages if m.get("role") == "user"), None)
+            preview = next(
+                (m["text"] for m in messages if m.get("role") == "user"), None
+            )
 
         results.append(
             {
@@ -270,10 +274,21 @@ def upsert_discovery_state(session_id: str, discovery: dict) -> None:
 
 # Required fields for completeness calculation (mirrors FIELD_SCHEMA in discovery_agent.py)
 _REQUIRED_FIELDS: list[str] = [
-    "use_case_title", "department", "requestor", "product_owner",
-    "process_as_is", "process_context", "trigger", "purpose_to_be",
-    "impacted_users", "add_value", "time_criticality", "strategic_impact",
-    "systems_and_tools", "document_types", "data_security_classification",
+    "use_case_title",
+    "department",
+    "requestor",
+    "product_owner",
+    "process_as_is",
+    "process_context",
+    "trigger",
+    "purpose_to_be",
+    "impacted_users",
+    "add_value",
+    "time_criticality",
+    "strategic_impact",
+    "systems_and_tools",
+    "document_types",
+    "data_security_classification",
     "solution_type",
 ]
 
@@ -335,6 +350,98 @@ def get_direct_fields(session_id: str) -> dict[str, str]:
         return {}
 
 
+def upsert_deferred_fields(session_id: str, fields: dict[str, Any]) -> None:
+    """Persist fields the user explicitly chose to defer.
+
+    Values are metadata objects, e.g. {"deferred_at": "..."}; callers may also
+    pass truthy placeholders for backwards compatibility.
+    """
+    if not fields:
+        return
+
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    existing_json = snap.to_dict().get("deferred_fields_json") if snap.exists else None
+    try:
+        existing: dict[str, Any] = json.loads(existing_json) if existing_json else {}
+    except Exception:
+        existing = {}
+
+    now = datetime.now(timezone.utc).isoformat()
+    for key, value in fields.items():
+        if value is None:
+            existing.pop(key, None)
+        elif isinstance(value, dict):
+            existing[key] = value
+        else:
+            existing[key] = {"deferred_at": now}
+
+    ref.set(
+        {
+            "session_id": session_id,
+            "updated_at": now,
+            "deferred_fields_json": json.dumps(existing, ensure_ascii=False),
+        },
+        merge=True,
+    )
+
+
+def get_deferred_fields(session_id: str) -> dict[str, Any]:
+    """Return persisted deferred fields for *session_id*."""
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    if not snap.exists:
+        return {}
+    json_str = snap.to_dict().get("deferred_fields_json")
+    if not json_str:
+        return {}
+    try:
+        parsed = json.loads(json_str)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def remove_deferred_fields(session_id: str, field_keys: list[str]) -> None:
+    """Remove fields from the persisted deferred-field set."""
+    if not field_keys:
+        return
+    upsert_deferred_fields(session_id, {key: None for key in field_keys})
+
+
+def get_workflow_state(session_id: str) -> dict | None:
+    """Return persisted workflow cursor state for *session_id*."""
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = ref.get()
+    if not snap.exists:
+        return None
+    json_str = snap.to_dict().get("workflow_state_json")
+    if not json_str:
+        return None
+    try:
+        parsed = json.loads(json_str)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def upsert_workflow_state(session_id: str, state: dict) -> None:
+    """Persist workflow cursor state for *session_id*."""
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    ref.set(
+        {
+            "session_id": session_id,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "workflow_state_json": json.dumps(state, ensure_ascii=False),
+        },
+        merge=True,
+    )
+
+
 def get_discovery_state(session_id: str) -> dict | None:
     """Return the last saved discovery state for *session_id*, or None.
 
@@ -357,7 +464,11 @@ def get_discovery_state(session_id: str) -> dict | None:
         return None
 
     try:
-        state: dict = json.loads(ai_json) if ai_json else {"completeness": 0, "fields": {}, "missing_priority": []}
+        state: dict = (
+            json.loads(ai_json)
+            if ai_json
+            else {"completeness": 0, "fields": {}, "missing_priority": []}
+        )
     except Exception:
         state = {"completeness": 0, "fields": {}, "missing_priority": []}
 

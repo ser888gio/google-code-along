@@ -370,6 +370,7 @@ export default function ChatPage() {
   const [chatMode, setChatMode] = useState<ChatMode>("text");
   const [directFields, setDirectFields] = useState<Record<string, string>>({});
   const [deferredDirectFields, setDeferredDirectFields] = useState<DirectChatFieldKey[]>([]);
+  const [activeWorkflowField, setActiveWorkflowField] = useState<string | null>(null);
   // Debounce timer ref for persisting direct fields to the backend
   const directFieldDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -728,6 +729,7 @@ export default function ChatPage() {
       },
       directFieldsForRequest,
       deferredFieldsForRequest,
+      (key) => setActiveWorkflowField(key),
     );
   }
 
@@ -767,6 +769,7 @@ export default function ChatPage() {
     setFinalAnalysis(null);
     setDirectFields({});
     setDeferredDirectFields([]);
+    setActiveWorkflowField(null);
     setHistoryOpen(false);
 
     // Restore Preview panel and check for completed analysis in parallel
@@ -801,6 +804,7 @@ export default function ChatPage() {
     setSrsData(null);
     setDirectFields({});
     setDeferredDirectFields([]);
+    setActiveWorkflowField(null);
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
     setHistoryOpen(false);
@@ -903,7 +907,14 @@ export default function ChatPage() {
 
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
-          <span className="text-sm font-bold text-gray-800">Document Preprocessor</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-gray-800">Document Preprocessor</span>
+            {activeWorkflowField && (
+              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                {activeWorkflowField.replace(/_/g, " ")}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-3">
             {/* Voice/Text mode toggle */}
             <button

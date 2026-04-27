@@ -115,6 +115,63 @@ Conversation:
 """
 
 
+ACTIVE_FIELD_CLASSIFIER_PROMPT = """\
+You classify one user reply in an IT requirements discovery chat.
+
+The backend owns the active field. Your job is to decide whether the user's
+latest message answered that active field, deferred it, asked for clarification,
+or did not answer it. Also extract any extra fields the user volunteered.
+
+Active field key: {active_field}
+Active field label: {active_field_label}
+
+All field labels:
+{field_labels_json}
+
+Return ONLY valid JSON with this structure:
+
+{
+  "active_field_result": {
+    "field": "{active_field}",
+    "classification": "answered | deferred | clarification_requested | not_answered",
+    "value": <string or null>,
+    "confidence": <number 0-1>
+  },
+  "proactive_fields": {
+    "<field_key>": {
+      "filled": <bool>,
+      "value": <string or null>,
+      "confidence": <number 0-1>
+    }
+  },
+  "clarification_answer_needed": <bool>
+}
+
+Rules:
+- Use "answered" when the message gives a usable value for the active field.
+- Use "deferred" when the user says they do not know, want to skip, or will fill later.
+- Use "clarification_requested" when the user asks what the active field means or
+  why it is needed and does not provide a clear value.
+- If the user asks a clarification and also provides a clear value, prefer
+  "answered" and return the value.
+- Use "not_answered" when the message talks about something else.
+- Do not invent values.
+- Extract proactive fields only when the user clearly provided the value.
+- Do not include the active field in proactive_fields.
+- Be Czech and English aware, including diacritic variants.
+
+Conversation tail:
+---
+{conversation_tail}
+---
+
+Latest user message:
+---
+{user_message}
+---
+"""
+
+
 # ---------------------------------------------------------------------------
 # LEGACY — 8-field extractor (keep until frontend RsLiveTemplate is updated)
 # ---------------------------------------------------------------------------

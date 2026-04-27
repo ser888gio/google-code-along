@@ -1,12 +1,31 @@
+from __future__ import annotations
+
 import asyncio
 import base64
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 
 from agent import rs_agent, audio_agent
-from agent.discovery_agent import extract_discovery_fields
+from agent.discovery_agent import (
+    FIELD_LABELS,
+    REQUIRED_FIELDS,
+    FIELD_SCHEMA,
+    extract_discovery_fields,
+    initialize_workflow_state,
+    is_not_applicable_allowed,
+    pick_next_active_field,
+    sync_workflow_with_discovery_state,
+)
 from agent.finalizer_agent import run_finalizer
+from answer_classifier import (
+    DIRECT_FIELD_KEYS,
+    classify_user_turn,
+    is_deferred_answer,
+    normalize_for_match,
+)
+from answer_quality import rate_answer
 from bpmn import check_completeness, generate_bpmn_diagram
 from config import APP_NAME, FINALIZING_MARKER, GCS_PREFIX_SESSIONS, MODEL_AUDIO
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
@@ -27,13 +46,18 @@ from firestore import (
     append_conversation_turn,
     get_direct_fields,
     get_conversation_history,
+    get_deferred_fields,
     get_discovery_state,
     get_final_analysis,
     get_srs_fields,
+    get_workflow_state,
     list_sessions,
+    remove_deferred_fields,
     set_finalization_pending,
+    upsert_deferred_fields,
     upsert_direct_fields,
     upsert_discovery_state,
+    upsert_workflow_state,
     upsert_srs_fields,
 )
 from gcs import get_bucket_name, list_files, write_file
@@ -44,7 +68,7 @@ from generation import (
     rs_template_to_docx,
     srs_json_to_docx,
 )
-from google.adk.agents.live_request_queue import LiveRequestQueue  
+from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -97,6 +121,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "Internal server error"},
     )
 
+
 # --- ADK runner setup ---
 
 session_service = InMemorySessionService()
@@ -127,6 +152,287 @@ session_bridge = SessionBridge(
 # (common in voice mode where turn_complete events arrive faster than
 # the ~40s extraction call can finish).
 _extract_locks: dict[str, asyncio.Lock] = {}
+
+
+def _build_conversation_tail(session, latest_user_message: str, limit: int = 12) -> str:
+    """Build a compact transcript tail for classifiers/extractors."""
+    tail_lines: list[str] = []
+    if session and getattr(session, "events", None):
+        for event in session.events[-limit:]:
+            if not event.content or not event.content.parts:
+                continue
+            role = event.content.role or "unknown"
+            text = "".join(p.text for p in event.content.parts if p.text).strip()
+            if text:
+                label = "User" if role == "user" else "Consultant"
+                tail_lines.append(f"{label}: {text}")
+    tail_lines.append(f"User: {latest_user_message}")
+    return "\n".join(tail_lines)
+
+
+def _answered_field_values(
+    discovery_state: dict | None,
+    direct_fields: dict[str, str],
+) -> dict[str, str]:
+    """Return answered field values for hidden workflow context."""
+    values: dict[str, str] = {}
+    for key, entry in ((discovery_state or {}).get("fields") or {}).items():
+        if isinstance(entry, dict) and entry.get("filled") and entry.get("value"):
+            values[key] = str(entry["value"])
+    for key, value in direct_fields.items():
+        if str(value or "").strip():
+            values[key] = str(value).strip()
+    return values
+
+
+def _is_finalize_choice(message: str) -> bool:
+    """Detect a wrap-up user choice to finalize with open questions."""
+    text = normalize_for_match(message)
+    return any(
+        phrase in text
+        for phrase in [
+            "finalize",
+            "finalise",
+            "generate",
+            "vygeneruj",
+            "finalizuj",
+            "dokoncit",
+            "nechat",
+            "pozdeji",
+        ]
+    )
+
+
+async def _reopen_first_deferred_field(
+    *,
+    session_id: str,
+    workflow: dict,
+    deferred_fields: dict,
+) -> None:
+    """Move wrap-up back to discovery for the first deferred field."""
+    if not deferred_fields:
+        return
+
+    field_key = next(iter(deferred_fields))
+    deferred_fields.pop(field_key, None)
+    workflow["phase"] = "discovery"
+    workflow["active_field"] = field_key
+    workflow.setdefault("field_status", {})[field_key] = "missing"
+    workflow.setdefault("miss_counts", {})[field_key] = 0
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
+
+
+def _field_entry(value: str) -> dict:
+    return {"filled": True, "value": value}
+
+
+def _recompute_discovery_completeness(state: dict) -> None:
+    fields = state.setdefault("fields", {})
+    filled = sum(1 for key in REQUIRED_FIELDS if fields.get(key, {}).get("filled"))
+    state["completeness"] = round((filled / len(REQUIRED_FIELDS)) * 100)
+
+
+async def _prepare_workflow_turn(
+    *,
+    session_id: str,
+    req: ChatRequest,
+    session,
+    direct_fields: dict[str, str],
+) -> dict:
+    """Advance backend-owned workflow state before the LLM turn starts."""
+    loop = asyncio.get_running_loop()
+
+    discovery_state = await loop.run_in_executor(None, get_discovery_state, session_id)
+    deferred_fields = await loop.run_in_executor(None, get_deferred_fields, session_id)
+    stored_workflow = await loop.run_in_executor(None, get_workflow_state, session_id)
+    workflow = sync_workflow_with_discovery_state(
+        stored_workflow or initialize_workflow_state(),
+        discovery_state,
+        direct_fields,
+        deferred_fields,
+    )
+
+    incoming_deferred = {
+        key: {"deferred_at": datetime.now(timezone.utc).isoformat()}
+        for key in (req.deferred_fields or [])
+        if key in FIELD_SCHEMA
+    }
+    if incoming_deferred:
+        deferred_fields.update(incoming_deferred)
+        await loop.run_in_executor(
+            None, upsert_deferred_fields, session_id, incoming_deferred
+        )
+
+    previous_active = workflow.get("active_field")
+    classification = {
+        "classification": "not_answered",
+        "value": None,
+        "confidence": 0.0,
+        "proactive_fields": {},
+    }
+
+    tail_text = _build_conversation_tail(session, req.message)
+    if workflow.get("phase") == "wrap_up":
+        if _is_finalize_choice(req.message):
+            workflow["phase"] = "ready_to_finalize"
+            workflow["active_field"] = None
+        else:
+            await _reopen_first_deferred_field(
+                session_id=session_id,
+                workflow=workflow,
+                deferred_fields=deferred_fields,
+            )
+    elif previous_active:
+        classification = await classify_user_turn(
+            previous_active, req.message, tail_text
+        )
+        await rate_answer(
+            previous_active,
+            str(
+                (workflow.get("last_question_by_field") or {}).get(previous_active, "")
+            ),
+            req.message,
+            classification["classification"],
+        )
+
+        statuses = workflow["field_status"]
+        miss_counts = workflow.setdefault("miss_counts", {})
+        clarification_counts = workflow.setdefault("clarification_counts", {})
+
+        if classification["classification"] == "answered":
+            value = classification.get("value")
+            if value:
+                statuses[previous_active] = "answered"
+                miss_counts[previous_active] = 0
+                if discovery_state is None:
+                    discovery_state = {
+                        "completeness": 0,
+                        "fields": {},
+                        "missing_priority": [],
+                    }
+                discovery_state.setdefault("fields", {})[previous_active] = (
+                    _field_entry(value)
+                )
+                _recompute_discovery_completeness(discovery_state)
+                await loop.run_in_executor(
+                    None, upsert_discovery_state, session_id, discovery_state
+                )
+                if previous_active in DIRECT_FIELD_KEYS:
+                    direct_fields[previous_active] = value
+                    await loop.run_in_executor(
+                        None, upsert_direct_fields, session_id, {previous_active: value}
+                    )
+                if previous_active in deferred_fields:
+                    deferred_fields.pop(previous_active, None)
+                    await loop.run_in_executor(
+                        None, remove_deferred_fields, session_id, [previous_active]
+                    )
+            else:
+                statuses[previous_active] = "missing"
+        elif classification["classification"] == "deferred":
+            statuses[previous_active] = "deferred"
+            miss_counts[previous_active] = 0
+            deferred_fields[previous_active] = {
+                "deferred_at": datetime.now(timezone.utc).isoformat()
+            }
+            await loop.run_in_executor(
+                None,
+                upsert_deferred_fields,
+                session_id,
+                {previous_active: deferred_fields[previous_active]},
+            )
+        elif classification["classification"] == "clarification_requested":
+            statuses[previous_active] = "clarification_requested"
+            clarification_counts[previous_active] = (
+                int(clarification_counts.get(previous_active) or 0) + 1
+            )
+        else:
+            if is_deferred_answer(req.message):
+                statuses[previous_active] = "deferred"
+                deferred_fields[previous_active] = {
+                    "deferred_at": datetime.now(timezone.utc).isoformat()
+                }
+                await loop.run_in_executor(
+                    None,
+                    upsert_deferred_fields,
+                    session_id,
+                    {previous_active: deferred_fields[previous_active]},
+                )
+            else:
+                statuses[previous_active] = "missing"
+                miss_counts[previous_active] = (
+                    int(miss_counts.get(previous_active) or 0) + 1
+                )
+
+        proactive_updates: dict[str, str] = {}
+        for key, entry in (classification.get("proactive_fields") or {}).items():
+            if key not in FIELD_SCHEMA or key == previous_active:
+                continue
+            value = str(entry.get("value") or "").strip()
+            if value:
+                workflow["field_status"][key] = "answered"
+                proactive_updates[key] = value
+        if proactive_updates:
+            if discovery_state is None:
+                discovery_state = {
+                    "completeness": 0,
+                    "fields": {},
+                    "missing_priority": [],
+                }
+            fields = discovery_state.setdefault("fields", {})
+            for key, value in proactive_updates.items():
+                fields[key] = _field_entry(value)
+            _recompute_discovery_completeness(discovery_state)
+            await loop.run_in_executor(
+                None, upsert_discovery_state, session_id, discovery_state
+            )
+
+    if workflow.get("phase") == "ready_to_finalize":
+        active_field = None
+    else:
+        active_field = pick_next_active_field(
+            workflow,
+            discovery_state,
+            direct_fields,
+            deferred_fields,
+        )
+        if active_field is None:
+            workflow["phase"] = "wrap_up"
+        elif workflow.get("phase") != "wrap_up":
+            workflow["phase"] = "discovery"
+        workflow["active_field"] = active_field
+
+    # Treat disallowed not-applicable statuses as deferred to avoid required-field skips.
+    for key, status in list(workflow.get("field_status", {}).items()):
+        if status == "not_applicable" and not is_not_applicable_allowed(key):
+            workflow["field_status"][key] = "deferred"
+
+    await loop.run_in_executor(None, upsert_workflow_state, session_id, workflow)
+
+    answered_values = _answered_field_values(discovery_state, direct_fields)
+    workflow_context = {
+        "phase": workflow.get("phase"),
+        "active_field": workflow.get("active_field"),
+        "clarification_requested": classification["classification"]
+        == "clarification_requested",
+        "miss_count": int(
+            (workflow.get("miss_counts") or {}).get(workflow.get("active_field")) or 0
+        ),
+        "answered_fields": answered_values,
+        "deferred_fields": list(deferred_fields.keys()),
+        "ready_to_finalize": workflow.get("phase") == "ready_to_finalize",
+    }
+
+    return {
+        "workflow": workflow,
+        "workflow_context": workflow_context,
+        "direct_fields": direct_fields,
+        "deferred_fields": list(deferred_fields.keys()),
+        "classification": classification,
+        "tail_text": tail_text,
+    }
 
 
 # --- Request / response models ---
@@ -194,7 +500,7 @@ async def upload_file(
     if len(contents) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024*1024)} MB.",
+            detail=f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
         )
     logger.info(
         f"Upload received: file={safe_filename} size={len(contents)}B session_id={safe_session_id}"
@@ -265,10 +571,21 @@ async def chat(req: ChatRequest):
     else:
         logger.debug(f"Resumed existing session: {session_id}")
 
-    stored_direct_fields = await loop.run_in_executor(None, get_direct_fields, session_id)
+    stored_direct_fields = await loop.run_in_executor(
+        None, get_direct_fields, session_id
+    )
     direct_fields = merge_direct_fields(stored_direct_fields, req.direct_fields)
     if req.direct_fields:
-        await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
+        await loop.run_in_executor(
+            None, upsert_direct_fields, session_id, req.direct_fields
+        )
+
+    workflow_turn = await _prepare_workflow_turn(
+        session_id=session_id,
+        req=req,
+        session=session,
+        direct_fields=direct_fields,
+    )
 
     user_content = types.Content(
         role="user",
@@ -276,8 +593,10 @@ async def chat(req: ChatRequest):
             types.Part.from_text(
                 text=build_augmented_user_message(
                     req.message,
-                    direct_fields,
-                    req.deferred_fields,
+                    workflow_turn["direct_fields"],
+                    workflow_turn["deferred_fields"],
+                    workflow_context=workflow_turn["workflow_context"],
+                    field_labels=FIELD_LABELS,
                 )
             )
         ],
@@ -326,10 +645,21 @@ async def chat_stream(req: ChatRequest):
     else:
         logger.debug(f"Resumed existing session: {session_id}")
 
-    stored_direct_fields = await loop.run_in_executor(None, get_direct_fields, session_id)
+    stored_direct_fields = await loop.run_in_executor(
+        None, get_direct_fields, session_id
+    )
     direct_fields = merge_direct_fields(stored_direct_fields, req.direct_fields)
     if req.direct_fields:
-        await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
+        await loop.run_in_executor(
+            None, upsert_direct_fields, session_id, req.direct_fields
+        )
+
+    workflow_turn = await _prepare_workflow_turn(
+        session_id=session_id,
+        req=req,
+        session=session,
+        direct_fields=direct_fields,
+    )
 
     user_content = types.Content(
         role="user",
@@ -337,8 +667,10 @@ async def chat_stream(req: ChatRequest):
             types.Part.from_text(
                 text=build_augmented_user_message(
                     req.message,
-                    direct_fields,
-                    req.deferred_fields,
+                    workflow_turn["direct_fields"],
+                    workflow_turn["deferred_fields"],
+                    workflow_context=workflow_turn["workflow_context"],
+                    field_labels=FIELD_LABELS,
                 )
             )
         ],
@@ -347,6 +679,9 @@ async def chat_stream(req: ChatRequest):
     async def event_generator():
         # First, send the session_id so the client can track it
         yield f'data: {{"session_id": "{session_id}"}}\n\n'
+        active_field = workflow_turn["workflow"].get("active_field")
+        if active_field:
+            yield f"data: {json.dumps({'active_field': active_field})}\n\n"
 
         # ── Pre-stream quick extract ──────────────────────────────────────
         # Before the agent starts responding, run a fast Gemini Flash extract
@@ -363,20 +698,7 @@ async def chat_stream(req: ChatRequest):
             )
             prev_fields = (prev_state or {}).get("fields") or {}
 
-            tail_lines: list[str] = []
-            if session and session.events:
-                for event in session.events[-12:]:  # last ~6 turns
-                    if not event.content or not event.content.parts:
-                        continue
-                    role = event.content.role or "unknown"
-                    text = "".join(
-                        p.text for p in event.content.parts if p.text
-                    ).strip()
-                    if text:
-                        label = "User" if role == "user" else "Consultant"
-                        tail_lines.append(f"{label}: {text}")
-            tail_lines.append(f"User: {req.message}")
-            tail_text = "\n".join(tail_lines)
+            tail_text = workflow_turn["tail_text"]
 
             new_state = await asyncio.wait_for(
                 extract_discovery_fields(tail_text),
@@ -408,9 +730,7 @@ async def chat_stream(req: ChatRequest):
                 f"Pre-stream extract timed out (>4s): session={session_id} — skipping field_update events"
             )
         except Exception as exc:
-            logger.warning(
-                f"Pre-stream extract failed: session={session_id} {exc}"
-            )
+            logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
 
         reply_parts: list[str] = []
         try:
@@ -737,8 +1057,13 @@ async def context_extract(req: ContextRequest):
             session_id=sid,
         )
     except Exception as exc:
-        logger.error(f"Failed to get session for extraction: session_id={sid}: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Session lookup failed: {type(exc).__name__}")
+        logger.error(
+            f"Failed to get session for extraction: session_id={sid}: {exc}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Session lookup failed: {type(exc).__name__}"
+        )
 
     if session is None:
         # ADK session gone — return last persisted discovery state if available
@@ -746,8 +1071,12 @@ async def context_extract(req: ContextRequest):
             loop = asyncio.get_running_loop()
             saved = await loop.run_in_executor(None, get_discovery_state, sid)
         except Exception as exc:
-            logger.error(f"Firestore fallback failed for session_id={sid}: {exc}", exc_info=True)
-            raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
+            logger.error(
+                f"Firestore fallback failed for session_id={sid}: {exc}", exc_info=True
+            )
+            raise HTTPException(
+                status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}"
+            )
         if saved:
             logger.info(
                 f"ADK session missing, returning saved discovery state: session_id={sid} completeness={saved.get('completeness')}%"
@@ -775,7 +1104,9 @@ async def context_extract(req: ContextRequest):
             try:
                 saved = await loop.run_in_executor(None, get_discovery_state, sid)
             except Exception as exc:
-                logger.warning(f"Firestore get_discovery_state (coalesced) failed: session_id={sid} {exc}")
+                logger.warning(
+                    f"Firestore get_discovery_state (coalesced) failed: session_id={sid} {exc}"
+                )
                 saved = None
             if saved:
                 logger.info(
@@ -816,7 +1147,9 @@ async def context_extract(req: ContextRequest):
         try:
             await loop.run_in_executor(None, upsert_discovery_state, sid, result)
         except Exception as exc:
-            logger.warning(f"Firestore upsert_discovery_state failed: session_id={sid} {exc}")
+            logger.warning(
+                f"Firestore upsert_discovery_state failed: session_id={sid} {exc}"
+            )
 
         asyncio.create_task(
             _persist_srs_to_firestore(
@@ -829,7 +1162,9 @@ async def context_extract(req: ContextRequest):
         try:
             merged = await loop.run_in_executor(None, get_discovery_state, sid)
         except Exception as exc:
-            logger.warning(f"Firestore get_discovery_state failed: session_id={sid} {exc}")
+            logger.warning(
+                f"Firestore get_discovery_state failed: session_id={sid} {exc}"
+            )
             merged = None
         if merged:
             return {"completeness": merged["completeness"], "fields": merged["fields"]}
@@ -983,8 +1318,12 @@ async def firestore_data(session_id: str):
         loop = asyncio.get_running_loop()
         doc = await loop.run_in_executor(None, get_srs_fields, session_id)
     except Exception as exc:
-        logger.error(f"Firestore read failed for session_id={session_id}: {exc}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
+        logger.error(
+            f"Firestore read failed for session_id={session_id}: {exc}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}"
+        )
     return FirestoreDataResponse(session_id=session_id, data=doc)
 
 
@@ -1407,7 +1746,12 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                 logger.error(f"[WS] Gemini Live API error: {e}", exc_info=True)
                 try:
                     await websocket.send_text(
-                        json.dumps({"type": "error", "message": "A voice API error occurred. Please try again."})
+                        json.dumps(
+                            {
+                                "type": "error",
+                                "message": "A voice API error occurred. Please try again.",
+                            }
+                        )
                     )
                 except Exception:
                     pass

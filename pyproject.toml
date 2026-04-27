@@ -1,0 +1,26 @@
+[project]
+name = "google-code-along"
+version = "0.1.0"
+description = "AI-powered Requirement Specification (RS) Generator"
+dependencies = []np
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.0",
+]
+
+[tool.ruff]
+# Configure Ruff to match your preferences
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+# Select rules (e.g., E = pycodestyle, F = pyflakes, I = isort)
+select = ["E", "F", "I"]
+ignore = []
+
+[tool.ruff.format]
+# Enable auto-formatting
+quote-style = "double"
+indent-style = "space"

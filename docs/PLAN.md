@@ -40,7 +40,7 @@ Systematically work through the required chapters of the RS template.
 
 ## 4. Technical Stack & Tools (GCP Ecosystem)
 
-- **Orchestration (Primary):** Google ADK (Agent Development Kit). This is the mandatory framework for building, routing, and managing the agent's conversational state and tool integrations during the hackathon.
+- **Orchestration (Primary):** Google ADK (Agent Development Kit). This is the mandatory framework for building, routing, and managing the agent's conversational state and tool integrations.
 - **Core Model:** Gemini 1.5 Pro (via Vertex AI). Chosen for its massive context window (ideal for holding long conversations and drafting large documents) and elite reasoning capabilities.
 - **Knowledge Base (RAG):** Vertex AI Search. Connected to a datastore containing the blank official RS Template and high-quality historical examples.
 - **[Nice-to-Have] File Handling:** Google Cloud Storage (GCS). If time allows, deploy a GCS bucket where users can upload supporting documents (PDFs, DOCX, images). The Google ADK will pass these URIs to Gemini to leverage its native multimodal vision and document parsing capabilities.

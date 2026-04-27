@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 
-export interface UseAudioPlayerReturn {
+interface UseAudioPlayerReturn {
   /** Whether audio is currently being played */
   isPlaying: boolean;
   /** Initialize the player (must be called after user gesture) */

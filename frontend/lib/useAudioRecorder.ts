@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 
-export interface UseAudioRecorderReturn {
+interface UseAudioRecorderReturn {
   /** Whether the recorder is actively capturing audio */
   isRecording: boolean;
   /** Start recording from the microphone */

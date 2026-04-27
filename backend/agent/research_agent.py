@@ -146,7 +146,7 @@ def list_knowledge_base_docs() -> dict:
             }
         }
 
-    TODO (manual setup required before hackathon continues):
+    TODO (manual setup required before continues):
       Upload curated documents to GCS knowledge_base/ sub-folders:
         gs://<bucket>/knowledge_base/templates/  — IT use case PDF form template
         gs://<bucket>/knowledge_base/guidelines/ — solution type selection guide

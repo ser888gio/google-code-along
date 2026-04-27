@@ -80,7 +80,9 @@ async def compile_srs_json_from_session(
 
     try:
         prompt = SRS_EXTRACTION_PROMPT.format(conversation=conversation_text)
-        response = _genai_client.models.generate_content(model=MODEL_SRS_COMPILER, contents=prompt)
+        response = _genai_client.models.generate_content(
+            model=MODEL_SRS_COMPILER, contents=prompt
+        )
         raw = (response.text or "").strip()
 
         # Strip markdown fences if present

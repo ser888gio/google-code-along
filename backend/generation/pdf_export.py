@@ -199,4 +199,3 @@ def markdown_to_pdf(markdown: str) -> bytes:
 
     doc.build(flowables)
     return buffer.getvalue()
-

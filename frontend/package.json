@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "knip": "knip"
   },
   "dependencies": {
     "@skodaflow/web-library": "^8.0.1",
@@ -20,21 +21,21 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@storybook/addon-mcp": "^0.4.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^20",
+    "@types/node": "^20.19.39",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.7",
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.3.0",
+    "knip": "^6.7.0",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.6",
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   }
 }

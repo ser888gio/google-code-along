@@ -96,7 +96,9 @@ def app_with_mocks():
 @pytest.mark.asyncio
 async def test_health_returns_ok(app_with_mocks):
     app, *_ = app_with_mocks
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
@@ -112,7 +114,9 @@ async def test_chat_returns_reply_and_session_id(app_with_mocks):
     app, mock_runner, *_ = app_with_mocks
     mock_runner.run_async = _fake_run_async_greeting
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post(
             "/chat",
             json={"message": "Hello", "session_id": None},
@@ -131,7 +135,9 @@ async def test_chat_reply_contains_agent_text(app_with_mocks):
     app, mock_runner, *_ = app_with_mocks
     mock_runner.run_async = _fake_run_async_greeting
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/chat", json={"message": "Hi there"})
 
     assert "Hello" in resp.json()["reply"]
@@ -143,7 +149,9 @@ async def test_chat_reuses_session_id(app_with_mocks):
     mock_runner.run_async = _fake_run_async_greeting
     session_id = "my-fixed-session"
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post(
             "/chat", json={"message": "Follow-up", "session_id": session_id}
         )
@@ -161,7 +169,9 @@ async def test_chat_stream_sends_session_id_event(app_with_mocks):
     app, mock_runner, *_ = app_with_mocks
     mock_runner.run_async = _fake_run_async_greeting
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post(
             "/chat/stream",
             json={"message": "Hello"},
@@ -181,7 +191,9 @@ async def test_chat_stream_ends_with_done(app_with_mocks):
     app, mock_runner, *_ = app_with_mocks
     mock_runner.run_async = _fake_run_async_greeting
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/chat/stream", json={"message": "Hello"})
 
     assert "data: [DONE]" in resp.text
@@ -192,10 +204,16 @@ async def test_chat_stream_contains_text_chunk(app_with_mocks):
     app, mock_runner, *_ = app_with_mocks
     mock_runner.run_async = _fake_run_async_greeting
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/chat/stream", json={"message": "Hello"})
 
-    lines = [line for line in resp.text.split("\n") if line.startswith("data: ") and line != "data: [DONE]"]
+    lines = [
+        line
+        for line in resp.text.split("\n")
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
     text_events = [json.loads(line[6:]) for line in lines if "{" in line]
     text_chunks = [e["text"] for e in text_events if "text" in e]
     assert len(text_chunks) > 0
@@ -216,7 +234,9 @@ async def test_document_returns_not_ready_without_rs(app_with_mocks):
 
     session_id = "doc-test-session"
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/document", json={"session_id": session_id})
 
     assert resp.status_code == 200
@@ -239,7 +259,9 @@ async def test_document_returns_ready_with_rs_marker(app_with_mocks):
     ]
     mock_session.events = [event]
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/document", json={"session_id": "rs-session"})
 
     assert resp.status_code == 200
@@ -260,7 +282,9 @@ async def test_document_pdf_returns_404_without_rs(app_with_mocks):
     app, mock_runner, mock_svc, mock_session = app_with_mocks
     mock_session.events = []
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/document/pdf", json={"session_id": "empty-session"})
 
     assert resp.status_code == 404
@@ -279,7 +303,9 @@ async def test_document_pdf_returns_valid_pdf_bytes(app_with_mocks):
     ]
     mock_session.events = [event]
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/document/pdf", json={"session_id": "pdf-session"})
 
     assert resp.status_code == 200
@@ -295,16 +321,18 @@ async def test_document_pdf_has_correct_disposition_header(app_with_mocks):
     event = MagicMock()
     event.content = MagicMock()
     event.content.role = "model"
-    event.content.parts = [
-        MagicMock(text=f"{RS_MARKER}\n{SAMPLE_RS_MARKDOWN}")
-    ]
+    event.content.parts = [MagicMock(text=f"{RS_MARKER}\n{SAMPLE_RS_MARKDOWN}")]
     mock_session.events = [event]
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         resp = await client.post("/document/pdf", json={"session_id": "pdf-session-2"})
 
     assert "attachment" in resp.headers.get("content-disposition", "")
-    assert "requirement_specification.pdf" in resp.headers.get("content-disposition", "")
+    assert "requirement_specification.pdf" in resp.headers.get(
+        "content-disposition", ""
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -330,10 +358,7 @@ async def test_full_pipeline_scripted_conversation(app_with_mocks):
     turn_responses = [
         "Welcome! Let's start. Can you describe your current process?",
         "Understood. What does success look like for you?",
-        "I have enough information.\n\n"
-        + RS_MARKER
-        + "\n"
-        + SAMPLE_RS_MARKDOWN,
+        "I have enough information.\n\n" + RS_MARKER + "\n" + SAMPLE_RS_MARKDOWN,
     ]
     turn_index = {"i": 0}
 
@@ -349,18 +374,35 @@ async def test_full_pipeline_scripted_conversation(app_with_mocks):
 
     mock_runner.run_async = fake_run_async
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         # Turn 1 — project description
-        r1 = await client.post("/chat", json={"message": "I want to automate sales reports.", "session_id": session_id})
+        r1 = await client.post(
+            "/chat",
+            json={
+                "message": "I want to automate sales reports.",
+                "session_id": session_id,
+            },
+        )
         assert r1.status_code == 200
         assert r1.json()["session_id"] == session_id
 
         # Turn 2 — As-Is
-        r2 = await client.post("/chat", json={"message": "We do it manually in Excel.", "session_id": session_id})
+        r2 = await client.post(
+            "/chat",
+            json={"message": "We do it manually in Excel.", "session_id": session_id},
+        )
         assert r2.status_code == 200
 
         # Turn 3 — To-Be (triggers RS generation)
-        r3 = await client.post("/chat", json={"message": "I want an automated daily email.", "session_id": session_id})
+        r3 = await client.post(
+            "/chat",
+            json={
+                "message": "I want an automated daily email.",
+                "session_id": session_id,
+            },
+        )
         assert r3.status_code == 200
         assert RS_MARKER in r3.json()["reply"]
 

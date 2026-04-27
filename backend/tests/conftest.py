@@ -43,12 +43,60 @@ def _install_google_adk_stubs():
 
     # --- google.adk.agents ---
     agents_mod = types.ModuleType("google.adk.agents")
+    agents_mod.__path__ = []
     agents_mod.Agent = MagicMock()
     sys.modules["google.adk.agents"] = agents_mod
+
+    live_queue_mod = types.ModuleType("google.adk.agents.live_request_queue")
+    live_queue_mod.LiveRequestQueue = MagicMock()
+    sys.modules["google.adk.agents.live_request_queue"] = live_queue_mod
+
+    run_config_mod = types.ModuleType("google.adk.agents.run_config")
+    run_config_mod.RunConfig = MagicMock()
+    run_config_mod.StreamingMode = MagicMock()
+    run_config_mod.StreamingMode.BIDI = "BIDI"
+    sys.modules["google.adk.agents.run_config"] = run_config_mod
+
+    events_mod = types.ModuleType("google.adk.events")
+    events_mod.__path__ = []
+    event_mod = types.ModuleType("google.adk.events.event")
+    event_mod.Event = MagicMock()
+    sys.modules["google.adk.events"] = events_mod
+    sys.modules["google.adk.events.event"] = event_mod
+
+    # --- google.adk.models.google_llm ---
+    models_mod = types.ModuleType("google.adk.models")
+    models_mod.__path__ = []
+    google_llm_mod = types.ModuleType("google.adk.models.google_llm")
+
+    class _FakeGemini:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def _tracking_headers(self):
+            return {}
+
+        @property
+        def _live_api_version(self):
+            return "v1beta"
+
+    google_llm_mod.Gemini = _FakeGemini
+    sys.modules["google.adk.models"] = models_mod
+    sys.modules["google.adk.models.google_llm"] = google_llm_mod
+
+    # --- google.adk.tools ---
+    tools_mod = types.ModuleType("google.adk.tools")
+    tools_mod.FunctionTool = MagicMock(
+        side_effect=lambda *args, **kwargs: (
+            kwargs.get("func") or (args[0] if args else MagicMock())
+        )
+    )
+    sys.modules["google.adk.tools"] = tools_mod
 
     # --- google.genai ---
     genai_mod = types.ModuleType("google.genai")
     genai_mod.__path__ = []
+    genai_mod.Client = MagicMock()
     sys.modules["google.genai"] = genai_mod
 
     # --- google.genai.types ---
@@ -69,14 +117,29 @@ def _install_google_adk_stubs():
 
     types_mod.Part = _FakePart
     types_mod.Content = _FakeContent
+    types_mod.HttpOptions = MagicMock()
+    types_mod.AudioTranscriptionConfig = MagicMock()
+    types_mod.Blob = MagicMock()
+    types_mod.SpeechConfig = MagicMock()
+    types_mod.VoiceConfig = MagicMock()
     sys.modules["google.genai.types"] = types_mod
     genai_mod.types = types_mod  # type: ignore[attr-defined]
+
+    errors_mod = types.ModuleType("google.genai.errors")
+    errors_mod.APIError = Exception
+    sys.modules["google.genai.errors"] = errors_mod
 
     # --- google.cloud / google.cloud.aiplatform ---
     cloud_mod = sys.modules.setdefault("google.cloud", types.ModuleType("google.cloud"))
     if not hasattr(cloud_mod, "__path__"):
         cloud_mod.__path__ = []  # type: ignore[attr-defined]
     sys.modules["google.cloud.aiplatform"] = types.ModuleType("google.cloud.aiplatform")
+
+    firestore_mod = types.ModuleType("google.cloud.firestore")
+    firestore_mod.Client = MagicMock()
+    firestore_mod.ArrayUnion = MagicMock(side_effect=lambda value: value)
+    sys.modules["google.cloud.firestore"] = firestore_mod
+    cloud_mod.firestore = firestore_mod  # type: ignore[attr-defined]
 
 
 # Run immediately when conftest is loaded (before collection)

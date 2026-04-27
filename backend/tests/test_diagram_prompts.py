@@ -9,7 +9,10 @@ def test_bpmn_prompts_format_with_literal_json_and_mermaid_braces():
     generation_prompt = BPMN_GENERATION_PROMPT.format(conversation=conversation)
 
     assert '"score": <integer 0-100>' in completeness_prompt
-    assert '"missing": [<short string describing each missing area>]' in completeness_prompt
+    assert (
+        '"missing": [<short string describing each missing area>]'
+        in completeness_prompt
+    )
     assert "{...}" in generation_prompt
     assert conversation in completeness_prompt
     assert conversation in generation_prompt
@@ -22,6 +25,9 @@ def test_dataflow_prompts_format_with_literal_json():
     generation_prompt = DATAFLOW_GENERATION_PROMPT.format(conversation=conversation)
 
     assert '"score": <integer 0-100>' in completeness_prompt
-    assert '"missing": [<short string describing each missing area>]' in completeness_prompt
+    assert (
+        '"missing": [<short string describing each missing area>]'
+        in completeness_prompt
+    )
     assert conversation in completeness_prompt
     assert conversation in generation_prompt

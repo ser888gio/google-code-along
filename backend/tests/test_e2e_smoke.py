@@ -114,6 +114,7 @@ NFR-004: A non-developer must be able to update the recipient list without code 
 # Fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def smoke_app():
     """Set up the FastAPI app with a scripted multi-turn mock runner."""
@@ -159,6 +160,7 @@ def smoke_app():
 # Smoke test
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_automated_sales_report_smoke(smoke_app):
     """
@@ -167,8 +169,9 @@ async def test_automated_sales_report_smoke(smoke_app):
     """
     app, session_id = smoke_app
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
         # — Turn 1: Greeting —
         r = await client.post(
             "/chat",
@@ -185,7 +188,10 @@ async def test_automated_sales_report_smoke(smoke_app):
             json={"message": SCRIPTED_TURNS[1][0], "session_id": session_id},
         )
         assert r.status_code == 200
-        assert "future" in r.json()["reply"].lower() or "ideal" in r.json()["reply"].lower()
+        assert (
+            "future" in r.json()["reply"].lower()
+            or "ideal" in r.json()["reply"].lower()
+        )
 
         # — Turn 3: To-Be —
         r = await client.post(

@@ -209,3 +209,132 @@ EMPTY_FIELDS: dict = {key: {"filled": False, "value": None} for key in FIELD_SCH
 # TODO: confirm with team whether ROI fields (cost_saving, saved_time, revenue_increase)
 #       should be required or optional for the completeness gate (currently optional)
 REQUIRED_FIELDS = [k for k, v in FIELD_SCHEMA.items() if v["required"]]
+FIELD_LABELS = {key: value["label"] for key, value in FIELD_SCHEMA.items()}
+OPTIONAL_FIELDS = [k for k, v in FIELD_SCHEMA.items() if not v["required"]]
+
+WORKFLOW_PHASES = {
+    "discovery",
+    "wrap_up",
+    "ready_to_finalize",
+    "finalizing",
+    "complete",
+}
+
+FIELD_STATUSES = {
+    "missing",
+    "answered",
+    "deferred",
+    "clarification_requested",
+    "not_applicable",
+}
+
+NOT_APPLICABLE_FIELDS = {
+    "cost_saving",
+    "revenue_increase",
+    "risk_avoidance",
+    "comments",
+    "attachments",
+}
+
+
+def initialize_workflow_state() -> dict:
+    """Return a new workflow cursor state for a discovery session."""
+    return {
+        "phase": "discovery",
+        "active_field": None,
+        "field_status": {key: "missing" for key in FIELD_SCHEMA},
+        "clarification_counts": {},
+        "miss_counts": {},
+        "last_question_by_field": {},
+    }
+
+
+def normalize_workflow_state(state: dict | None) -> dict:
+    """Return workflow state with all expected keys and valid field statuses."""
+    normalized = initialize_workflow_state()
+    if isinstance(state, dict):
+        normalized.update({k: v for k, v in state.items() if k in normalized})
+
+    phase = normalized.get("phase")
+    if phase not in WORKFLOW_PHASES:
+        normalized["phase"] = "discovery"
+
+    active = normalized.get("active_field")
+    if active not in FIELD_SCHEMA:
+        normalized["active_field"] = None
+
+    statuses = normalized.get("field_status")
+    if not isinstance(statuses, dict):
+        statuses = {}
+    normalized["field_status"] = {
+        key: statuses.get(key) if statuses.get(key) in FIELD_STATUSES else "missing"
+        for key in FIELD_SCHEMA
+    }
+
+    for key in ("clarification_counts", "miss_counts", "last_question_by_field"):
+        if not isinstance(normalized.get(key), dict):
+            normalized[key] = {}
+
+    return normalized
+
+
+def sync_workflow_with_discovery_state(
+    workflow_state: dict | None,
+    discovery_state: dict | None,
+    direct_fields: dict[str, str] | None = None,
+    deferred_fields: dict | None = None,
+) -> dict:
+    """Mark workflow fields answered/deferred based on persisted form state."""
+    state = normalize_workflow_state(workflow_state)
+    statuses = state["field_status"]
+
+    fields = (discovery_state or {}).get("fields") or {}
+    for key, entry in fields.items():
+        if key not in statuses or not isinstance(entry, dict):
+            continue
+        if entry.get("filled") and str(entry.get("value") or "").strip():
+            statuses[key] = "answered"
+
+    for key, value in (direct_fields or {}).items():
+        if key in statuses and str(value or "").strip():
+            statuses[key] = "answered"
+
+    for key in deferred_fields or {}:
+        if key in statuses and statuses[key] != "answered":
+            statuses[key] = "deferred"
+
+    return state
+
+
+def is_not_applicable_allowed(field_key: str) -> bool:
+    """Return whether a field can be treated as not applicable."""
+    return field_key in NOT_APPLICABLE_FIELDS
+
+
+def pick_next_active_field(
+    workflow_state: dict | None,
+    discovery_state: dict | None = None,
+    direct_fields: dict[str, str] | None = None,
+    deferred_fields: dict | None = None,
+    *,
+    include_optional: bool = True,
+) -> str | None:
+    """Pick the next missing field in deterministic schema order."""
+    state = sync_workflow_with_discovery_state(
+        workflow_state,
+        discovery_state,
+        direct_fields,
+        deferred_fields,
+    )
+    statuses = state["field_status"]
+
+    for key in REQUIRED_FIELDS:
+        if statuses.get(key) in {"missing", "clarification_requested"}:
+            return key
+
+    if include_optional:
+        for key in OPTIONAL_FIELDS:
+            if statuses.get(key) in {"missing", "clarification_requested"}:
+                return key
+
+    return None

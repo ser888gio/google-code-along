@@ -44,40 +44,64 @@ def _add_placeholder(doc: Document, text: str):
 
 
 _RS_TEMPLATE_SECTIONS = [
-    (1, "Identity & Current State", [
-        ("use_case_title", "Use Case Title (EN)"),
-        ("department", "Customer Department"),
-        ("requestor", "Requestor"),
-        ("product_owner", "Product Owner"),
-        ("process_as_is", "Process Description / As-Is"),
-        ("process_context", "Process Context"),
-        ("trigger", "Trigger"),
-    ]),
-    (2, "Target State", [
-        ("purpose_to_be", "Purpose / To-Be"),
-    ]),
-    (3, "Value & ROI", [
-        ("saved_time_hours_per_year", "Saved Time (hours/year)"),
-        ("cost_saving", "Cost Saving"),
-        ("revenue_increase", "Revenue Increase"),
-        ("impacted_users", "Impacted Users"),
-        ("add_value", "Added Value"),
-    ]),
-    (4, "Priority & Risk", [
-        ("time_criticality", "Time Criticality"),
-        ("strategic_impact", "Strategic Impact"),
-        ("risk_avoidance", "Risk Avoidance"),
-    ]),
-    (5, "Technical Context", [
-        ("systems_and_tools", "Systems & Tools Involved"),
-        ("document_types", "Types of Documents Involved"),
-        ("data_security_classification", "Data Security Classification"),
-        ("solution_type", "Solution Type"),
-    ]),
-    (6, "Additional", [
-        ("comments", "Comments"),
-        ("attachments", "Attachments (GCS paths)"),
-    ]),
+    (
+        1,
+        "Identity & Current State",
+        [
+            ("use_case_title", "Use Case Title (EN)"),
+            ("department", "Customer Department"),
+            ("requestor", "Requestor"),
+            ("product_owner", "Product Owner"),
+            ("process_as_is", "Process Description / As-Is"),
+            ("process_context", "Process Context"),
+            ("trigger", "Trigger"),
+        ],
+    ),
+    (
+        2,
+        "Target State",
+        [
+            ("purpose_to_be", "Purpose / To-Be"),
+        ],
+    ),
+    (
+        3,
+        "Value & ROI",
+        [
+            ("saved_time_hours_per_year", "Saved Time (hours/year)"),
+            ("cost_saving", "Cost Saving"),
+            ("revenue_increase", "Revenue Increase"),
+            ("impacted_users", "Impacted Users"),
+            ("add_value", "Added Value"),
+        ],
+    ),
+    (
+        4,
+        "Priority & Risk",
+        [
+            ("time_criticality", "Time Criticality"),
+            ("strategic_impact", "Strategic Impact"),
+            ("risk_avoidance", "Risk Avoidance"),
+        ],
+    ),
+    (
+        5,
+        "Technical Context",
+        [
+            ("systems_and_tools", "Systems & Tools Involved"),
+            ("document_types", "Types of Documents Involved"),
+            ("data_security_classification", "Data Security Classification"),
+            ("solution_type", "Solution Type"),
+        ],
+    ),
+    (
+        6,
+        "Additional",
+        [
+            ("comments", "Comments"),
+            ("attachments", "Attachments (GCS paths)"),
+        ],
+    ),
 ]
 
 

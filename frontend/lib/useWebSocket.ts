@@ -4,31 +4,31 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080";
 
-export type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
+type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
 
-export interface WsTextMessage {
+interface WsTextMessage {
   type: "text";
   text: string;
 }
 
-export interface WsUserTranscriptMessage {
+interface WsUserTranscriptMessage {
   type: "user_transcript";
   text: string;
 }
 
-export interface WsTurnCompleteMessage {
+interface WsTurnCompleteMessage {
   type: "turn_complete";
   finalizing?: boolean;
 }
 
-export interface WsErrorMessage {
+interface WsErrorMessage {
   type: "error";
   message: string;
 }
 
 export type WsServerMessage = WsTextMessage | WsUserTranscriptMessage | WsTurnCompleteMessage | WsErrorMessage;
 
-export interface UseWebSocketReturn {
+interface UseWebSocketReturn {
   /** Current connection state */
   connectionState: ConnectionState;
   /** Connect to the bidi WebSocket */

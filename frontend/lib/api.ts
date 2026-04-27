@@ -1,11 +1,11 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-export interface ChatResponse {
+interface ChatResponse {
   reply: string;
   session_id: string;
 }
 
-export interface DocumentResponse {
+interface DocumentResponse {
   markdown: string | null;
   ready: boolean;
 }
@@ -40,6 +40,7 @@ export async function streamChat(
   onFieldUpdate?: (key: string, value: string) => void,
   directFields?: Record<string, string>,
   deferredFields?: string[],
+  onActiveField?: (key: string) => void,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
@@ -81,6 +82,7 @@ export async function streamChat(
         if (parsed.session_id) onSessionId(parsed.session_id);
         if (parsed.text) onChunk(parsed.text);
         if (parsed.event === "finalizing") onFinalizing?.();
+        if (typeof parsed.active_field === "string") onActiveField?.(parsed.active_field);
         if (parsed.field_update && typeof parsed.field_update.key === "string") {
           onFieldUpdate?.(parsed.field_update.key, parsed.field_update.value ?? "");
         }
@@ -143,7 +145,7 @@ export async function downloadPdf(sessionId: string): Promise<void> {
 
 // ─── Live RS context extraction ───────────────────────────────────────────────
 
-export interface RsSectionData {
+interface RsSectionData {
   filled: boolean;
   value: string | null;
 }
@@ -217,7 +219,7 @@ export async function extractContext(sessionId: string): Promise<RsPartialData |
 
 // ─── BPMN ─────────────────────────────────────────────────────────────────────
 
-export interface BpmnResponse {
+interface BpmnResponse {
   ready: boolean;
   mermaid?: string;
   score?: number;
@@ -243,7 +245,7 @@ export async function generateBpmn(sessionId: string): Promise<BpmnResponse> {
 
 // ─── DataFlow ─────────────────────────────────────────────────────────────────
 
-export interface DataflowResponse {
+interface DataflowResponse {
   ready: boolean;
   mermaid?: string;
   score?: number;
@@ -357,7 +359,7 @@ export interface SessionSummary {
   preview: string | null;
 }
 
-export interface HistoryMessage {
+interface HistoryMessage {
   role: "user" | "assistant";
   text: string;
   ts: string;
@@ -403,33 +405,33 @@ export async function getFirestoreData(sessionId: string): Promise<SrsData | nul
 // TODO: align these types with FINAL_ANALYSIS_SCHEMA in backend/agent/finalizer_agent.py
 //       and generate them automatically once the schema is stable.
 
-export interface TechnologyRecommendation {
+interface TechnologyRecommendation {
   primary: string;
   rationale: string;
   alternatives: string[];
   constraints: string[];
 }
 
-export interface TeamProfile {
+interface TeamProfile {
   recommended_team_type: "internal" | "partner" | "vendor" | "mixed";
   skills_required: string[];
   rationale: string;
 }
 
-export interface PriorityTier {
+interface PriorityTier {
   tier: "strategic" | "tactical" | "operational";
   score: number;           // 0–100
   scoring_rationale: string;
   priority_drivers: string[];
 }
 
-export interface RiskAndDependencies {
+interface RiskAndDependencies {
   risks: string[];
   dependencies: string[];
   open_questions: string[];
 }
 
-export interface FinalAnalysisMeta {
+interface FinalAnalysisMeta {
   session_id: string;
   finalized_at: string;
   model: string;
@@ -447,9 +449,9 @@ export interface FinalAnalysis {
   _meta: FinalAnalysisMeta;
 }
 
-export type AnalysisStatus = "not_found" | "pending" | "complete";
+type AnalysisStatus = "not_found" | "pending" | "complete";
 
-export interface AnalysisResponse {
+interface AnalysisResponse {
   status: AnalysisStatus;
   analysis?: FinalAnalysis;
 }
