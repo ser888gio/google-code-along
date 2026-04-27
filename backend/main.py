@@ -10,6 +10,7 @@ from agent.finalizer_agent import run_finalizer
 from bpmn import check_completeness, generate_bpmn_diagram
 from config import APP_NAME, FINALIZING_MARKER, GCS_PREFIX_SESSIONS, MODEL_AUDIO
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
+from direct_field_context import build_augmented_user_message, merge_direct_fields
 from fastapi import (
     FastAPI,
     File,
@@ -24,6 +25,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from starlette.requests import Request
 from firestore import (
     append_conversation_turn,
+    get_direct_fields,
     get_conversation_history,
     get_discovery_state,
     get_final_analysis,
@@ -134,6 +136,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: str | None = None
     user_id: str = "default_user"
+    direct_fields: dict[str, str] | None = None
 
 
 class ChatResponse(BaseModel):
@@ -243,6 +246,7 @@ async def chat(req: ChatRequest):
 
     session_id = req.session_id or str(uuid.uuid4())
     logger.debug(f"Chat request: session_id={session_id} user_id={req.user_id}")
+    loop = asyncio.get_running_loop()
 
     # Ensure session exists
     session = await session_service.get_session(
@@ -260,9 +264,18 @@ async def chat(req: ChatRequest):
     else:
         logger.debug(f"Resumed existing session: {session_id}")
 
+    stored_direct_fields = await loop.run_in_executor(None, get_direct_fields, session_id)
+    direct_fields = merge_direct_fields(stored_direct_fields, req.direct_fields)
+    if req.direct_fields:
+        await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
+
     user_content = types.Content(
         role="user",
-        parts=[types.Part.from_text(text=req.message)],
+        parts=[
+            types.Part.from_text(
+                text=build_augmented_user_message(req.message, direct_fields)
+            )
+        ],
     )
 
     # Collect the agent's final text response
@@ -280,7 +293,6 @@ async def chat(req: ChatRequest):
     reply = "".join(reply_parts)
     logger.info(f"Agent reply ready: session_id={session_id} reply_chars={len(reply)}")
 
-    loop = asyncio.get_running_loop()
     loop.run_in_executor(None, append_conversation_turn, session_id, req.message, reply)
 
     return ChatResponse(reply=reply, session_id=session_id)
@@ -292,6 +304,7 @@ async def chat_stream(req: ChatRequest):
 
     session_id = req.session_id or str(uuid.uuid4())
     logger.debug(f"Stream chat request: session_id={session_id} user_id={req.user_id}")
+    loop = asyncio.get_running_loop()
 
     session = await session_service.get_session(
         app_name=APP_NAME,
@@ -308,9 +321,18 @@ async def chat_stream(req: ChatRequest):
     else:
         logger.debug(f"Resumed existing session: {session_id}")
 
+    stored_direct_fields = await loop.run_in_executor(None, get_direct_fields, session_id)
+    direct_fields = merge_direct_fields(stored_direct_fields, req.direct_fields)
+    if req.direct_fields:
+        await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
+
     user_content = types.Content(
         role="user",
-        parts=[types.Part.from_text(text=req.message)],
+        parts=[
+            types.Part.from_text(
+                text=build_augmented_user_message(req.message, direct_fields)
+            )
+        ],
     )
 
     async def event_generator():
@@ -327,7 +349,6 @@ async def chat_stream(req: ChatRequest):
         # heard. Hard-capped at 4s so the agent never stalls if Gemini is
         # slow or down.
         try:
-            loop = asyncio.get_running_loop()
             prev_state = await loop.run_in_executor(
                 None, get_discovery_state, session_id
             )

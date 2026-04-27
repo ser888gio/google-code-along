@@ -490,10 +490,7 @@ export default function ChatPage() {
       if (!sessionId) return;
       const merged = await patchDirectFields(sessionId, { [key]: value });
       if (merged) {
-        setRsPartial((prev) => ({
-          completeness: merged.completeness,
-          fields: prev?.fields ?? {},
-        }));
+        setRsPartial(merged);
       }
     }, 600);
   }
@@ -582,6 +579,7 @@ export default function ChatPage() {
           setDirectFields((prev) => ({ ...prev, [key]: value }));
         }
       },
+      directFields,
     );
   }
 

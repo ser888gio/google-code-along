@@ -38,11 +38,16 @@ export async function streamChat(
   onError: (err: string) => void,
   onFinalizing?: () => void,
   onFieldUpdate?: (key: string, value: string) => void,
+  directFields?: Record<string, string>,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, session_id: sessionId }),
+    body: JSON.stringify({
+      message,
+      session_id: sessionId,
+      ...(directFields ? { direct_fields: directFields } : {}),
+    }),
   });
 
   if (!res.ok || !res.body) {
