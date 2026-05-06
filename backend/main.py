@@ -94,7 +94,14 @@ from google.genai.types import (
     VoiceConfig,
 )
 from logger import get_logger, setup_logging
-from observability.metrics import record_feedback_vote, record_itl, record_ttft
+from observability.metrics import (
+    record_feedback_vote,
+    record_itl,
+    record_operation_duration,
+    record_session_completion,
+    record_session_duration,
+    record_ttft,
+)
 from observability.tracing import setup_telemetry
 from observability.turns import (
     current_turn,
@@ -192,6 +199,27 @@ session_bridge = SessionBridge(
 # WeakValueDictionary so entries are evicted automatically once no request
 # holds a reference to the lock — no unbounded growth across sessions.
 _extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+_session_started_at: dict[str, float] = {}
+_session_outcomes_recorded: set[str] = set()
+
+
+def _mark_session_seen(session_id: str) -> None:
+    """Remember first-seen time for session duration metrics."""
+    _session_started_at.setdefault(session_id, time.monotonic())
+
+
+def _record_session_outcome(
+    session_id: str,
+    outcome: Literal["finalized", "abandoned"],
+) -> None:
+    """Record session completion once per backend process."""
+    if session_id in _session_outcomes_recorded:
+        return
+    _session_outcomes_recorded.add(session_id)
+    started_at = _session_started_at.pop(session_id, None)
+    if started_at is not None:
+        record_session_duration(time.monotonic() - started_at, outcome=outcome)
+    record_session_completion(outcome=outcome)
 
 
 def _current_trace_ids() -> tuple[str | None, str | None]:
@@ -619,6 +647,7 @@ async def chat(req: ChatRequest):
     """Send a message to the RS consultant agent and get a response."""
 
     session_id = req.session_id or str(uuid.uuid4())
+    _mark_session_seen(session_id)
     logger.debug(f"Chat request: session_id={session_id} user_id={req.user_id}")
     loop = asyncio.get_running_loop()
 
@@ -715,6 +744,7 @@ async def chat_stream(req: ChatRequest):
     """Stream the agent's response as Server-Sent Events."""
 
     session_id = req.session_id or str(uuid.uuid4())
+    _mark_session_seen(session_id)
     logger.debug(f"Stream chat request: session_id={session_id} user_id={req.user_id}")
     loop = asyncio.get_running_loop()
 
@@ -825,7 +855,9 @@ async def chat_stream(req: ChatRequest):
             )
         except asyncio.TimeoutError:
             logger.warning(
-                f"Pre-stream extract timed out (>4s): session={session_id} — skipping field_update events"
+                "Pre-stream extract timed out (>4s): "
+                f"event=extract_timeout_total session_id={session_id} "
+                "timeout_seconds=4"
             )
         except Exception as exc:
             logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
@@ -991,6 +1023,7 @@ async def submit_session_feedback(req: SessionFeedbackRequest):
     if feedback is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    _record_session_outcome(req.session_id, "abandoned")
     record_feedback_vote(vote=f"rating_{req.rating}", phase="session")
     logger.info(
         "Session feedback recorded: "
@@ -1020,11 +1053,18 @@ async def get_document(req: SessionRef):
     Returns the markdown if [GENERATE_RS] was found in the conversation,
     otherwise returns ready=False.
     """
+    t0 = time.perf_counter()
     markdown = await compile_rs_from_session(
         session_service=session_service,
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=req.session_id,
+    )
+    record_operation_duration(
+        time.perf_counter() - t0,
+        model="none",
+        operation="document.compile",
+        status="ready" if markdown is not None else "not_ready",
     )
     return DocumentResponse(
         markdown=markdown,
@@ -1039,7 +1079,8 @@ async def download_pdf(req: SessionRef):
     Extracts the RS markdown from the session and converts it to PDF.
     Returns 404 if no document has been generated yet.
     """
-
+    t0 = time.perf_counter()
+    status = "ok"
     markdown = await compile_rs_from_session(
         session_service=session_service,
         app_name=APP_NAME,
@@ -1047,6 +1088,13 @@ async def download_pdf(req: SessionRef):
         session_id=req.session_id,
     )
     if markdown is None:
+        status = "not_ready"
+        record_operation_duration(
+            time.perf_counter() - t0,
+            model="none",
+            operation="document.pdf",
+            status=status,
+        )
         logger.warning(
             f"PDF export requested but no RS document found: session_id={req.session_id}"
         )
@@ -1057,6 +1105,12 @@ async def download_pdf(req: SessionRef):
 
     logger.info(f"Generating PDF export: session_id={req.session_id}")
     pdf_bytes = markdown_to_pdf(markdown)
+    record_operation_duration(
+        time.perf_counter() - t0,
+        model="none",
+        operation="document.pdf",
+        status=status,
+    )
 
     return Response(
         content=pdf_bytes,
@@ -1075,7 +1129,8 @@ async def download_docx(req: SessionRef):
     then writes it into a Word document using the SRS template structure.
     Returns 404 if the session is not found, 422 if compilation fails.
     """
-
+    t0 = time.perf_counter()
+    status = "ok"
     srs_json = await compile_srs_json_from_session(
         session_service=session_service,
         app_name=APP_NAME,
@@ -1083,6 +1138,13 @@ async def download_docx(req: SessionRef):
         session_id=req.session_id,
     )
     if srs_json is None:
+        status = "compile_failed"
+        record_operation_duration(
+            time.perf_counter() - t0,
+            model="none",
+            operation="document.docx",
+            status=status,
+        )
         logger.warning(
             f"DOCX export failed — SRS could not be compiled: session_id={req.session_id}"
         )
@@ -1093,6 +1155,12 @@ async def download_docx(req: SessionRef):
 
     logger.info(f"Generating DOCX export: session_id={req.session_id}")
     docx_bytes = srs_json_to_docx(srs_json)
+    record_operation_duration(
+        time.perf_counter() - t0,
+        model="none",
+        operation="document.docx",
+        status=status,
+    )
 
     return Response(
         content=docx_bytes,
@@ -1106,6 +1174,7 @@ async def download_docx(req: SessionRef):
 @app.post("/document/rs-template/docx")
 async def download_rs_template_docx(req: SessionRef):
     """Generate a Word doc from the 22 RSLiveTemplate fields, save to GCS, and return for download."""
+    t0 = time.perf_counter()
     loop = asyncio.get_running_loop()
     state = await loop.run_in_executor(None, get_discovery_state, req.session_id)
 
@@ -1125,6 +1194,12 @@ async def download_rs_template_docx(req: SessionRef):
         ),
     )
     logger.info(f"RS template DOCX saved to GCS: {gcs_path}")
+    record_operation_duration(
+        time.perf_counter() - t0,
+        model="none",
+        operation="document.rs_template_docx",
+        status="ok",
+    )
 
     return Response(
         content=docx_bytes,
@@ -1154,6 +1229,7 @@ class BpmnResponse(BaseModel):
 @app.post("/bpmn/generate", response_model=BpmnResponse)
 async def bpmn_generate(req: BpmnRequest):
     """Check RS completeness and generate a Mermaid BPMN diagram if ≥ 90%."""
+    t0 = time.perf_counter()
     session = await session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
@@ -1171,10 +1247,22 @@ async def bpmn_generate(req: BpmnRequest):
 
     if score < 90:
         logger.debug(f"BPMN not ready (score < 90): missing={missing}")
+        record_operation_duration(
+            time.perf_counter() - t0,
+            model=MODEL_ORCHESTRATOR,
+            operation="diagram.bpmn",
+            status="not_ready",
+        )
         return BpmnResponse(ready=False, score=score, missing=missing)
 
     logger.info(f"Generating BPMN diagram: session_id={req.session_id}")
     mermaid = await generate_bpmn_diagram(conversation_text)
+    record_operation_duration(
+        time.perf_counter() - t0,
+        model=MODEL_ORCHESTRATOR,
+        operation="diagram.bpmn",
+        status="ok",
+    )
     return BpmnResponse(ready=True, mermaid=mermaid, score=score)
 
 
@@ -1196,6 +1284,7 @@ class DataflowResponse(BaseModel):
 @app.post("/dataflow/generate", response_model=DataflowResponse)
 async def dataflow_generate(req: DataflowRequest):
     """Check DFD readiness and generate a Mermaid Data Flow Diagram if score ≥ 70%."""
+    t0 = time.perf_counter()
     session = await session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
@@ -1215,10 +1304,22 @@ async def dataflow_generate(req: DataflowRequest):
 
     if score < 70:
         logger.debug(f"Dataflow not ready (score < 70): missing={missing}")
+        record_operation_duration(
+            time.perf_counter() - t0,
+            model=MODEL_ORCHESTRATOR,
+            operation="diagram.dataflow",
+            status="not_ready",
+        )
         return DataflowResponse(ready=False, score=score, missing=missing)
 
     logger.info(f"Generating Dataflow diagram: session_id={req.session_id}")
     mermaid = await generate_dataflow_diagram(conversation_text)
+    record_operation_duration(
+        time.perf_counter() - t0,
+        model=MODEL_ORCHESTRATOR,
+        operation="diagram.dataflow",
+        status="ok",
+    )
     return DataflowResponse(ready=True, mermaid=mermaid, score=score)
 
 
@@ -1529,7 +1630,9 @@ async def firestore_data(session_id: str):
         doc = await loop.run_in_executor(None, get_srs_fields, session_id)
     except Exception as exc:
         logger.error(
-            f"Firestore read failed for session_id={session_id}: {exc}", exc_info=True
+            "Firestore read failed: "
+            f"event=firestore_unavailable_total session_id={session_id} {exc}",
+            exc_info=True,
         )
         raise HTTPException(
             status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}"
@@ -1594,6 +1697,7 @@ async def _run_turn_postprocessing(
     #    The finalizer needs discovery fields + conversation transcript,
     #    so we extract them here (only on finalization, not every turn).
     if is_finalizing:
+        _record_session_outcome(session_id, "finalized")
         logger.info(
             f"[FINALIZING] detected: session={session_id} — launching finalizer"
         )
@@ -1703,6 +1807,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
           Text frames   = JSON: {"type":"text", "text":"..."} for transcriptions / text
     """
     await websocket.accept()
+    _mark_session_seen(session_id)
     logger.info(f"[WS] Connected: user={user_id} session={session_id}")
 
     # Ensure session exists (share session store with REST endpoints)
@@ -1925,7 +2030,9 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                             )
                     except Exception as exc:
                         logger.error(
-                            f"[WS] SessionBridge injection failed: session={session_id} {exc}"
+                            "[WS] SessionBridge injection failed: "
+                            f"event=bridge_injection_failure_total "
+                            f"session_id={session_id} {exc}"
                         )
 
                     # Now send turn_complete — the session has the voice data

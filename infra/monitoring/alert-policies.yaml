@@ -1,0 +1,77 @@
+combiner: OR
+notificationChannels:
+  - projects/PROJECT_ID/notificationChannels/CHANNEL_ID
+conditions:
+  - displayName: Performance - TTFT p95 over 2s for 10m
+    conditionThreshold:
+      filter: metric.type="workload.googleapis.com/genai.client.ttft_seconds" resource.type="generic_task"
+      aggregations:
+        - alignmentPeriod: 600s
+          perSeriesAligner: ALIGN_PERCENTILE_95
+      comparison: COMPARISON_GT
+      thresholdValue: 2
+      duration: 600s
+      trigger:
+        count: 1
+  - displayName: Performance - operation p95 over 12s for 5m
+    conditionThreshold:
+      filter: metric.type="workload.googleapis.com/genai.client.operation.duration_seconds" resource.type="generic_task"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_PERCENTILE_95
+      comparison: COMPARISON_GT
+      thresholdValue: 12
+      duration: 300s
+      trigger:
+        count: 1
+  - displayName: UX - thumbs-down rate over 30 percent for 1h
+    conditionMonitoringQueryLanguage:
+      query: |
+        fetch generic_task
+        | metric 'workload.googleapis.com/rs.feedback.vote'
+        | filter metric.vote =~ 'up|down'
+        | group_by 1h, [votes: sum(value.feedback_vote)]
+        | group_by [metric.vote], [votes: sum(votes)]
+        | ratio_by [metric.vote == 'down']
+        | condition val() > 0.30
+      duration: 3600s
+      trigger:
+        count: 1
+  - displayName: Reliability - Firestore unavailable log metric
+    conditionThreshold:
+      filter: metric.type="logging.googleapis.com/user/firestore_unavailable_total" resource.type="cloud_run_revision"
+      aggregations:
+        - alignmentPeriod: 300s
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      thresholdValue: 0
+      duration: 300s
+      trigger:
+        count: 1
+  - displayName: Reliability - extraction timeout log metric
+    conditionThreshold:
+      filter: metric.type="logging.googleapis.com/user/extract_timeout_total" resource.type="cloud_run_revision"
+      aggregations:
+        - alignmentPeriod: 600s
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      thresholdValue: 0
+      duration: 600s
+      trigger:
+        count: 1
+  - displayName: Safety - cost circuit trip rate over 1 per hour
+    conditionThreshold:
+      filter: metric.type="workload.googleapis.com/rs.safety.cost_circuit_tripped" resource.type="generic_task"
+      aggregations:
+        - alignmentPeriod: 3600s
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      thresholdValue: 0.0002778
+      duration: 3600s
+      trigger:
+        count: 1
+documentation:
+  content: Phase 6 error-budget burn alerts. Add quality/safety evaluator policies once those product metrics exist.
+  mimeType: text/markdown
+displayName: RS Generator Phase 6 SLI Alerts
+enabled: true

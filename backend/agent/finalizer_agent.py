@@ -46,7 +46,12 @@ from google import genai
 from google.genai import types
 from logger import get_logger
 from observability.cost import compute_cost
-from observability.metrics import record_cost, record_operation_duration, record_tokens
+from observability.metrics import (
+    record_cache_hit_ratio,
+    record_cost,
+    record_operation_duration,
+    record_tokens,
+)
 from observability.turns import record_model_call
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
@@ -205,6 +210,11 @@ async def run_finalizer(
                 record_tokens(output_tokens, model=MODEL_FINALIZER, token_type="output", feature="finalize")
                 if cache_read:
                     record_tokens(cache_read, model=MODEL_FINALIZER, token_type="cache_read", feature="finalize")
+                record_cache_hit_ratio(
+                    model=MODEL_FINALIZER,
+                    input_tokens=input_tokens,
+                    cache_read_tokens=cache_read,
+                )
                 record_cost(cost_usd, model=MODEL_FINALIZER, feature="finalize", session_id_hash=sid_hash)
                 record_model_call(
                     model=MODEL_FINALIZER,

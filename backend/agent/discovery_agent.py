@@ -33,7 +33,12 @@ from google import genai
 from google.adk.agents import Agent
 from logger import get_logger
 from observability.cost import compute_cost
-from observability.metrics import record_cost, record_operation_duration, record_tokens
+from observability.metrics import (
+    record_cache_hit_ratio,
+    record_cost,
+    record_operation_duration,
+    record_tokens,
+)
 from observability.turns import record_model_call
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
@@ -125,6 +130,11 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
                 record_tokens(output_tokens, model=MODEL_DISCOVERY, token_type="output", feature="discovery_extract")
                 if cache_read:
                     record_tokens(cache_read, model=MODEL_DISCOVERY, token_type="cache_read", feature="discovery_extract")
+                record_cache_hit_ratio(
+                    model=MODEL_DISCOVERY,
+                    input_tokens=input_tokens,
+                    cache_read_tokens=cache_read,
+                )
                 record_cost(cost_usd, model=MODEL_DISCOVERY, feature="discovery_extract", session_id_hash="batch")
                 record_model_call(
                     model=MODEL_DISCOVERY,

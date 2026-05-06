@@ -23,8 +23,10 @@ from opentelemetry.trace import SpanKind, StatusCode
 
 from observability.cost import compute_cost
 from observability.metrics import (
+    record_cache_hit_ratio,
     record_cost,
     record_operation_duration,
+    record_safety_finish_reason,
     record_tokens,
 )
 from observability.turns import record_model_call, record_tool_call
@@ -169,6 +171,13 @@ def after_model_cb(callback_context, llm_response) -> None:
         record_tokens(output_tokens, model=model, token_type="output", feature=agent_name)
         if cache_read:
             record_tokens(cache_read, model=model, token_type="cache_read", feature=agent_name)
+        record_cache_hit_ratio(
+            model=model,
+            input_tokens=input_tokens,
+            cache_read_tokens=cache_read,
+        )
+        if "SAFETY" in str(finish_reason).upper():
+            record_safety_finish_reason(model=model)
         record_model_call(
             model=model,
             feature=agent_name,
