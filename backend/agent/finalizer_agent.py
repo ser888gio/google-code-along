@@ -31,6 +31,7 @@ TODO (nice-to-have): generate final_analysis.docx from the JSON using a Word tem
 
 import asyncio
 import datetime
+import hashlib
 import json
 import os
 import time
@@ -44,6 +45,10 @@ from gcs.connector import get_bucket_name, list_files, read_file, write_file
 from google import genai
 from google.genai import types
 from logger import get_logger
+from observability.cost import compute_cost
+from observability.metrics import record_cost, record_operation_duration, record_tokens
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
 from prompts.agent import FINALIZER_SYSTEM_PROMPT
 from utils import format_prompt_data_lines, sanitize_gcs_segment
 
@@ -167,18 +172,42 @@ async def run_finalizer(
         logger.debug(
             f"Calling Gemini model={MODEL_FINALIZER} for final analysis: session_id={session_id}"
         )
-        # Run blocking generate_content() in a thread so we don't freeze the event loop
         logger.info(
             f"Model call started: model={MODEL_FINALIZER} caller=run_finalizer session_id={session_id}"
         )
+        tracer = trace.get_tracer("rs-generator")
         _t0 = time.perf_counter()
-        response = await asyncio.to_thread(
-            _genai_client.models.generate_content,
-            model=MODEL_FINALIZER,
-            contents=contents,
-        )
+        with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
+            span.set_attribute("gen_ai.operation.name", "generate_content")
+            span.set_attribute("gen_ai.system", "gemini")
+            span.set_attribute("gen_ai.request.model", MODEL_FINALIZER)
+            span.set_attribute("session_id", session_id)
+            span.set_attribute("phase", "finalize")
+            response = await asyncio.to_thread(
+                _genai_client.models.generate_content,
+                model=MODEL_FINALIZER,
+                contents=contents,
+            )
+            elapsed = time.perf_counter() - _t0
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+                output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+                cache_read = getattr(usage, "cached_content_token_count", 0) or 0
+                span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+                span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+                span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read)
+                cost_usd = compute_cost(MODEL_FINALIZER, usage)
+                span.set_attribute("cost_usd", cost_usd)
+                sid_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16]
+                record_tokens(input_tokens, model=MODEL_FINALIZER, token_type="input", feature="finalize")
+                record_tokens(output_tokens, model=MODEL_FINALIZER, token_type="output", feature="finalize")
+                if cache_read:
+                    record_tokens(cache_read, model=MODEL_FINALIZER, token_type="cache_read", feature="finalize")
+                record_cost(cost_usd, model=MODEL_FINALIZER, feature="finalize", session_id_hash=sid_hash)
+            record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
         logger.info(
-            f"Model call completed: model={MODEL_FINALIZER} elapsed={time.perf_counter() - _t0:.2f}s session_id={session_id}"
+            f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}"
         )
 
         # 4. Parse JSON output

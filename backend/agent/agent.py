@@ -23,6 +23,12 @@ from config import GOOGLE_API_KEY, MODEL_AUDIO, MODEL_ORCHESTRATOR
 from google.adk.agents import Agent
 from google.adk.models.google_llm import Gemini
 from google.genai import types as genai_types
+from observability.callbacks import (
+    after_model_cb,
+    after_tool_cb,
+    before_model_cb,
+    before_tool_cb,
+)
 from prompts.agent import ORCHESTRATOR_SYSTEM_PROMPT
 
 from .research_agent import RESEARCH_TOOLS
@@ -63,6 +69,10 @@ rs_agent = Agent(
     model=MODEL_ORCHESTRATOR,
     instruction=ORCHESTRATOR_SYSTEM_PROMPT,
     tools=RESEARCH_TOOLS,  # search_past_analyses, list_knowledge_base_docs, search_vertex_ai
+    before_model_callback=before_model_cb,
+    after_model_callback=after_model_cb,
+    before_tool_callback=before_tool_cb,
+    after_tool_callback=after_tool_cb,
 )
 
 

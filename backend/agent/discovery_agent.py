@@ -32,6 +32,10 @@ from field_schema import (
 from google import genai
 from google.adk.agents import Agent
 from logger import get_logger
+from observability.cost import compute_cost
+from observability.metrics import record_cost, record_operation_duration, record_tokens
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
 from prompts.agent import DISCOVERY_SYSTEM_PROMPT
 from prompts.context import DISCOVERY_EXTRACTION_PROMPT
 from utils import format_prompt_data_lines
@@ -84,6 +88,7 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
         return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
 
     logger.debug("Extracting discovery fields from conversation transcript")
+    tracer = trace.get_tracer("rs-generator")
     try:
         # Use .replace() not .format() — user transcript may contain literal braces
         # that would cause a KeyError if str.format() tried to interpret them.
@@ -94,13 +99,35 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
             f"Model call started: model={MODEL_DISCOVERY} caller=extract_discovery_fields"
         )
         _t0 = time.perf_counter()
-        response = await asyncio.to_thread(
-            _genai_client.models.generate_content,
-            model=MODEL_DISCOVERY,
-            contents=prompt,
-        )
+        with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
+            span.set_attribute("gen_ai.operation.name", "generate_content")
+            span.set_attribute("gen_ai.system", "gemini")
+            span.set_attribute("gen_ai.request.model", MODEL_DISCOVERY)
+            span.set_attribute("phase", "discovery_extract")
+            response = await asyncio.to_thread(
+                _genai_client.models.generate_content,
+                model=MODEL_DISCOVERY,
+                contents=prompt,
+            )
+            elapsed = time.perf_counter() - _t0
+            usage = getattr(response, "usage_metadata", None)
+            if usage:
+                input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+                output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+                cache_read = getattr(usage, "cached_content_token_count", 0) or 0
+                span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+                span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+                span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read)
+                cost_usd = compute_cost(MODEL_DISCOVERY, usage)
+                span.set_attribute("cost_usd", cost_usd)
+                record_tokens(input_tokens, model=MODEL_DISCOVERY, token_type="input", feature="discovery_extract")
+                record_tokens(output_tokens, model=MODEL_DISCOVERY, token_type="output", feature="discovery_extract")
+                if cache_read:
+                    record_tokens(cache_read, model=MODEL_DISCOVERY, token_type="cache_read", feature="discovery_extract")
+                record_cost(cost_usd, model=MODEL_DISCOVERY, feature="discovery_extract", session_id_hash="batch")
+            record_operation_duration(elapsed, model=MODEL_DISCOVERY, operation="generate_content", status="ok")
         logger.info(
-            f"Model call completed: model={MODEL_DISCOVERY} elapsed={time.perf_counter() - _t0:.2f}s"
+            f"Model call completed: model={MODEL_DISCOVERY} elapsed={elapsed:.2f}s"
         )
         raw = (response.text or "").strip()
 

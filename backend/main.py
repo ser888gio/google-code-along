@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import time
 import uuid
 import weakref
 from datetime import datetime, timezone
@@ -30,6 +31,7 @@ from config import (
     FINALIZING_MARKER,
     GCS_PREFIX_SESSIONS,
     MODEL_AUDIO,
+    MODEL_ORCHESTRATOR,
     validate_config,
 )
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
@@ -87,6 +89,7 @@ from google.genai.types import (
     VoiceConfig,
 )
 from logger import get_logger, setup_logging
+from observability.metrics import record_itl, record_ttft
 from observability.tracing import setup_telemetry
 from pydantic import BaseModel
 from session_bridge import SessionBridge
@@ -701,8 +704,11 @@ async def chat_stream(req: ChatRequest):
     )
 
     async def event_generator():
-        # First, send the session_id so the client can track it
-        yield f'data: {{"session_id": "{session_id}"}}\n\n'
+        # Stable ID for this assistant turn — lets the frontend link feedback to traces.
+        message_id = str(uuid.uuid4())
+
+        # First, send the session_id and message_id so the client can track them.
+        yield f'data: {{"session_id": "{session_id}", "message_id": "{message_id}"}}\n\n'
         active_field = workflow_turn["workflow"].get("active_field")
         if active_field:
             yield f"data: {json.dumps({'active_field': active_field})}\n\n"
@@ -757,6 +763,9 @@ async def chat_stream(req: ChatRequest):
             logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
 
         reply_parts: list[str] = []
+        _stream_t0 = time.perf_counter()
+        _ttft_recorded = False
+        _chunk_times: list[float] = []
         try:
             async for event in runner.run_async(
                 user_id=req.user_id,
@@ -766,6 +775,12 @@ async def chat_stream(req: ChatRequest):
                 if event.content and event.content.parts:
                     for part in event.content.parts:
                         if part.text:
+                            _now = time.perf_counter()
+                            if not _ttft_recorded:
+                                ttft = _now - _stream_t0
+                                record_ttft(ttft, model=MODEL_ORCHESTRATOR, phase="chat")
+                                _ttft_recorded = True
+                            _chunk_times.append(_now)
                             reply_parts.append(part.text)
                             # Strip [FINALIZING] marker before sending to the client
                             # so the user never sees the raw signal token.
@@ -778,6 +793,10 @@ async def chat_stream(req: ChatRequest):
                 exc_info=True,
             )
             yield f"data: {json.dumps({'error': 'An internal error occurred. Please try again.'})}\n\n"
+
+        if len(_chunk_times) >= 2:
+            avg_itl = (_chunk_times[-1] - _chunk_times[0]) / (len(_chunk_times) - 1)
+            record_itl(avg_itl)
 
         full_reply = "".join(reply_parts)
         logger.info(
