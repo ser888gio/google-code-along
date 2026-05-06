@@ -87,6 +87,7 @@ from google.genai.types import (
     VoiceConfig,
 )
 from logger import get_logger, setup_logging
+from observability.tracing import setup_telemetry
 from pydantic import BaseModel
 from session_bridge import SessionBridge
 from starlette.requests import Request
@@ -107,6 +108,8 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
     allow_credentials=True,
 )
+
+setup_telemetry(app)
 logger.info(f"RS Generator API initializing (app_name={APP_NAME})")
 
 
