@@ -47,6 +47,7 @@ from google.genai import types
 from logger import get_logger
 from observability.cost import compute_cost
 from observability.metrics import record_cost, record_operation_duration, record_tokens
+from observability.turns import record_model_call
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from prompts.agent import FINALIZER_SYSTEM_PROMPT
@@ -205,6 +206,14 @@ async def run_finalizer(
                 if cache_read:
                     record_tokens(cache_read, model=MODEL_FINALIZER, token_type="cache_read", feature="finalize")
                 record_cost(cost_usd, model=MODEL_FINALIZER, feature="finalize", session_id_hash=sid_hash)
+                record_model_call(
+                    model=MODEL_FINALIZER,
+                    feature="finalize",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read,
+                    cost_usd=cost_usd,
+                )
             record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
         logger.info(
             f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}"

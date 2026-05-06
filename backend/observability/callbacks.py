@@ -27,6 +27,7 @@ from observability.metrics import (
     record_operation_duration,
     record_tokens,
 )
+from observability.turns import record_model_call, record_tool_call
 
 _SNIPPET_MAX_CHARS = 500  # max chars captured as span event content
 
@@ -168,6 +169,16 @@ def after_model_cb(callback_context, llm_response) -> None:
         record_tokens(output_tokens, model=model, token_type="output", feature=agent_name)
         if cache_read:
             record_tokens(cache_read, model=model, token_type="cache_read", feature=agent_name)
+        record_model_call(
+            model=model,
+            feature=agent_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=getattr(usage, "cache_creation_token_count", 0) or 0,
+            cost_usd=cost_usd,
+            finish_reason=str(finish_reason) if finish_reason is not None else None,
+        )
 
     # Record operation duration
     if invocation_id and invocation_id in _call_start:
@@ -186,10 +197,17 @@ def after_model_cb(callback_context, llm_response) -> None:
 def before_tool_cb(callback_context, tool, args, tool_context) -> None:  # type: ignore[return-value]
     """Record a span event for the tool call start."""
     span = trace.get_current_span()
+    tool_name = getattr(tool, "name", None) or str(tool)
+    record_tool_call(
+        {
+            "tool_name": tool_name,
+            "event": "call",
+            "args_preview": _redact_snippet(str(args), 200),
+        }
+    )
     if not span.is_recording():
         return None
 
-    tool_name = getattr(tool, "name", None) or str(tool)
     span.add_event(
         "gen_ai.tool.call",
         attributes={
@@ -208,10 +226,17 @@ def before_tool_cb(callback_context, tool, args, tool_context) -> None:  # type:
 def after_tool_cb(callback_context, tool, args, tool_context, tool_response) -> None:  # type: ignore[return-value]
     """Record a span event for the tool call result."""
     span = trace.get_current_span()
+    tool_name = getattr(tool, "name", None) or str(tool)
+    record_tool_call(
+        {
+            "tool_name": tool_name,
+            "event": "result",
+            "result_preview": _redact_snippet(str(tool_response), 200),
+        }
+    )
     if not span.is_recording():
         return None
 
-    tool_name = getattr(tool, "name", None) or str(tool)
     span.add_event(
         "gen_ai.tool.result",
         attributes={

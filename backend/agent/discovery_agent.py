@@ -34,6 +34,7 @@ from google.adk.agents import Agent
 from logger import get_logger
 from observability.cost import compute_cost
 from observability.metrics import record_cost, record_operation_duration, record_tokens
+from observability.turns import record_model_call
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from prompts.agent import DISCOVERY_SYSTEM_PROMPT
@@ -125,6 +126,14 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
                 if cache_read:
                     record_tokens(cache_read, model=MODEL_DISCOVERY, token_type="cache_read", feature="discovery_extract")
                 record_cost(cost_usd, model=MODEL_DISCOVERY, feature="discovery_extract", session_id_hash="batch")
+                record_model_call(
+                    model=MODEL_DISCOVERY,
+                    feature="discovery_extract",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read,
+                    cost_usd=cost_usd,
+                )
             record_operation_duration(elapsed, model=MODEL_DISCOVERY, operation="generate_content", status="ok")
         logger.info(
             f"Model call completed: model={MODEL_DISCOVERY} elapsed={elapsed:.2f}s"

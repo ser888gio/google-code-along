@@ -8,6 +8,7 @@ import time
 import uuid
 import weakref
 from datetime import datetime, timezone
+from functools import partial
 
 from agent import audio_agent, rs_agent
 from agent.discovery_agent import (
@@ -91,6 +92,14 @@ from google.genai.types import (
 from logger import get_logger, setup_logging
 from observability.metrics import record_itl, record_ttft
 from observability.tracing import setup_telemetry
+from observability.turns import (
+    current_turn,
+    reset_turn,
+    set_stream_timings,
+    start_turn,
+    summarize_turn,
+)
+from opentelemetry import trace
 from pydantic import BaseModel
 from session_bridge import SessionBridge
 from starlette.requests import Request
@@ -179,6 +188,14 @@ session_bridge = SessionBridge(
 # WeakValueDictionary so entries are evicted automatically once no request
 # holds a reference to the lock — no unbounded growth across sessions.
 _extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _current_trace_ids() -> tuple[str | None, str | None]:
+    """Return current OTel trace/span IDs as hex strings, if a span is active."""
+    span_context = trace.get_current_span().get_span_context()
+    if not span_context or not span_context.is_valid:
+        return None, None
+    return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
 
 
 def _build_conversation_tail(session, latest_user_message: str, limit: int = 12) -> str:
@@ -630,21 +647,42 @@ async def chat(req: ChatRequest):
     )
 
     # Collect the agent's final text response
+    message_id = str(uuid.uuid4())
+    trace_id, span_id = _current_trace_ids()
+    turn_token = start_turn(session_id=session_id, message_id=message_id, phase="chat")
+    turn_t0 = time.perf_counter()
     reply_parts: list[str] = []
-    async for event in runner.run_async(
-        user_id=req.user_id,
-        session_id=session_id,
-        new_message=user_content,
-    ):
-        if event.content and event.content.parts:
-            for part in event.content.parts:
-                if part.text:
-                    reply_parts.append(part.text)
+    try:
+        async for event in runner.run_async(
+            user_id=req.user_id,
+            session_id=session_id,
+            new_message=user_content,
+        ):
+            if event.content and event.content.parts:
+                for part in event.content.parts:
+                    if part.text:
+                        reply_parts.append(part.text)
+        set_stream_timings(latency_ms=int((time.perf_counter() - turn_t0) * 1000))
+        turn_summary = summarize_turn(current_turn())
+    finally:
+        reset_turn(turn_token)
 
     reply = "".join(reply_parts)
     logger.info(f"Agent reply ready: session_id={session_id} reply_chars={len(reply)}")
 
-    loop.run_in_executor(None, append_conversation_turn, session_id, req.message, reply)
+    loop.run_in_executor(
+        None,
+        partial(
+            append_conversation_turn,
+            session_id,
+            req.message,
+            reply,
+            message_id=message_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            **turn_summary,
+        ),
+    )
 
     return ChatResponse(reply=reply, session_id=session_id)
 
@@ -706,6 +744,13 @@ async def chat_stream(req: ChatRequest):
     async def event_generator():
         # Stable ID for this assistant turn — lets the frontend link feedback to traces.
         message_id = str(uuid.uuid4())
+        trace_id, span_id = _current_trace_ids()
+        turn_token = start_turn(
+            session_id=session_id,
+            message_id=message_id,
+            phase="chat",
+        )
+        turn_t0 = time.perf_counter()
 
         # First, send the session_id and message_id so the client can track them.
         yield f'data: {{"session_id": "{session_id}", "message_id": "{message_id}"}}\n\n'
@@ -779,6 +824,7 @@ async def chat_stream(req: ChatRequest):
                             if not _ttft_recorded:
                                 ttft = _now - _stream_t0
                                 record_ttft(ttft, model=MODEL_ORCHESTRATOR, phase="chat")
+                                set_stream_timings(ttft_ms=int(ttft * 1000))
                                 _ttft_recorded = True
                             _chunk_times.append(_now)
                             reply_parts.append(part.text)
@@ -797,8 +843,11 @@ async def chat_stream(req: ChatRequest):
         if len(_chunk_times) >= 2:
             avg_itl = (_chunk_times[-1] - _chunk_times[0]) / (len(_chunk_times) - 1)
             record_itl(avg_itl)
+            set_stream_timings(itl_ms=int(avg_itl * 1000))
 
         full_reply = "".join(reply_parts)
+        set_stream_timings(latency_ms=int((time.perf_counter() - turn_t0) * 1000))
+        turn_summary = summarize_turn(current_turn())
         logger.info(
             f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}"
         )
@@ -822,9 +871,14 @@ async def chat_stream(req: ChatRequest):
                 assistant_text=full_reply,
                 is_finalizing=is_finalizing,
                 fallback_transcript=full_reply,
+                message_id=message_id,
+                trace_id=trace_id,
+                span_id=span_id,
+                turn_summary=turn_summary,
             )
         )
 
+        reset_turn(turn_token)
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -1381,6 +1435,10 @@ async def _run_turn_postprocessing(
     is_finalizing: bool,
     *,
     fallback_transcript: str | None = None,
+    message_id: str | None = None,
+    trace_id: str | None = None,
+    span_id: str | None = None,
+    turn_summary: dict | None = None,
 ) -> None:
     """Shared post-processing pipeline for a completed conversation turn.
 
@@ -1404,12 +1462,19 @@ async def _run_turn_postprocessing(
 
     # 1. Persist conversation turn to Firestore
     if user_text or assistant_text:
+        turn_summary = turn_summary or {}
         loop.run_in_executor(
             None,
-            append_conversation_turn,
-            session_id,
-            user_text or "(voice input)",
-            assistant_text,
+            partial(
+                append_conversation_turn,
+                session_id,
+                user_text or "(voice input)",
+                assistant_text,
+                message_id=message_id,
+                trace_id=trace_id,
+                span_id=span_id,
+                **turn_summary,
+            ),
         )
 
     # 2. If [FINALIZING] detected, launch the finalizer pipeline
