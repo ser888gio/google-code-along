@@ -11,10 +11,13 @@ from .writer import (
     remove_deferred_fields,
     set_finalization_error,
     set_finalization_pending,
+    update_feedback_comment,
     upsert_deferred_fields,
     upsert_direct_fields,
     upsert_discovery_state,
     upsert_final_analysis,
+    upsert_message_feedback,
+    upsert_session_feedback,
     upsert_workflow_state,
     upsert_srs_fields,
 )
@@ -38,4 +41,7 @@ __all__ = [
     "upsert_final_analysis",
     "get_final_analysis",
     "set_finalization_error",
+    "upsert_message_feedback",
+    "update_feedback_comment",
+    "upsert_session_feedback",
 ]

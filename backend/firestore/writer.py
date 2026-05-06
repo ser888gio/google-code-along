@@ -27,6 +27,9 @@ from google.cloud import firestore
 from privacy import hash_text, redact_text
 
 _COLLECTION = FIRESTORE_COLLECTION
+_FEEDBACK_COLLECTION = "feedback"
+_VALID_FEEDBACK_VOTES = {"up", "down"}
+_VALID_SESSION_RATINGS = {1, 2, 3, 4, 5}
 
 _firestore_client: firestore.Client | None = None
 
@@ -231,6 +234,150 @@ def get_conversation_history(session_id: str) -> list[dict[str, Any]]:
     if not snap.exists:
         return []
     return snap.to_dict().get("messages", [])
+
+
+def _find_assistant_message(
+    messages: list[dict[str, Any]],
+    message_id: str,
+) -> dict[str, Any] | None:
+    for message in messages:
+        if (
+            message.get("message_id") == message_id
+            and message.get("role") == "assistant"
+        ):
+            return message
+    return None
+
+
+def upsert_message_feedback(
+    *,
+    session_id: str,
+    message_id: str,
+    vote: str,
+    comment: str | None = None,
+) -> dict[str, Any] | None:
+    """Persist thumbs feedback for a saved assistant message.
+
+    Returns None when the session/message pair does not exist.
+    """
+    if vote not in _VALID_FEEDBACK_VOTES:
+        raise ValueError("vote must be 'up' or 'down'")
+
+    client = _client()
+    session_ref = client.collection(_COLLECTION).document(session_id)
+    session_snap = session_ref.get()
+    if not session_snap.exists:
+        return None
+
+    messages = session_snap.to_dict().get("messages", [])
+    message = _find_assistant_message(messages, message_id)
+    if message is None:
+        return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    feedback_ref = client.collection(_FEEDBACK_COLLECTION).document(message_id)
+    existing_snap = feedback_ref.get()
+    existing = existing_snap.to_dict() if existing_snap.exists else {}
+
+    doc: dict[str, Any] = {
+        "feedback_id": message_id,
+        "session_id": session_id,
+        "message_id": message_id,
+        "trace_id": message.get("trace_id"),
+        "span_id": message.get("span_id"),
+        "vote": vote,
+        "phase": message.get("phase") or "chat",
+        "model": message.get("model"),
+        "created_at": existing.get("created_at") or now,
+        "updated_at": now,
+    }
+    if comment is not None:
+        doc["comment_redacted"] = redact_text(comment.strip())
+        doc["comment_original_hash"] = hash_text(comment)
+
+    feedback_ref.set(
+        {key: value for key, value in doc.items() if value is not None},
+        merge=True,
+    )
+    return doc
+
+
+def update_feedback_comment(
+    *,
+    session_id: str,
+    message_id: str,
+    comment: str | None,
+) -> dict[str, Any] | None:
+    """Update the optional comment for an existing feedback document."""
+    client = _client()
+    feedback_ref = client.collection(_FEEDBACK_COLLECTION).document(message_id)
+    snap = feedback_ref.get()
+    if not snap.exists:
+        return None
+
+    existing = snap.to_dict()
+    if existing.get("session_id") != session_id:
+        return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    update = {
+        "comment_redacted": redact_text((comment or "").strip()),
+        "comment_original_hash": hash_text(comment),
+        "updated_at": now,
+    }
+    feedback_ref.set(update, merge=True)
+    return {**existing, **update}
+
+
+def upsert_session_feedback(
+    *,
+    session_id: str,
+    rating: int,
+    comment: str | None = None,
+) -> dict[str, Any] | None:
+    """Persist the end-of-chat rating for a session and mark it ended."""
+    if rating not in _VALID_SESSION_RATINGS:
+        raise ValueError("rating must be an integer from 1 to 5")
+
+    client = _client()
+    session_ref = client.collection(_COLLECTION).document(session_id)
+    session_snap = session_ref.get()
+    if not session_snap.exists:
+        return None
+
+    now = datetime.now(timezone.utc).isoformat()
+    feedback_id = f"session:{session_id}"
+    feedback_ref = client.collection(_FEEDBACK_COLLECTION).document(feedback_id)
+    existing_snap = feedback_ref.get()
+    existing = existing_snap.to_dict() if existing_snap.exists else {}
+
+    doc: dict[str, Any] = {
+        "feedback_id": feedback_id,
+        "feedback_type": "session",
+        "session_id": session_id,
+        "rating": rating,
+        "phase": "session",
+        "created_at": existing.get("created_at") or now,
+        "updated_at": now,
+        "ended_at": now,
+    }
+    if comment is not None:
+        doc["comment_redacted"] = redact_text(comment.strip())
+        doc["comment_original_hash"] = hash_text(comment)
+
+    feedback_ref.set(
+        {key: value for key, value in doc.items() if value is not None},
+        merge=True,
+    )
+    session_ref.set(
+        {
+            "session_status": "ended",
+            "ended_at": now,
+            "updated_at": now,
+        },
+        merge=True,
+    )
+    return doc
 
 
 def list_sessions() -> list[dict[str, Any]]:
