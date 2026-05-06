@@ -1,4 +1,9 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const ADMIN_API_TOKEN = process.env.NEXT_PUBLIC_ADMIN_API_TOKEN ?? "";
+
+function adminHeaders(): HeadersInit {
+  return ADMIN_API_TOKEN ? { Authorization: `Bearer ${ADMIN_API_TOKEN}` } : {};
+}
 
 interface DocumentResponse {
   markdown: string | null;
@@ -534,4 +539,86 @@ export async function getAnalysis(sessionId: string): Promise<AnalysisResponse> 
   } catch {
     return { status: "not_found" };
   }
+}
+
+// Admin chat review
+
+export type AdminSessionFilter = "thumbs_down";
+
+export interface AdminSessionSummary {
+  id: string;
+  session_id: string;
+  project_name: string;
+  message_count: number;
+  cost_usd: number;
+  dominant_feedback: string;
+  thumbs_down_count: number;
+  thumbs_up_count: number;
+  session_rating: number | null;
+  updated_at: string | null;
+  trace_id: string | null;
+  cloud_trace_url: string | null;
+}
+
+export interface AdminTranscriptMessage {
+  message_id?: string | null;
+  role: "user" | "assistant" | string;
+  text_redacted: string;
+  created_at: string | null;
+  trace_id: string | null;
+  span_id: string | null;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  ttft_ms: number | null;
+  itl_ms: number | null;
+  latency_ms: number | null;
+  tool_calls: Record<string, unknown>[];
+  phase: string | null;
+  finish_reason: string | null;
+  feedback: {
+    vote: string;
+    comment_redacted: string | null;
+  } | null;
+  cloud_trace_url: string | null;
+}
+
+export interface AdminSessionDetail {
+  id: string;
+  session_id: string;
+  project_name: string;
+  message_count: number;
+  cost_usd: number;
+  trace_id: string | null;
+  cloud_trace_url: string | null;
+  messages: AdminTranscriptMessage[];
+}
+
+export async function getAdminSessions(
+  filter?: AdminSessionFilter,
+  limit = 50,
+): Promise<AdminSessionSummary[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (filter) params.set("filter", filter);
+  const res = await fetch(`${API_URL}/admin/sessions?${params.toString()}`, {
+    headers: adminHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function getAdminSession(sessionId: string): Promise<AdminSessionDetail> {
+  const res = await fetch(`${API_URL}/admin/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: adminHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
+  return res.json();
 }

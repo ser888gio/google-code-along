@@ -22,6 +22,17 @@ GCS_PREFIX_KNOWLEDGE_BASE = "knowledge_base"  # knowledge_base/{category}/
 FIRESTORE_COLLECTION: str = os.getenv("FIRESTORE_COLLECTION", "")
 FIRESTORE_DATABASE: str = os.getenv("FIRESTORE_DATABASE", "")
 
+ADMIN_BEARER_TOKEN: str = os.getenv("ADMIN_BEARER_TOKEN", "")
+BIGQUERY_DATASET: str = os.getenv("BIGQUERY_DATASET", "observability")
+BIGQUERY_MESSAGES_VIEW: str = os.getenv(
+    "BIGQUERY_MESSAGES_VIEW",
+    f"{GCP_PROJECT}.{BIGQUERY_DATASET}.messages" if GCP_PROJECT else "",
+)
+BIGQUERY_FEEDBACK_VIEW: str = os.getenv(
+    "BIGQUERY_FEEDBACK_VIEW",
+    f"{GCP_PROJECT}.{BIGQUERY_DATASET}.feedback" if GCP_PROJECT else "",
+)
+
 APP_ENV: str = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
 _PRODUCTION_ENVS = {"production", "prod", "staging"}
 _LOCAL_OPTIONAL_CONFIG = {

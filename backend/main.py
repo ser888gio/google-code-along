@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from functools import partial
 from typing import Literal
 
+from admin_sessions import get_admin_session, list_admin_sessions, require_admin
 from agent import audio_agent, rs_agent
 from agent.discovery_agent import (
     extract_discovery_fields,
@@ -39,10 +40,12 @@ from config import (
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
 from direct_field_context import build_augmented_user_message, merge_direct_fields
 from fastapi import (
+    Depends,
     FastAPI,
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
@@ -544,6 +547,59 @@ class SessionFeedbackRequest(BaseModel):
     session_id: str
     rating: int
     comment: str | None = None
+
+
+class AdminSessionSummary(BaseModel):
+    id: str
+    session_id: str
+    project_name: str
+    message_count: int
+    cost_usd: float
+    dominant_feedback: str
+    thumbs_down_count: int
+    thumbs_up_count: int
+    session_rating: int | None = None
+    updated_at: str | None = None
+    trace_id: str | None = None
+    cloud_trace_url: str | None = None
+
+
+class AdminMessageFeedback(BaseModel):
+    vote: str
+    comment_redacted: str | None = None
+
+
+class AdminTranscriptMessage(BaseModel):
+    message_id: str | None = None
+    role: str
+    text_redacted: str
+    created_at: str | None = None
+    trace_id: str | None = None
+    span_id: str | None = None
+    model: str | None = None
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    ttft_ms: int | None = None
+    itl_ms: int | None = None
+    latency_ms: int | None = None
+    tool_calls: list[dict]
+    phase: str | None = None
+    finish_reason: str | None = None
+    feedback: AdminMessageFeedback | None = None
+    cloud_trace_url: str | None = None
+
+
+class AdminSessionDetail(BaseModel):
+    id: str
+    session_id: str
+    project_name: str
+    message_count: int
+    cost_usd: float
+    trace_id: str | None = None
+    cloud_trace_url: str | None = None
+    messages: list[AdminTranscriptMessage]
 
 
 # --- Endpoints ---
@@ -1548,6 +1604,50 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
 
 
 # --- Firestore data retrieval ---
+
+
+@app.get("/admin/sessions", response_model=list[AdminSessionSummary])
+async def admin_sessions_list(
+    _: None = Depends(require_admin),
+    limit: int = Query(default=50, ge=1, le=200),
+    filter: Literal["thumbs_down"] | None = None,
+):
+    """Return BigQuery session summaries for the self-hosted review UI."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None,
+            partial(list_admin_sessions, limit=limit, filter_value=filter),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Admin sessions query failed: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not query admin sessions from BigQuery.",
+        ) from exc
+
+
+@app.get("/admin/sessions/{session_id}", response_model=AdminSessionDetail)
+async def admin_session_detail(
+    session_id: str,
+    _: None = Depends(require_admin),
+):
+    """Return a full BigQuery transcript for the self-hosted review UI."""
+    loop = asyncio.get_running_loop()
+    try:
+        detail = await loop.run_in_executor(None, get_admin_session, session_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            f"Admin session detail query failed: session_id={session_id} error={exc}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Could not query admin session from BigQuery.",
+        ) from exc
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return detail
 
 
 class FirestoreDataResponse(BaseModel):
