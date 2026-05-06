@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { streamChat, extractContext, getDiscoveryState, downloadPdf, downloadRsTemplateDocx, getFirestoreData, getSessions, getHistory, getAnalysis, getSessionUploads, patchDirectFields, RsPartialData, SrsData, SessionSummary, FinalAnalysis, UploadedFile } from "../lib/api";
+import { streamChat, extractContext, getDiscoveryState, downloadRsTemplateDocx, getFirestoreData, getSessions, getHistory, getAnalysis, getSessionUploads, patchDirectFields, submitFeedback, updateFeedbackComment, submitSessionFeedback, FeedbackVote, SessionRating, RsPartialData, SrsData, SessionSummary, FinalAnalysis, UploadedFile } from "../lib/api";
 import { useAudioRecorder } from "../lib/useAudioRecorder";
 import { useAudioPlayer } from "../lib/useAudioPlayer";
 import { useWebSocket, WsServerMessage } from "../lib/useWebSocket";
@@ -30,12 +31,19 @@ interface Message {
   role: Role;
   text: string;
   streaming?: boolean;
+  messageId?: string;
+  feedback?: {
+    vote: FeedbackVote;
+    comment?: string;
+    pending?: boolean;
+  };
 }
 
 const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Analysis", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
 
 type ChatMode = "text" | "voice";
+const SESSION_RATINGS = [1, 2, 3, 4, 5] as const satisfies readonly SessionRating[];
 
 // Finalization can be in one of three states:
 //   idle       — not yet triggered
@@ -45,8 +53,20 @@ type FinalizingStatus = "idle" | "finalizing" | "complete";
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({
+  msg,
+  sessionId,
+  onFeedback,
+  onFeedbackComment,
+}: {
+  msg: Message;
+  sessionId: string | null;
+  onFeedback: (localId: string, vote: FeedbackVote) => Promise<void>;
+  onFeedbackComment: (localId: string, comment: string) => Promise<void>;
+}) {
   const isUser = msg.role === "user";
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [comment, setComment] = useState(msg.feedback?.comment ?? "");
 
   if (isUser) {
     return (
@@ -64,6 +84,21 @@ function MessageBubble({ msg }: { msg: Message }) {
   }
 
   const isThinking = msg.streaming && !msg.text;
+  const canSendFeedback = Boolean(sessionId && msg.messageId && !msg.streaming);
+  const feedbackPending = Boolean(msg.feedback?.pending);
+  const activeVote = msg.feedback?.vote;
+
+  async function handleVote(vote: FeedbackVote) {
+    if (!canSendFeedback || feedbackPending) return;
+    setCommentOpen(true);
+    await onFeedback(msg.id, vote);
+  }
+
+  async function handleCommentSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!canSendFeedback || !activeVote || feedbackPending) return;
+    await onFeedbackComment(msg.id, comment);
+  }
 
   return (
     <div className="rounded border border-gray-200 bg-white px-4 py-3">
@@ -82,6 +117,75 @@ function MessageBubble({ msg }: { msg: Message }) {
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
           {msg.streaming && (
             <span className="ml-0.5 inline-block h-4 w-1.5 animate-[blink_1s_step-end_infinite] bg-gray-400 align-middle" />
+          )}
+        </div>
+      )}
+      {canSendFeedback && !isThinking && (
+        <div className="mt-3 border-t border-gray-100 pt-2">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              aria-label="Mark answer helpful"
+              title="Mark answer helpful"
+              disabled={feedbackPending}
+              onClick={() => void handleVote("up")}
+              className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${
+                activeVote === "up"
+                  ? "border-[#4a6659] bg-[#edf5ef] text-[#1a3a2a]"
+                  : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-700"
+              } ${feedbackPending ? "opacity-60" : ""}`}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M7 10v10" />
+                <path d="M15 5.5 14 10h5.5a2 2 0 0 1 2 2.3l-1.1 6a2 2 0 0 1-2 1.7H7V10l5-7a2 2 0 0 1 3 2.5Z" />
+                <path d="M3 10h4v10H3z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label="Mark answer unhelpful"
+              title="Mark answer unhelpful"
+              disabled={feedbackPending}
+              onClick={() => void handleVote("down")}
+              className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${
+                activeVote === "down"
+                  ? "border-red-300 bg-red-50 text-red-700"
+                  : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-700"
+              } ${feedbackPending ? "opacity-60" : ""}`}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 14V4" />
+                <path d="M9 18.5 10 14H4.5a2 2 0 0 1-2-2.3l1.1-6a2 2 0 0 1 2-1.7H17v10l-5 7a2 2 0 0 1-3-2.5Z" />
+                <path d="M21 14h-4V4h4z" />
+              </svg>
+            </button>
+            {activeVote && (
+              <button
+                type="button"
+                onClick={() => setCommentOpen((open) => !open)}
+                className="ml-1 text-xs text-gray-500 hover:text-gray-800"
+              >
+                {commentOpen ? "Hide comment" : "Add comment"}
+              </button>
+            )}
+          </div>
+          {commentOpen && activeVote && (
+            <form onSubmit={handleCommentSubmit} className="mt-2 flex gap-2">
+              <textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="Optional comment"
+                rows={2}
+                className="min-h-16 flex-1 resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
+              />
+              <button
+                type="submit"
+                disabled={feedbackPending}
+                className="h-8 self-end rounded bg-[#4a6659] px-3 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                Save
+              </button>
+            </form>
           )}
         </div>
       )}
@@ -313,6 +417,11 @@ export default function ChatPage() {
   const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
   const [srsData, setSrsData] = useState<SrsData | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [ratingOpen, setRatingOpen] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const [sessionRating, setSessionRating] = useState<SessionRating | null>(null);
+  const [sessionRatingComment, setSessionRatingComment] = useState("");
+  const [isSubmittingSessionRating, setIsSubmittingSessionRating] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -501,6 +610,85 @@ export default function ChatPage() {
     );
   }
 
+  function setMessageBackendId(id: string, messageId: string) {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, messageId } : m))
+    );
+  }
+
+  async function handleFeedback(localId: string, vote: FeedbackVote) {
+    const target = messages.find((m) => m.id === localId);
+    if (!sessionId || !target?.messageId) return;
+
+    const previousFeedback = target.feedback;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === localId
+          ? { ...m, feedback: { ...(m.feedback ?? {}), vote, pending: true } }
+          : m
+      )
+    );
+
+    try {
+      await submitFeedback(sessionId, target.messageId, vote);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === localId && m.feedback
+            ? { ...m, feedback: { ...m.feedback, pending: false } }
+            : m
+        )
+      );
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === localId ? { ...m, feedback: previousFeedback } : m
+        )
+      );
+      setError(err instanceof Error ? err.message : "Could not save feedback");
+    }
+  }
+
+  async function handleFeedbackComment(localId: string, comment: string) {
+    const target = messages.find((m) => m.id === localId);
+    if (!sessionId || !target?.messageId || !target.feedback?.vote) return;
+
+    const previousComment = target.feedback.comment;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === localId && m.feedback
+          ? { ...m, feedback: { ...m.feedback, comment, pending: true } }
+          : m
+      )
+    );
+
+    try {
+      await updateFeedbackComment(sessionId, target.messageId, comment);
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === localId && m.feedback
+            ? { ...m, feedback: { ...m.feedback, pending: false } }
+            : m
+        )
+      );
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === localId && m.feedback
+            ? {
+                ...m,
+                feedback: {
+                  ...m.feedback,
+                  comment: previousComment,
+                  pending: false,
+                },
+              }
+            : m
+        )
+      );
+      setError(err instanceof Error ? err.message : "Could not save feedback comment");
+    }
+  }
+
   function formatUploadAttachments(files: UploadedFile[]): string {
     return files.map((file) => file.gcs_path).join("\n");
   }
@@ -592,7 +780,7 @@ export default function ChatPage() {
 
   async function handleSend() {
     const text = input.trim();
-    if (!text || isStreaming) return;
+    if (!text || isStreaming || sessionEnded) return;
 
     setInput("");
     setError(null);
@@ -682,6 +870,7 @@ export default function ChatPage() {
       directFieldsForRequest,
       deferredFieldsForRequest,
       (key) => setActiveWorkflowField(key),
+      (messageId) => setMessageBackendId(assistantId, messageId),
     );
   }
 
@@ -701,6 +890,37 @@ export default function ChatPage() {
     }
   }
 
+  function openSessionRating() {
+    if (!sessionId || isStreaming) return;
+    if (chatMode === "voice") {
+      audioRecorder.stopRecording();
+      audioPlayer.stop();
+      ws.disconnect();
+      setChatMode("text");
+    }
+    setRatingOpen(true);
+  }
+
+  async function handleSessionRatingSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!sessionId || !sessionRating || isSubmittingSessionRating) return;
+
+    setIsSubmittingSessionRating(true);
+    try {
+      await submitSessionFeedback(
+        sessionId,
+        sessionRating,
+        sessionRatingComment,
+      );
+      setSessionEnded(true);
+      setRatingOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save session rating");
+    } finally {
+      setIsSubmittingSessionRating(false);
+    }
+  }
+
   async function openHistory() {
     setHistoryOpen(true);
     setHistoryLoading(true);
@@ -712,13 +932,21 @@ export default function ChatPage() {
   async function loadSession(sid: string) {
     const msgs = await getHistory(sid);
     setMessages(
-      msgs.map((m) => ({ id: crypto.randomUUID(), role: m.role, text: m.text }))
+      msgs.map((m) => ({
+        id: crypto.randomUUID(),
+        role: m.role,
+        text: m.text,
+        messageId: m.message_id,
+      }))
     );
     setSessionId(sid);
     setRsPartial(null);
     setSrsData(null);
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
+    setSessionEnded(false);
+    setSessionRating(null);
+    setSessionRatingComment("");
     setDirectFields({});
     setDeferredDirectFields([]);
     setActiveWorkflowField(null);
@@ -759,6 +987,10 @@ export default function ChatPage() {
     setActiveWorkflowField(null);
     setFinalizingStatus("idle");
     setFinalAnalysis(null);
+    setSessionEnded(false);
+    setSessionRating(null);
+    setSessionRatingComment("");
+    setRatingOpen(false);
     setHistoryOpen(false);
     // Clean up voice mode if active
     if (chatMode === "voice") {
@@ -899,6 +1131,16 @@ export default function ChatPage() {
               )}
             </button>
             <button
+              onClick={openSessionRating}
+              disabled={!sessionId || isStreaming || sessionEnded}
+              className="flex items-center gap-1.5 rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:border-[#4a6659] hover:text-[#1a3a2a] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </svg>
+              {sessionEnded ? "Ended" : "End chat"}
+            </button>
+            <button
               onClick={openHistory}
               className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
             >
@@ -927,7 +1169,13 @@ export default function ChatPage() {
         {/* Message thread */}
         <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} />
+            <MessageBubble
+              key={msg.id}
+              msg={msg}
+              sessionId={sessionId}
+              onFeedback={handleFeedback}
+              onFeedbackComment={handleFeedbackComment}
+            />
           ))}
           <div ref={bottomRef} />
         </div>
@@ -952,12 +1200,12 @@ export default function ChatPage() {
                 {/* Mic button */}
                 <button
                   onClick={handleMicToggle}
-                  disabled={!isVoiceConnected}
+                  disabled={!isVoiceConnected || sessionEnded}
                   title={audioRecorder.isRecording ? "Stop speaking" : "Start speaking"}
                   className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
                     audioRecorder.isRecording
                       ? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse"
-                      : isVoiceConnected
+                      : isVoiceConnected && !sessionEnded
                         ? "bg-[#4a6659] text-white hover:opacity-90"
                         : "bg-gray-300 text-gray-500 cursor-not-allowed"
                   }`}
@@ -975,7 +1223,7 @@ export default function ChatPage() {
                     : audioPlayer.isPlaying
                       ? "AI is speaking..."
                       : isVoiceConnected
-                        ? "Tap to speak"
+                        ? sessionEnded ? "Chat ended" : "Tap to speak"
                         : "Connecting..."}
                 </span>
               </div>
@@ -986,6 +1234,7 @@ export default function ChatPage() {
               <button
                 onClick={() => setUploadOpen(true)}
                 title="Attach a file"
+                disabled={sessionEnded}
                 className="flex shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 hover:border-[#4caf50] hover:text-[#4caf50] transition-colors"
                 style={{ width: 40, height: 40 }}
               >
@@ -1000,13 +1249,13 @@ export default function ChatPage() {
                 onKeyDown={handleKeyDown}
                 placeholder="Describe your project or answer the consultant's questions…"
                 rows={1}
-                disabled={isStreaming}
+                disabled={isStreaming || sessionEnded}
                 className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
                 style={{ minHeight: 40, maxHeight: 160 }}
               />
               <button
                 onClick={handleSend}
-                disabled={!input.trim() || isStreaming}
+                disabled={!input.trim() || isStreaming || sessionEnded}
                 className="flex shrink-0 items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isStreaming ? (
@@ -1047,6 +1296,80 @@ export default function ChatPage() {
               </div>
               <FileUpload sessionId={sessionId} onUploaded={handleFileUploaded} />
             </div>
+          </div>
+        )}
+
+        {/* End chat rating modal */}
+        {ratingOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+            onClick={() => !isSubmittingSessionRating && setRatingOpen(false)}
+          >
+            <form
+              onSubmit={handleSessionRatingSubmit}
+              className="w-[360px] rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-gray-800">Rate this session</h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Your rating closes the chat and helps improve the consultant.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={isSubmittingSessionRating}
+                  onClick={() => setRatingOpen(false)}
+                  className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                >
+                  x
+                </button>
+              </div>
+
+              <div className="grid grid-cols-5 gap-2">
+                {SESSION_RATINGS.map((rating) => (
+                  <button
+                    key={rating}
+                    type="button"
+                    onClick={() => setSessionRating(rating)}
+                    className={`h-10 rounded border text-sm font-semibold transition-colors ${
+                      sessionRating === rating
+                        ? "border-[#4a6659] bg-[#edf5ef] text-[#1a3a2a]"
+                        : "border-gray-200 text-gray-500 hover:border-gray-300"
+                    }`}
+                  >
+                    {rating}
+                  </button>
+                ))}
+              </div>
+
+              <textarea
+                value={sessionRatingComment}
+                onChange={(e) => setSessionRatingComment(e.target.value)}
+                placeholder="Optional comment"
+                rows={3}
+                className="mt-3 min-h-24 w-full resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
+              />
+
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isSubmittingSessionRating}
+                  onClick={() => setRatingOpen(false)}
+                  className="rounded border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!sessionRating || isSubmittingSessionRating}
+                  className="rounded bg-[#4a6659] px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isSubmittingSessionRating ? "Saving..." : "End chat"}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 

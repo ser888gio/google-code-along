@@ -1,10 +1,5 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-interface ChatResponse {
-  reply: string;
-  session_id: string;
-}
-
 interface DocumentResponse {
   markdown: string | null;
   ready: boolean;
@@ -14,6 +9,9 @@ export interface UploadedFile {
   filename: string;
   gcs_path: string;
 }
+
+export type FeedbackVote = "up" | "down";
+export type SessionRating = 1 | 2 | 3 | 4 | 5;
 
 /**
  * Send a message and stream the response via SSE.
@@ -41,6 +39,7 @@ export async function streamChat(
   directFields?: Record<string, string>,
   deferredFields?: string[],
   onActiveField?: (key: string) => void,
+  onMessageId?: (id: string) => void,
 ): Promise<void> {
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
@@ -80,6 +79,7 @@ export async function streamChat(
       try {
         const parsed = JSON.parse(payload);
         if (parsed.session_id) onSessionId(parsed.session_id);
+        if (parsed.message_id) onMessageId?.(parsed.message_id);
         if (parsed.text) onChunk(parsed.text);
         if (parsed.event === "finalizing") onFinalizing?.();
         if (typeof parsed.active_field === "string") onActiveField?.(parsed.active_field);
@@ -93,6 +93,70 @@ export async function streamChat(
   }
 
   onDone();
+}
+
+export async function submitFeedback(
+  sessionId: string,
+  messageId: string,
+  vote: FeedbackVote,
+  comment?: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      message_id: messageId,
+      vote,
+      ...(comment !== undefined ? { comment } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
+}
+
+export async function updateFeedbackComment(
+  sessionId: string,
+  messageId: string,
+  comment: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/feedback/${encodeURIComponent(messageId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      comment,
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
+}
+
+export async function submitSessionFeedback(
+  sessionId: string,
+  rating: SessionRating,
+  comment?: string,
+): Promise<void> {
+  const res = await fetch(`${API_URL}/feedback/session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId,
+      rating,
+      ...(comment !== undefined ? { comment } : {}),
+    }),
+  });
+
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
 }
 
 /**
@@ -360,6 +424,7 @@ export interface SessionSummary {
 }
 
 interface HistoryMessage {
+  message_id?: string;
   role: "user" | "assistant";
   text: string;
   ts: string;
