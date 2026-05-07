@@ -2,6 +2,10 @@
   "name": "frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.2.3"
+  },
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
