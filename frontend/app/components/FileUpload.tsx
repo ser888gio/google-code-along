@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { uploadFile, UploadedFile } from "../../lib/api";
+import { useLocale } from "../i18n/LocaleContext";
 
 interface FileUploadProps {
   sessionId: string | null;
@@ -9,6 +10,7 @@ interface FileUploadProps {
 }
 
 export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
+  const { t } = useLocale();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -19,7 +21,7 @@ export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     if (!sessionId) {
-      setError("Start a conversation first to create a session.");
+      setError(t("upload.no_session"));
       return;
     }
 
@@ -34,7 +36,7 @@ export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
       setUploaded((prev) => [...prev, entry]);
       onUploaded?.(entry);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setError(err instanceof Error ? err.message : t("upload.failed"));
     } finally {
       setUploading(false);
       setProgress(0);
@@ -89,10 +91,10 @@ export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
           />
         </svg>
         {uploading ? (
-          <span className="text-xs text-gray-500">Uploading… {progress}%</span>
+          <span className="text-xs text-gray-500">{t("upload.uploading")} {progress}%</span>
         ) : (
           <span className="text-xs text-gray-500">
-            Drop a file or <span className="text-[#4caf50] font-medium">browse</span>
+            {t("upload.drop")} <span className="text-[#4caf50] font-medium">{t("upload.browse")}</span>
           </span>
         )}
       </div>

@@ -1,10 +1,12 @@
 "use client";
 
 import { FinalAnalysis } from "../../lib/api";
+import { useLocale } from "../i18n/LocaleContext";
 
 // ─── Finalizing spinner ───────────────────────────────────────────────────────
 
 export function FinalizingOverlay() {
+  const { t } = useLocale();
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-8">
       <svg
@@ -20,10 +22,9 @@ export function FinalizingOverlay() {
           strokeDasharray="31.4" strokeDashoffset="10"
         />
       </svg>
-      <p className="text-sm font-semibold text-[#1a3a2a]">Finalizing your analysis…</p>
+      <p className="text-sm font-semibold text-[#1a3a2a]">{t("analysis.finalizing")}</p>
       <p className="max-w-xs text-center text-xs text-gray-400">
-        The AI is synthesising all collected information, searching past cases, and
-        classifying the best approach. This takes about 30–60 seconds.
+        {t("analysis.finalizing_desc")}
       </p>
     </div>
   );
@@ -126,6 +127,7 @@ export default function AnalysisPanel({
 }: {
   analysis: FinalAnalysis;
 }) {
+  const { t } = useLocale();
   const { technology_recommendation, team_profile, priority_tier, risk_and_dependencies, use_case_form, _meta } = analysis;
 
   return (
@@ -136,11 +138,11 @@ export default function AnalysisPanel({
           <div>
             <p className="text-sm font-bold text-gray-800">
               {/* TODO: show use_case_title from use_case_form once field names are confirmed */}
-              {use_case_form?.["use_case_title"] ?? "Use Case Analysis"}
+              {use_case_form?.["use_case_title"] ?? t("analysis.use_case")}
             </p>
             <p className="text-[11px] text-gray-400">
-              Finalized · {_meta?.finalized_at ? new Date(_meta.finalized_at).toLocaleString() : "—"}
-              {" · "}completeness at generation: {_meta?.discovery_completeness ?? "—"}%
+              {t("analysis.finalized")} {_meta?.finalized_at ? new Date(_meta.finalized_at).toLocaleString() : "—"}
+              {" · "}{t("analysis.completeness")} {_meta?.discovery_completeness ?? "—"}%
             </p>
           </div>
           {/* TODO: add download button for final_analysis.docx once backend generates it */}
@@ -153,7 +155,7 @@ export default function AnalysisPanel({
               <path d="M7 1v8M4 6l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M1 10v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
             </svg>
-            Download
+            {t("analysis.download")}
           </button>
         </div>
       </div>
@@ -161,7 +163,7 @@ export default function AnalysisPanel({
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
 
         {/* 1 — Technology Recommendation */}
-        <SectionCard title="Technology Recommendation" accent="border-t-2 border-t-[#4a6659]">
+        <SectionCard title={t("analysis.tech_rec")} accent="border-t-2 border-t-[#4a6659]">
           <div className="mb-2 flex flex-wrap gap-2">
             <Tag label={technology_recommendation.primary} variant="green" />
             {technology_recommendation.alternatives.map((a) => (
@@ -174,7 +176,7 @@ export default function AnalysisPanel({
           {technology_recommendation.constraints.length > 0 && (
             <div>
               <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-                Constraints
+                {t("analysis.constraints")}
               </p>
               <BulletList items={technology_recommendation.constraints} />
             </div>
@@ -182,7 +184,7 @@ export default function AnalysisPanel({
         </SectionCard>
 
         {/* 2 — Team Profile */}
-        <SectionCard title="Recommended Team">
+        <SectionCard title={t("analysis.team")}>
           <div className="mb-2">
             <Tag
               label={team_profile.recommended_team_type.toUpperCase()}
@@ -194,7 +196,7 @@ export default function AnalysisPanel({
           </p>
           <div>
             <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-              Skills Required
+              {t("analysis.skills")}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {team_profile.skills_required.map((s) => (
@@ -205,7 +207,7 @@ export default function AnalysisPanel({
         </SectionCard>
 
         {/* 3 — Priority Tier */}
-        <SectionCard title="Priority Classification">
+        <SectionCard title={t("analysis.priority")}>
           <div className="mb-3">
             <TierBadge tier={priority_tier.tier} score={priority_tier.score} />
           </div>
@@ -214,29 +216,29 @@ export default function AnalysisPanel({
           </p>
           <div>
             <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-              Priority Drivers
+              {t("analysis.drivers")}
             </p>
             <BulletList items={priority_tier.priority_drivers} />
           </div>
         </SectionCard>
 
         {/* 4 — Risk & Dependencies */}
-        <SectionCard title="Risks & Dependencies">
+        <SectionCard title={t("analysis.risks")}>
           {risk_and_dependencies.risks.length > 0 && (
             <div className="mb-3">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Risks</p>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{t("analysis.risks_label")}</p>
               <BulletList items={risk_and_dependencies.risks} />
             </div>
           )}
           {risk_and_dependencies.dependencies.length > 0 && (
             <div className="mb-3">
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Dependencies</p>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{t("analysis.deps")}</p>
               <BulletList items={risk_and_dependencies.dependencies} />
             </div>
           )}
           {risk_and_dependencies.open_questions.length > 0 && (
             <div>
-              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Open Questions</p>
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{t("analysis.open_q")}</p>
               <BulletList items={risk_and_dependencies.open_questions} />
             </div>
           )}
@@ -245,7 +247,7 @@ export default function AnalysisPanel({
         {/* 5 — Use Case Form fields */}
         {/* TODO: replace with full 22-field typed display once field names are confirmed.
                   Currently shows whatever keys the finalizer returns. */}
-        <SectionCard title="Collected Form Fields">
+        <SectionCard title={t("analysis.form_fields")}>
           {Object.entries(use_case_form ?? {})
             .filter(([, v]) => v != null && String(v).trim())
             .map(([key, value]) => (

@@ -7,7 +7,7 @@ SRS_EXTRACTION_PROMPT — maps a full conversation transcript into the 4-block
 
 SRS_EXTRACTION_PROMPT = """\
 You are an expert technical writer. Given the following conversation between a user and an \
-AI business consultant, extract all discussed information and compile it into a structured \
+Discovery Agent, extract all discussed information and compile it into a structured \
 Discovery Session output document.
 
 You MUST return ONLY valid JSON — no markdown fences, no commentary, no explanation.

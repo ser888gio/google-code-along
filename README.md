@@ -1,4 +1,4 @@
-# AI Business Consultant — RS Generator
+# Discovery Agent — RS Generator
 
 Monorepo for the AI-Assisted Requirement Specification Generator.
 
@@ -6,7 +6,7 @@ An interactive AI persona that guides business users through defining their need
 
 ## Features
 
-- **Conversational Discovery:** Chat with an expert AI business consultant (Google ADK + Gemini 2.5 Pro) to map out "As-Is" and "To-Be" specifications.
+- **Conversational Discovery:** Chat with an expert Discovery Agent (Google ADK + Gemini 2.5 Pro) to map out "As-Is" and "To-Be" specifications.
 - **Live RS Template:** A sidebar panel tracks and fills all 22 RS fields across 6 sections in real time as the conversation progresses.
 - **Automated Diagramming:** Generates BPMN and Dataflow diagrams from conversational context, rendered client-side with Mermaid.js.
 - **Document Export:** Compiles the session into standard PDF and Word (DOCX) outputs.

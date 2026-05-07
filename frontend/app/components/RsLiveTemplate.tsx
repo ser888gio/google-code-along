@@ -2,10 +2,12 @@
 
 import { RsPartialData } from "../../lib/api";
 import { RS_SECTIONS, Section } from "../generated/rsSchema";
+import { useLocale } from "../i18n/LocaleContext";
 
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
 function PlaceholderCard({ label, pulsing = false }: { label: string; pulsing?: boolean }) {
+  const { t } = useLocale();
   return (
     <div
       className={`rounded border-2 border-dashed border-gray-200 px-3 py-2.5 ${
@@ -16,7 +18,7 @@ function PlaceholderCard({ label, pulsing = false }: { label: string; pulsing?: 
         <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
           {label}
         </span>
-        <span className="ml-auto text-[10px] italic text-gray-300">Gathering…</span>
+        <span className="ml-auto text-[10px] italic text-gray-300">{t("rs.gathering")}</span>
       </div>
     </div>
   );
@@ -51,6 +53,7 @@ function EditableCard({
   onChange: (key: string, value: string) => void;
   multiline?: boolean;
 }) {
+  const { t } = useLocale();
   return (
     <div className="rounded border border-blue-200 bg-white px-3 py-2.5 shadow-sm">
       <div className="mb-1.5 flex items-center gap-2">
@@ -65,7 +68,7 @@ function EditableCard({
         <textarea
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
-          placeholder={`Enter ${label.toLowerCase()}…`}
+          placeholder={`${t("rs.badge.direct")} ${label.toLowerCase()}…`}
           rows={2}
           className="w-full resize-none text-sm leading-relaxed text-gray-700 outline-none placeholder-gray-300"
         />
@@ -74,7 +77,7 @@ function EditableCard({
           type="text"
           value={value}
           onChange={(e) => onChange(fieldKey, e.target.value)}
-          placeholder={`Enter ${label.toLowerCase()}…`}
+          placeholder={`${t("rs.badge.direct")} ${label.toLowerCase()}…`}
           className="w-full text-sm text-gray-700 outline-none placeholder-gray-300"
         />
       )}
@@ -161,6 +164,7 @@ function CompletenessHeader({
   completeness: number;
   onGenerateFull: () => void;
 }) {
+  const { t } = useLocale();
   const canGenerate = completeness >= 80;
 
   const barColor =
@@ -174,24 +178,24 @@ function CompletenessHeader({
     "text-red-500";
 
   const statusLabel =
-    completeness >= 80 ? "Ready to generate" :
-    completeness >= 50 ? "Getting there…" :
-    "Keep chatting";
+    completeness >= 80 ? t("rs.status.ready") :
+    completeness >= 50 ? t("rs.status.getting_there") :
+    t("rs.status.keep_chatting");
 
   return (
     <div className="shrink-0 border-b border-gray-200 bg-white px-5 py-4">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <p className="text-sm font-bold text-gray-800">Requirements Specification</p>
-          <p className="text-xs text-gray-400">Filling automatically as you chat</p>
+          <p className="text-sm font-bold text-gray-800">{t("rs.title")}</p>
+          <p className="text-xs text-gray-400">{t("rs.subtitle")}</p>
         </div>
         <button
           onClick={onGenerateFull}
           disabled={!canGenerate}
           title={
             canGenerate
-              ? "Generate the full document"
-              : `Reach 80% completeness to generate (currently ${completeness}%)`
+              ? t("rs.generate")
+              : `${t("rs.reach_80")} ${completeness}%)`
           }
           className={`flex items-center gap-1.5 rounded px-3 py-2 text-xs font-semibold transition-all ${
             canGenerate
@@ -208,7 +212,7 @@ function CompletenessHeader({
               strokeLinejoin="round"
             />
           </svg>
-          {canGenerate ? "Generate Full Document" : `${completeness}% — keep chatting`}
+          {canGenerate ? t("rs.generate") : `${completeness}% ${t("rs.keep_chatting_suffix")}`}
         </button>
       </div>
 
@@ -217,7 +221,7 @@ function CompletenessHeader({
           <span className={`font-semibold ${textColor}`}>
             {completeness}% — {statusLabel}
           </span>
-          <span className="text-gray-400">80% to generate</span>
+          <span className="text-gray-400">{t("rs.to_generate")}</span>
         </div>
         <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
           <div
@@ -245,6 +249,7 @@ export default function RsLiveTemplate({
   onDirectFieldChange: (key: string, value: string) => void;
   isExtracting?: boolean;
 }) {
+  const { t } = useLocale();
   const completeness = rsPartial?.completeness ?? 0;
 
   return (
@@ -252,7 +257,7 @@ export default function RsLiveTemplate({
       <CompletenessHeader completeness={completeness} onGenerateFull={onGenerateFull} />
       {isExtracting && (
         <div className="shrink-0 bg-amber-50 px-4 py-1.5 text-center text-[11px] text-amber-700 border-b border-amber-100">
-          Processing…
+          {t("rs.processing")}
         </div>
       )}
 

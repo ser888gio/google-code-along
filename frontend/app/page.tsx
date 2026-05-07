@@ -14,6 +14,8 @@ import BpmnPanel from "./components/BpmnPanel";
 import DataflowPanel from "./components/DataflowPanel";
 import RsLiveTemplate from "./components/RsLiveTemplate";
 import FirestoreSrsPanel from "./components/FirestoreSrsPanel";
+import LanguageSwitcher from "./i18n/LanguageSwitcher";
+import { useLocale } from "./i18n/LocaleContext";
 import {
   DEFERRED_DIRECT_ANSWER_PATTERNS,
   DIRECT_CHAT_FIELD_PATTERNS,
@@ -64,6 +66,7 @@ function MessageBubble({
   onFeedback: (localId: string, vote: FeedbackVote) => Promise<void>;
   onFeedbackComment: (localId: string, comment: string) => Promise<void>;
 }) {
+  const { t } = useLocale();
   const isUser = msg.role === "user";
   const [commentOpen, setCommentOpen] = useState(false);
   const [comment, setComment] = useState(msg.feedback?.comment ?? "");
@@ -71,7 +74,7 @@ function MessageBubble({
   if (isUser) {
     return (
       <div className="rounded border border-gray-200 bg-[#f5fdf5] px-4 py-3">
-        <div className="mb-1 text-[11px] font-bold uppercase tracking-widest text-gray-500">VY</div>
+        <div className="mb-1 text-[11px] font-bold uppercase tracking-widest text-gray-500">{t("label.you")}</div>
         <div className="flex items-start gap-2">
           <svg className="mt-0.5 shrink-0 text-gray-400" width="14" height="16" viewBox="0 0 14 16" fill="none">
             <rect x="1" y="1" width="12" height="14" rx="1" stroke="currentColor" strokeWidth="1.5" />
@@ -102,10 +105,10 @@ function MessageBubble({
 
   return (
     <div className="rounded border border-gray-200 bg-white px-4 py-3">
-      <div className="mb-1 text-[11px] font-bold uppercase tracking-widest text-gray-500">AI CONSULTANT</div>
+      <div className="mb-1 text-[11px] font-bold uppercase tracking-widest text-gray-500">{t("label.ai_consultant")}</div>
       {isThinking ? (
         <p className="text-sm italic text-gray-400">
-          Thinking
+          {t("thinking")}
           <span className="inline-flex gap-0.5 ml-0.5 align-middle">
             <span className="animate-[blink_1.2s_step-end_infinite] [animation-delay:0s]">.</span>
             <span className="animate-[blink_1.2s_step-end_infinite] [animation-delay:0.4s]">.</span>
@@ -125,8 +128,8 @@ function MessageBubble({
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              aria-label="Mark answer helpful"
-              title="Mark answer helpful"
+              aria-label={t("feedback.helpful")}
+              title={t("feedback.helpful")}
               disabled={feedbackPending}
               onClick={() => void handleVote("up")}
               className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${
@@ -143,8 +146,8 @@ function MessageBubble({
             </button>
             <button
               type="button"
-              aria-label="Mark answer unhelpful"
-              title="Mark answer unhelpful"
+              aria-label={t("feedback.unhelpful")}
+              title={t("feedback.unhelpful")}
               disabled={feedbackPending}
               onClick={() => void handleVote("down")}
               className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${
@@ -165,7 +168,7 @@ function MessageBubble({
                 onClick={() => setCommentOpen((open) => !open)}
                 className="ml-1 text-xs text-gray-500 hover:text-gray-800"
               >
-                {commentOpen ? "Hide comment" : "Add comment"}
+                {commentOpen ? t("btn.hide_comment") : t("btn.add_comment")}
               </button>
             )}
           </div>
@@ -174,7 +177,7 @@ function MessageBubble({
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
-                placeholder="Optional comment"
+                placeholder={t("feedback.optional_comment")}
                 rows={2}
                 className="min-h-16 flex-1 resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
               />
@@ -183,7 +186,7 @@ function MessageBubble({
                 disabled={feedbackPending}
                 className="h-8 self-end rounded bg-[#4a6659] px-3 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
-                Save
+                {t("btn.save")}
               </button>
             </form>
           )}
@@ -196,9 +199,10 @@ function MessageBubble({
 // ─── Error Toast ──────────────────────────────────────────────────────────────
 
 function ErrorToast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  const { t } = useLocale();
   useEffect(() => {
-    const t = setTimeout(onDismiss, 6000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(onDismiss, 6000);
+    return () => clearTimeout(timer);
   }, [message, onDismiss]);
 
   return (
@@ -209,7 +213,7 @@ function ErrorToast({ message, onDismiss }: { message: string; onDismiss: () => 
         <line x1="12" y1="16" x2="12.01" y2="16" />
       </svg>
       <div className="flex-1">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-red-600">Something went wrong</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-red-600">{t("error.something_wrong")}</p>
         <p className="mt-0.5 text-sm text-gray-700">{message}</p>
       </div>
       <button onClick={onDismiss} className="shrink-0 text-gray-400 hover:text-gray-600">✕</button>
@@ -244,12 +248,22 @@ function RsDocumentPanel({
   finalAnalysis: FinalAnalysis | null;
   isExtracting: boolean;
 }) {
+  const { t } = useLocale();
+  const TAB_LABELS: Record<string, string> = {
+    Preview: t("tab.preview"),
+    BPMN: t("tab.bpmn"),
+    Data: t("tab.data"),
+    Database: t("tab.database"),
+    Analysis: t("tab.analysis"),
+    Summary: t("tab.summary"),
+  };
+
   return (
     <div className="flex h-full flex-col">
       {/* Tab bar */}
       <div className="flex shrink-0 items-center border-b border-gray-200 bg-white px-4">
         <span className="mr-4 border-r border-gray-200 py-3 pr-4 text-sm font-semibold text-gray-800">
-          Requirements Specification
+          {t("header.rs")}
         </span>
         <div className="flex overflow-x-auto">
           {RS_TABS.map((tab) => (
@@ -262,7 +276,7 @@ function RsDocumentPanel({
                   : "text-gray-500 hover:text-gray-800"
               }`}
             >
-              {tab}
+              {TAB_LABELS[tab] ?? tab}
               {tab === "Analysis" && finalizingStatus === "finalizing" && (
                 <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 align-middle" />
               )}
@@ -297,7 +311,7 @@ function RsDocumentPanel({
             <FinalizingOverlay />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-gray-400">
-              Analysis will appear here once the discovery is complete (≥ 90%).
+              {t("analysis.pending")}
             </div>
           )
         ) : activeTab === "Summary" ? (
@@ -309,12 +323,12 @@ function RsDocumentPanel({
                 <path d="M7 1v8M4 6l3 3 3-3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M1 10v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
               </svg>
-              Download Requirements Specification
+              {t("download.rs")}
             </button>
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
-            {activeTab} — not yet available
+            {TAB_LABELS[activeTab] ?? activeTab}
           </div>
         )}
       </div>
@@ -324,12 +338,9 @@ function RsDocumentPanel({
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const WELCOME_MESSAGE: Message = {
-  id: "welcome",
-  role: "assistant",
-  text: "Welcome to your Business Analyst session. I'm your AI consultant — I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
-  streaming: false,
-};
+function makeWelcomeMessage(text: string): Message {
+  return { id: "welcome", role: "assistant", text, streaming: false };
+}
 
 // Fields that must never be AI-extracted (numeric/financial or file-backed).
 const DIRECT_INPUT_KEYS = new Set<string>(STRICT_DIRECT_FIELD_KEYS);
@@ -408,7 +419,8 @@ function mergePartialFields(
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
+  const { t } = useLocale();
+  const [messages, setMessages] = useState<Message[]>(() => [makeWelcomeMessage(t("welcome_message"))]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -978,7 +990,7 @@ export default function ChatPage() {
   }
 
   function newConversation() {
-    setMessages([WELCOME_MESSAGE]);
+    setMessages([makeWelcomeMessage(t("welcome_message"))]);
     setSessionId(null);
     setRsPartial(null);
     setSrsData(null);
@@ -1049,7 +1061,7 @@ export default function ChatPage() {
           <div className="absolute inset-0 z-40 flex">
             <div className="flex w-72 flex-col border-r border-gray-200 bg-white shadow-xl">
               <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
-                <span className="text-sm font-bold text-gray-800">Conversations</span>
+                <span className="text-sm font-bold text-gray-800">{t("sidebar.conversations")}</span>
                 <button onClick={() => setHistoryOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
               </div>
               <div className="shrink-0 border-b border-gray-200 p-3">
@@ -1057,14 +1069,14 @@ export default function ChatPage() {
                   onClick={newConversation}
                   className="w-full rounded border border-dashed border-gray-300 py-2 text-xs font-semibold text-gray-500 hover:border-[#4caf50] hover:text-[#4a6659] transition-colors"
                 >
-                  + New conversation
+                  {t("btn.new_conversation")}
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto">
                 {historyLoading ? (
-                  <p className="p-4 text-center text-xs text-gray-400">Loading…</p>
+                  <p className="p-4 text-center text-xs text-gray-400">{t("sidebar.loading")}</p>
                 ) : historySessions.length === 0 ? (
-                  <p className="p-4 text-center text-xs text-gray-400">No past conversations found.</p>
+                  <p className="p-4 text-center text-xs text-gray-400">{t("sidebar.no_conversations")}</p>
                 ) : (
                   historySessions.map((s) => (
                     <button
@@ -1092,7 +1104,7 @@ export default function ChatPage() {
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-gray-800">Document Preprocessor</span>
+            <span className="text-sm font-bold text-gray-800">{t("header.title")}</span>
             {activeWorkflowField && (
               <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
                 {activeWorkflowField.replace(/_/g, " ")}
@@ -1103,7 +1115,7 @@ export default function ChatPage() {
             {/* Voice/Text mode toggle */}
             <button
               onClick={handleToggleVoice}
-              title={chatMode === "voice" ? "Switch to text mode" : "Switch to voice mode"}
+              title={chatMode === "voice" ? t("header.voice_to_text") : t("header.text_to_voice")}
               className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
                 chatMode === "voice"
                   ? "bg-red-50 text-red-600 hover:bg-red-100"
@@ -1117,7 +1129,7 @@ export default function ChatPage() {
                     <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
-                  Voice Mode
+                  {t("btn.voice_mode")}
                 </>
               ) : (
                 <>
@@ -1126,7 +1138,7 @@ export default function ChatPage() {
                     <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                     <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
                   </svg>
-                  Voice
+                  {t("btn.voice")}
                 </>
               )}
             </button>
@@ -1138,7 +1150,7 @@ export default function ChatPage() {
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                 <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
               </svg>
-              {sessionEnded ? "Ended" : "End chat"}
+              {sessionEnded ? t("btn.ended") : t("btn.end_chat")}
             </button>
             <button
               onClick={openHistory}
@@ -1148,8 +1160,9 @@ export default function ChatPage() {
                 <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              History
+              {t("btn.history")}
             </button>
+            <LanguageSwitcher />
             <div className={`h-3 w-3 rounded-full ${
               chatMode === "voice"
                 ? ws.connectionState === "connected"
@@ -1187,10 +1200,10 @@ export default function ChatPage() {
             <div className="flex flex-col items-center gap-2">
               {/* Connection status */}
               {ws.connectionState === "connecting" && (
-                <p className="text-xs text-yellow-600">Connecting...</p>
+                <p className="text-xs text-yellow-600">{t("voice.connecting")}</p>
               )}
               {ws.connectionState === "error" && (
-                <p className="text-xs text-red-600">Connection failed. Try toggling voice mode.</p>
+                <p className="text-xs text-red-600">{t("voice.conn_failed")}</p>
               )}
               {audioRecorder.error && (
                 <p className="text-xs text-red-600">{audioRecorder.error}</p>
@@ -1219,12 +1232,12 @@ export default function ChatPage() {
 
                 <span className="text-xs text-gray-500">
                   {audioRecorder.isRecording
-                    ? "Listening..."
+                    ? t("voice.listening")
                     : audioPlayer.isPlaying
-                      ? "AI is speaking..."
+                      ? t("voice.ai_speaking")
                       : isVoiceConnected
-                        ? sessionEnded ? "Chat ended" : "Tap to speak"
-                        : "Connecting..."}
+                        ? sessionEnded ? t("voice.chat_ended") : t("voice.tap_to_speak")
+                        : t("voice.connecting")}
                 </span>
               </div>
             </div>
@@ -1247,7 +1260,7 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Describe your project or answer the consultant's questions…"
+                placeholder={t("input.placeholder")}
                 rows={1}
                 disabled={isStreaming || sessionEnded}
                 className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
@@ -1264,7 +1277,7 @@ export default function ChatPage() {
                   </svg>
                 ) : (
                   <>
-                    Send
+                    {t("btn.send")}
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                       <path d="M2 7h10M7 2l5 5-5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
@@ -1286,7 +1299,7 @@ export default function ChatPage() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-gray-800">Attach a file</span>
+                <span className="text-sm font-semibold text-gray-800">{t("modal.attach_file")}</span>
                 <button
                   onClick={() => setUploadOpen(false)}
                   className="text-xs text-gray-400 hover:text-gray-600"
@@ -1312,9 +1325,9 @@ export default function ChatPage() {
             >
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
-                  <h2 className="text-sm font-semibold text-gray-800">Rate this session</h2>
+                  <h2 className="text-sm font-semibold text-gray-800">{t("modal.rate_session")}</h2>
                   <p className="mt-1 text-xs text-gray-500">
-                    Your rating closes the chat and helps improve the consultant.
+                    {t("modal.rate_desc")}
                   </p>
                 </div>
                 <button
@@ -1347,7 +1360,7 @@ export default function ChatPage() {
               <textarea
                 value={sessionRatingComment}
                 onChange={(e) => setSessionRatingComment(e.target.value)}
-                placeholder="Optional comment"
+                placeholder={t("feedback.optional_comment")}
                 rows={3}
                 className="mt-3 min-h-24 w-full resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
               />
@@ -1359,14 +1372,14 @@ export default function ChatPage() {
                   onClick={() => setRatingOpen(false)}
                   className="rounded border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
                 >
-                  Cancel
+                  {t("btn.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!sessionRating || isSubmittingSessionRating}
                   className="rounded bg-[#4a6659] px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {isSubmittingSessionRating ? "Saving..." : "End chat"}
+                  {isSubmittingSessionRating ? t("modal.saving") : t("modal.end_chat")}
                 </button>
               </div>
             </form>
@@ -1376,7 +1389,7 @@ export default function ChatPage() {
         {/* Disclaimer */}
         <div className="shrink-0 px-4 py-1.5 text-center">
           <p className="text-[10px] text-gray-400">
-            This is an AI system and cannot always be accurate. Please review outputs.
+            {t("disclaimer")}
           </p>
         </div>
       </div>

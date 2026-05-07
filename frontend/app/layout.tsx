@@ -3,7 +3,7 @@ import Providers from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RS Generator — AI Business Consultant",
+  title: "RS Generator — Discovery Agent",
   description: "AI-powered Requirement Specification Generator",
 };
 
@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="cs">
       <body>
         <Providers>{children}</Providers>
       </body>

@@ -1,4 +1,4 @@
-# Agent Instructions: AI Business Consultant for Requirement Specification
+# Agent Instructions: Discovery Agent for Requirement Specification
 
 ## 1. Project Overview & Mission
 
