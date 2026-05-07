@@ -1320,7 +1320,7 @@ export default function ChatPage() {
           >
             <form
               onSubmit={handleSessionRatingSubmit}
-              className="w-[360px] rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+              className="w-90 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="mb-4 flex items-start justify-between gap-4">

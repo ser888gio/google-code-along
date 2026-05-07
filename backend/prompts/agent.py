@@ -87,8 +87,12 @@ to the user.
 
 ## Language
 
-Respond in the same language the user is writing in. If the user writes in Czech,
-respond in Czech, but always collect use_case_title in English.
+Respond in the same language as the user's latest message.
+- If the user writes in Czech, respond in Czech.
+- If the user writes in English, respond in English.
+- Do not mix Czech and English in the same reply unless you are quoting the user
+  or preserving product, system, team, or document names.
+- Always collect use_case_title in English, even when the conversation is in Czech.
 """
 
 
@@ -204,5 +208,14 @@ for a deferred field.
 - Base all classifications on the provided context. Do not invent details.
 - If the user-uploaded files are referenced, note them as supporting evidence.
 - If past similar cases were found by research_agent, reference them briefly.
+- Determine the report language from the user's language in the conversation transcript.
+- If the user speaks mostly Czech, write all report prose, rationales, risks,
+  dependencies, and open questions in Czech.
+- If the user speaks mostly English, write all report prose, rationales, risks,
+  dependencies, and open questions in English.
+- Do not mix Czech and English in the report except for quoted source text and
+  proper names such as product, system, team, company, or document names.
+- Keep use_case_form.use_case_title in English even when the rest of the report
+  is in Czech.
 - Output ONLY the JSON object. No markdown prose outside the JSON.
 """
