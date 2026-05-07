@@ -16,10 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Optional
 
 from opentelemetry import trace
-from opentelemetry.trace import SpanKind, StatusCode
 
 from observability.cost import compute_cost
 from observability.metrics import (
@@ -29,6 +27,7 @@ from observability.metrics import (
     record_safety_finish_reason,
     record_tokens,
 )
+from observability.safety import add_session_cost
 from observability.turns import record_model_call, record_tool_call
 
 _SNIPPET_MAX_CHARS = 500  # max chars captured as span event content
@@ -114,13 +113,12 @@ def before_model_cb(callback_context, llm_request) -> None:
 def after_model_cb(callback_context, llm_response) -> None:
     """Stamp the current span with response-side GenAI attributes and record metrics."""
     span = trace.get_current_span()
+    pending_session_cost_usd = 0.0
 
     invocation_id: str = getattr(callback_context, "invocation_id", "") or ""
     session_id: str = ""
-    user_id: str = ""
     try:
         session_id = callback_context.session.id or ""
-        user_id = callback_context.user_id or ""
     except Exception:
         pass
     model: str = getattr(llm_response, "model_version", "") or ""
@@ -148,7 +146,10 @@ def after_model_cb(callback_context, llm_response) -> None:
             reply_content = getattr(llm_response, "content", None)
             snippet = _redact_snippet(_extract_text_from_content(reply_content))
             if snippet:
-                span.add_event("gen_ai.assistant.message", attributes={"content": snippet})
+                span.add_event(
+                    "gen_ai.assistant.message",
+                    attributes={"content": snippet},
+                )
         except Exception:
             pass
 
@@ -168,9 +169,19 @@ def after_model_cb(callback_context, llm_response) -> None:
         cache_read = getattr(usage, "cached_content_token_count", 0) or 0
 
         record_tokens(input_tokens, model=model, token_type="input", feature=agent_name)
-        record_tokens(output_tokens, model=model, token_type="output", feature=agent_name)
+        record_tokens(
+            output_tokens,
+            model=model,
+            token_type="output",
+            feature=agent_name,
+        )
         if cache_read:
-            record_tokens(cache_read, model=model, token_type="cache_read", feature=agent_name)
+            record_tokens(
+                cache_read,
+                model=model,
+                token_type="cache_read",
+                feature=agent_name,
+            )
         record_cache_hit_ratio(
             model=model,
             input_tokens=input_tokens,
@@ -188,12 +199,24 @@ def after_model_cb(callback_context, llm_response) -> None:
             cost_usd=cost_usd,
             finish_reason=str(finish_reason) if finish_reason is not None else None,
         )
+        pending_session_cost_usd = cost_usd
 
     # Record operation duration
     if invocation_id and invocation_id in _call_start:
         elapsed = time.perf_counter() - _call_start.pop(invocation_id)
-        status = "ok" if finish_reason not in ("SAFETY", "ERROR") else str(finish_reason)
-        record_operation_duration(elapsed, model=model or "unknown", operation="generate_content", status=status)
+        status = (
+            "ok"
+            if finish_reason not in ("SAFETY", "ERROR")
+            else str(finish_reason)
+        )
+        record_operation_duration(
+            elapsed,
+            model=model or "unknown",
+            operation="generate_content",
+            status=status,
+        )
+
+    add_session_cost(session_id, pending_session_cost_usd)
 
     return None  # type: ignore[return-value]
 
@@ -203,7 +226,12 @@ def after_model_cb(callback_context, llm_response) -> None:
 # ---------------------------------------------------------------------------
 
 
-def before_tool_cb(callback_context, tool, args, tool_context) -> None:  # type: ignore[return-value]
+def before_tool_cb(  # type: ignore[return-value]
+    callback_context,
+    tool,
+    args,
+    tool_context,
+) -> None:
     """Record a span event for the tool call start."""
     span = trace.get_current_span()
     tool_name = getattr(tool, "name", None) or str(tool)
@@ -232,7 +260,13 @@ def before_tool_cb(callback_context, tool, args, tool_context) -> None:  # type:
 # ---------------------------------------------------------------------------
 
 
-def after_tool_cb(callback_context, tool, args, tool_context, tool_response) -> None:  # type: ignore[return-value]
+def after_tool_cb(  # type: ignore[return-value]
+    callback_context,
+    tool,
+    args,
+    tool_context,
+    tool_response,
+) -> None:
     """Record a span event for the tool call result."""
     span = trace.get_current_span()
     tool_name = getattr(tool, "name", None) or str(tool)

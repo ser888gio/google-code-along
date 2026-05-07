@@ -85,6 +85,10 @@ export async function streamChat(
         const parsed = JSON.parse(payload);
         if (parsed.session_id) onSessionId(parsed.session_id);
         if (parsed.message_id) onMessageId?.(parsed.message_id);
+        if (parsed.error) {
+          onError(parsed.error);
+          return;
+        }
         if (parsed.text) onChunk(parsed.text);
         if (parsed.event === "finalizing") onFinalizing?.();
         if (typeof parsed.active_field === "string") onActiveField?.(parsed.active_field);

@@ -15,11 +15,10 @@ google.adk stubs are installed by conftest.py before collection — no stubs nee
 """
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from httpx import AsyncClient, ASGITransport
-
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -68,6 +67,7 @@ def app_with_mocks():
     fully mocked. Returns (app, mock_runner, mock_session_service).
     """
     import importlib
+
     import main as main_module  # noqa — imported after stubs installed
 
     importlib.reload(main_module)  # re-evaluate module-level globals with stubs

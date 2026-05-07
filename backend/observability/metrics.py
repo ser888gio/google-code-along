@@ -14,11 +14,18 @@ from opentelemetry.metrics import Observation
 
 _meter = metrics.get_meter("rs-generator", version="1.0.0")
 _cache_hit_ratios: dict[str, float] = {}
+_injection_block_rates: dict[str, float] = {}
 
 
 def _observe_cache_hit_ratio(_options) -> Iterable[Observation]:  # noqa: ANN001
     for model, ratio in _cache_hit_ratios.items():
         yield Observation(ratio, attributes={"model": model})
+
+
+def _observe_injection_block_rate(_options) -> Iterable[Observation]:  # noqa: ANN001
+    for suite, ratio in _injection_block_rates.items():
+        yield Observation(ratio, attributes={"suite": suite})
+
 
 # ---------------------------------------------------------------------------
 # Histograms
@@ -88,6 +95,20 @@ cost_circuit_counter = _meter.create_counter(
     unit="events",
 )
 
+prompt_injection_attempt_counter = _meter.create_counter(
+    name="rs.safety.injection_attempt_total",
+    description=(
+        "Known-bad prompt injection or exfiltration attempts seen by safety checks."
+    ),
+    unit="events",
+)
+
+anomalous_session_counter = _meter.create_counter(
+    name="rs.safety.anomalous_session",
+    description="Sessions flagged for anomalous token or cost usage.",
+    unit="events",
+)
+
 # ---------------------------------------------------------------------------
 # Gauges (up-down counters used as gauges)
 # ---------------------------------------------------------------------------
@@ -97,6 +118,13 @@ cache_hit_ratio_gauge = _meter.create_observable_gauge(
     description="Ratio of cache_read_tokens to total input_tokens per call.",
     unit="ratio",
     callbacks=[_observe_cache_hit_ratio],
+)
+
+injection_block_rate_gauge = _meter.create_observable_gauge(
+    name="rs.safety.injection_block_rate",
+    description="Synthetic red-team prompt block rate.",
+    unit="ratio",
+    callbacks=[_observe_injection_block_rate],
 )
 
 # ---------------------------------------------------------------------------
@@ -194,3 +222,27 @@ def record_cost_circuit_tripped(*, session_id_hash: str) -> None:
 
 def record_safety_finish_reason(*, model: str) -> None:
     safety_finish_reason_counter.add(1, attributes={"model": model})
+
+
+def record_prompt_injection_attempt(*, blocked: bool, category: str) -> None:
+    prompt_injection_attempt_counter.add(
+        1,
+        attributes={"blocked": str(blocked).lower(), "category": category},
+    )
+
+
+def record_injection_block_rate(*, suite: str, block_rate: float) -> None:
+    _injection_block_rates[suite] = max(0.0, min(1.0, block_rate))
+
+
+def record_anomalous_session(*, reason: str) -> None:
+    anomalous_session_counter.add(1, attributes={"reason": reason})
+
+
+def force_flush_metrics(timeout_millis: int = 5_000) -> bool:
+    """Flush OTel metrics before short-lived jobs exit."""
+    provider = metrics.get_meter_provider()
+    force_flush = getattr(provider, "force_flush", None)
+    if not callable(force_flush):
+        return False
+    return bool(force_flush(timeout_millis=timeout_millis))

@@ -1,0 +1,30 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: rs-safety-anomaly-metrics
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          containers:
+            - image: BACKEND_IMAGE
+              command:
+                - python
+                - -m
+                - observability.safety_anomalies
+              env:
+                - name: APP_ENV
+                  value: staging
+                - name: GOOGLE_CLOUD_PROJECT
+                  value: PROJECT_ID
+                - name: BIGQUERY_DATASET
+                  value: DATASET
+                - name: SAFETY_ANOMALIES_TABLE
+                  value: PROJECT_ID.DATASET.safety_anomalous_sessions
+                - name: SAFETY_ANOMALIES_LOOKBACK_HOURS
+                  value: "36"
+          maxRetries: 1
+          timeoutSeconds: 600

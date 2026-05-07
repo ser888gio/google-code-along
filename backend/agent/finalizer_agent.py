@@ -52,6 +52,7 @@ from observability.metrics import (
     record_operation_duration,
     record_tokens,
 )
+from observability.safety import add_session_cost
 from observability.turns import record_model_call
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
@@ -224,6 +225,7 @@ async def run_finalizer(
                     cache_read_tokens=cache_read,
                     cost_usd=cost_usd,
                 )
+                add_session_cost(session_id, cost_usd)
             record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
         logger.info(
             f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}"

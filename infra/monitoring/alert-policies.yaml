@@ -70,8 +70,41 @@ conditions:
       duration: 3600s
       trigger:
         count: 1
+  - displayName: Safety - any production model safety finish reason
+    conditionThreshold:
+      filter: metric.type="workload.googleapis.com/rs.safety.finish_reason_safety" resource.type="generic_task"
+      aggregations:
+        - alignmentPeriod: 60s
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      thresholdValue: 0
+      duration: 0s
+      trigger:
+        count: 1
+  - displayName: Safety - red-team block rate below 100 percent
+    conditionThreshold:
+      filter: metric.type="workload.googleapis.com/rs.safety.injection_block_rate" resource.type="generic_task"
+      aggregations:
+        - alignmentPeriod: 86400s
+          perSeriesAligner: ALIGN_MEAN
+      comparison: COMPARISON_LT
+      thresholdValue: 1
+      duration: 0s
+      trigger:
+        count: 1
+  - displayName: Safety - anomalous session metric
+    conditionThreshold:
+      filter: metric.type="workload.googleapis.com/rs.safety.anomalous_session" resource.type="generic_task"
+      aggregations:
+        - alignmentPeriod: 3600s
+          perSeriesAligner: ALIGN_RATE
+      comparison: COMPARISON_GT
+      thresholdValue: 0
+      duration: 0s
+      trigger:
+        count: 1
 documentation:
-  content: Phase 6 error-budget burn alerts. Add quality/safety evaluator policies once those product metrics exist.
+  content: Phase 6/9 SLI alerts. Quality evaluator policies remain pending until evaluator metrics exist.
   mimeType: text/markdown
 displayName: RS Generator Phase 6 SLI Alerts
 enabled: true

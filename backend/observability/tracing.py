@@ -29,7 +29,7 @@ def _gcp_resource() -> Resource:
     return Resource.create({SERVICE_NAME: service, "service.version": revision})
 
 
-def setup_telemetry(app) -> None:  # noqa: ANN001
+def setup_telemetry(app=None) -> None:  # noqa: ANN001
     """Initialize OTel providers and instrument the FastAPI app.
 
     Safe to call multiple times — subsequent calls are no-ops.
@@ -73,7 +73,8 @@ def setup_telemetry(app) -> None:  # noqa: ANN001
     metrics.set_meter_provider(meter_provider)
 
     # --- FastAPI auto-instrumentation ---
-    FastAPIInstrumentor.instrument_app(app)
+    if app is not None:
+        FastAPIInstrumentor.instrument_app(app)
 
 
 def get_tracer(name: str = "rs-generator") -> trace.Tracer:

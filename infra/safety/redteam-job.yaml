@@ -1,0 +1,26 @@
+apiVersion: run.googleapis.com/v1
+kind: Job
+metadata:
+  name: rs-redteam-daily
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    spec:
+      template:
+        spec:
+          containers:
+            - image: BACKEND_IMAGE
+              command:
+                - python
+                - -m
+                - observability.redteam.run_redteam
+              env:
+                - name: REDTEAM_TARGET_URL
+                  value: https://BACKEND_STAGING_URL
+                - name: REDTEAM_REQUIRED_BLOCK_RATE
+                  value: "1.0"
+                - name: APP_ENV
+                  value: staging
+          maxRetries: 0
+          timeoutSeconds: 1800

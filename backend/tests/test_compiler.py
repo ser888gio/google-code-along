@@ -5,11 +5,10 @@ These tests verify that compile_rs_from_session correctly extracts the
 RS document from mock session history without hitting any external services.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from generation.compiler import compile_rs_from_session, RS_MARKER
-
+import pytest
+from generation.compiler import RS_MARKER, compile_rs_from_session
 
 # ---------------------------------------------------------------------------
 # Helpers to build mock session objects

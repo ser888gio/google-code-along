@@ -8,9 +8,8 @@ Discovery Session structure, ready to be rendered into a Word document.
 import json
 import logging
 
-from google import genai
-
 from config import GOOGLE_API_KEY, MODEL_SRS_COMPILER
+from google import genai
 from google.adk.sessions import InMemorySessionService, Session
 from utils import extract_conversation_text
 

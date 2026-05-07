@@ -9,12 +9,11 @@ Verifies that:
 """
 
 from generation.pdf_export import (
-    markdown_to_pdf,
+    _build_styles,
     _inline_markdown,
     _parse_markdown_to_flowables,
-    _build_styles,
+    markdown_to_pdf,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper

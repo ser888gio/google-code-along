@@ -64,14 +64,15 @@ from firestore import (
     get_workflow_state,
     list_sessions,
     remove_deferred_fields,
+    set_finalization_error,
     set_finalization_pending,
     update_feedback_comment,
     upsert_deferred_fields,
     upsert_direct_fields,
     upsert_discovery_state,
-    upsert_srs_fields,
     upsert_message_feedback,
     upsert_session_feedback,
+    upsert_srs_fields,
     upsert_workflow_state,
 )
 from gcs import get_bucket_name, list_files, write_file
@@ -104,6 +105,14 @@ from observability.metrics import (
     record_session_completion,
     record_session_duration,
     record_ttft,
+)
+from observability.safety import (
+    FRIENDLY_COST_ERROR,
+    FRIENDLY_PROMPT_ERROR,
+    CostCircuitBreakerTripped,
+    UnsafePromptBlocked,
+    assert_session_within_budget,
+    check_user_prompt_or_raise,
 )
 from observability.tracing import setup_telemetry
 from observability.turns import (
@@ -231,6 +240,27 @@ def _current_trace_ids() -> tuple[str | None, str | None]:
     if not span_context or not span_context.is_valid:
         return None, None
     return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
+
+
+def _run_safety_preflight(message: str, session_id: str) -> None:
+    assert_session_within_budget(session_id)
+    check_user_prompt_or_raise(message, session_id=session_id)
+
+
+def _safety_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, CostCircuitBreakerTripped):
+        return HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR)
+    if isinstance(exc, UnsafePromptBlocked):
+        return HTTPException(status_code=400, detail=FRIENDLY_PROMPT_ERROR)
+    return HTTPException(status_code=400, detail="Safety check failed.")
+
+
+def _safety_error_stream(session_id: str, detail: str) -> StreamingResponse:
+    async def generator():
+        yield f"data: {json.dumps({'session_id': session_id, 'error': detail})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generator(), media_type="text/event-stream")
 
 
 def _build_conversation_tail(session, latest_user_message: str, limit: int = 12) -> str:
@@ -704,6 +734,10 @@ async def chat(req: ChatRequest):
 
     session_id = req.session_id or str(uuid.uuid4())
     _mark_session_seen(session_id)
+    try:
+        _run_safety_preflight(req.message, session_id)
+    except (CostCircuitBreakerTripped, UnsafePromptBlocked) as exc:
+        raise _safety_http_error(exc) from exc
     logger.debug(f"Chat request: session_id={session_id} user_id={req.user_id}")
     loop = asyncio.get_running_loop()
 
@@ -760,6 +794,7 @@ async def chat(req: ChatRequest):
     turn_token = start_turn(session_id=session_id, message_id=message_id, phase="chat")
     turn_t0 = time.perf_counter()
     reply_parts: list[str] = []
+    turn_summary: dict = {}
     try:
         async for event in runner.run_async(
             user_id=req.user_id,
@@ -772,6 +807,12 @@ async def chat(req: ChatRequest):
                         reply_parts.append(part.text)
         set_stream_timings(latency_ms=int((time.perf_counter() - turn_t0) * 1000))
         turn_summary = summarize_turn(current_turn())
+    except CostCircuitBreakerTripped as exc:
+        turn_summary = summarize_turn(current_turn())
+        logger.warning(
+            f"Chat aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
+        )
+        raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
     finally:
         reset_turn(turn_token)
 
@@ -801,6 +842,12 @@ async def chat_stream(req: ChatRequest):
 
     session_id = req.session_id or str(uuid.uuid4())
     _mark_session_seen(session_id)
+    try:
+        _run_safety_preflight(req.message, session_id)
+    except CostCircuitBreakerTripped:
+        return _safety_error_stream(session_id, FRIENDLY_COST_ERROR)
+    except UnsafePromptBlocked:
+        return _safety_error_stream(session_id, FRIENDLY_PROMPT_ERROR)
     logger.debug(f"Stream chat request: session_id={session_id} user_id={req.user_id}")
     loop = asyncio.get_running_loop()
 
@@ -885,7 +932,7 @@ async def chat_stream(req: ChatRequest):
             tail_text = workflow_turn["tail_text"]
 
             new_state = await asyncio.wait_for(
-                extract_discovery_fields(tail_text),
+                extract_discovery_fields(tail_text, session_id=session_id),
                 timeout=4.0,
             )
             new_fields = new_state.get("fields") or {}
@@ -915,6 +962,15 @@ async def chat_stream(req: ChatRequest):
                 f"event=extract_timeout_total session_id={session_id} "
                 "timeout_seconds=4"
             )
+        except CostCircuitBreakerTripped as exc:
+            logger.warning(
+                f"Stream aborted by cost circuit during extraction: "
+                f"session_id={session_id} cost_usd={exc.cost_usd:.6f}"
+            )
+            reset_turn(turn_token)
+            yield f"data: {json.dumps({'error': FRIENDLY_COST_ERROR})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
         except Exception as exc:
             logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
 
@@ -922,6 +978,7 @@ async def chat_stream(req: ChatRequest):
         _stream_t0 = time.perf_counter()
         _ttft_recorded = False
         _chunk_times: list[float] = []
+        cost_aborted = False
         try:
             async for event in runner.run_async(
                 user_id=req.user_id,
@@ -944,12 +1001,24 @@ async def chat_stream(req: ChatRequest):
                             clean = part.text.replace(FINALIZING_MARKER, "").strip()
                             if clean:
                                 yield f"data: {json.dumps({'text': clean})}\n\n"
+        except CostCircuitBreakerTripped as exc:
+            cost_aborted = True
+            logger.warning(
+                f"Stream aborted by cost circuit: "
+                f"session_id={session_id} cost_usd={exc.cost_usd:.6f}"
+            )
+            yield f"data: {json.dumps({'error': FRIENDLY_COST_ERROR})}\n\n"
         except Exception as exc:
             logger.error(
                 f"Streaming error for session_id={session_id}: {exc}",
                 exc_info=True,
             )
             yield f"data: {json.dumps({'error': 'An internal error occurred. Please try again.'})}\n\n"
+
+        if cost_aborted:
+            reset_turn(turn_token)
+            yield "data: [DONE]\n\n"
+            return
 
         if len(_chunk_times) >= 2:
             avg_itl = (_chunk_times[-1] - _chunk_times[0]) / (len(_chunk_times) - 1)
@@ -1416,6 +1485,10 @@ async def context_extract(req: ContextRequest):
       3. If nothing saved yet, return empty state (completeness=0).
     """
     sid = req.session_id
+    try:
+        assert_session_within_budget(sid)
+    except CostCircuitBreakerTripped as exc:
+        raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
 
     try:
         session = await session_service.get_session(
@@ -1504,7 +1577,10 @@ async def context_extract(req: ContextRequest):
             f"events={len(session.events)} text_len={len(conversation_text)} "
             f"preview={conversation_text[:200]!r}"
         )
-        result = await extract_discovery_fields(conversation_text)
+        try:
+            result = await extract_discovery_fields(conversation_text, session_id=sid)
+        except CostCircuitBreakerTripped as exc:
+            raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
         logger.info(
             f"Discovery fields extracted: session_id={sid} completeness={result.get('completeness')}%"
         )
@@ -1820,7 +1896,10 @@ async def _run_turn_postprocessing(
 
         # Extract discovery fields for the finalizer
         try:
-            discovery_fields = await extract_discovery_fields(conversation_text)
+            discovery_fields = await extract_discovery_fields(
+                conversation_text,
+                session_id=session_id,
+            )
             logger.debug(
                 f"Discovery fields for finalizer: session={session_id} "
                 f"completeness={discovery_fields.get('completeness')}%"
@@ -1828,6 +1907,13 @@ async def _run_turn_postprocessing(
             loop.run_in_executor(
                 None, upsert_discovery_state, session_id, discovery_fields
             )
+        except CostCircuitBreakerTripped as exc:
+            logger.warning(
+                f"Finalizer skipped by cost circuit: "
+                f"session={session_id} cost_usd={exc.cost_usd:.6f}"
+            )
+            loop.run_in_executor(None, set_finalization_error, session_id)
+            return
         except Exception as exc:
             logger.warning(
                 f"extract_discovery_fields failed: session={session_id} {exc}"

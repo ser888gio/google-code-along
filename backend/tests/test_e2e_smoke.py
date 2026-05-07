@@ -15,11 +15,10 @@ All external services (ADK runner, Gemini) are mocked.
 google.adk stubs are installed by conftest.py before collection — no stubs needed here.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from httpx import AsyncClient, ASGITransport
-
+import pytest
+from httpx import ASGITransport, AsyncClient
 
 # ---------------------------------------------------------------------------
 # Scripted conversation for the "Automated Sales Report" use case
@@ -119,6 +118,7 @@ NFR-004: A non-developer must be able to update the recipient list without code 
 def smoke_app():
     """Set up the FastAPI app with a scripted multi-turn mock runner."""
     import importlib
+
     import main as main_module
 
     importlib.reload(main_module)

@@ -19,6 +19,7 @@ Model: Gemini Flash — extraction only, no deep reasoning needed, needs to be f
 """
 
 import asyncio
+import hashlib
 import json
 import time
 
@@ -39,6 +40,7 @@ from observability.metrics import (
     record_operation_duration,
     record_tokens,
 )
+from observability.safety import CostCircuitBreakerTripped, add_session_cost
 from observability.turns import record_model_call
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
@@ -53,7 +55,8 @@ logger = get_logger(__name__)
 discovery_agent = Agent(
     name="discovery_agent",
     description=(
-        "Analyzes a conversation transcript and extracts all 22 IT use case form fields. "
+        "Analyzes a conversation transcript and extracts all 22 IT use case "
+        "form fields. "
         "Returns a JSON object with field values, completeness score (0-100), and the "
         "top 3 missing fields to prioritize next."
     ),
@@ -71,7 +74,10 @@ discovery_agent = Agent(
 #       The old 8-field extractor can be kept temporarily for frontend backwards compat.
 
 
-async def extract_discovery_fields(conversation_text: str) -> dict:
+async def extract_discovery_fields(
+    conversation_text: str,
+    session_id: str | None = None,
+) -> dict:
     """Extract all 22 form fields from a conversation transcript.
 
     Calls Gemini Flash directly (not via ADK runner) so it can be used as
@@ -102,7 +108,8 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
             "{conversation}", format_prompt_data_lines(conversation_text)
         )
         logger.info(
-            f"Model call started: model={MODEL_DISCOVERY} caller=extract_discovery_fields"
+            "Model call started: "
+            f"model={MODEL_DISCOVERY} caller=extract_discovery_fields"
         )
         _t0 = time.perf_counter()
         with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
@@ -126,16 +133,41 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
                 span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read)
                 cost_usd = compute_cost(MODEL_DISCOVERY, usage)
                 span.set_attribute("cost_usd", cost_usd)
-                record_tokens(input_tokens, model=MODEL_DISCOVERY, token_type="input", feature="discovery_extract")
-                record_tokens(output_tokens, model=MODEL_DISCOVERY, token_type="output", feature="discovery_extract")
+                record_tokens(
+                    input_tokens,
+                    model=MODEL_DISCOVERY,
+                    token_type="input",
+                    feature="discovery_extract",
+                )
+                record_tokens(
+                    output_tokens,
+                    model=MODEL_DISCOVERY,
+                    token_type="output",
+                    feature="discovery_extract",
+                )
                 if cache_read:
-                    record_tokens(cache_read, model=MODEL_DISCOVERY, token_type="cache_read", feature="discovery_extract")
+                    record_tokens(
+                        cache_read,
+                        model=MODEL_DISCOVERY,
+                        token_type="cache_read",
+                        feature="discovery_extract",
+                    )
                 record_cache_hit_ratio(
                     model=MODEL_DISCOVERY,
                     input_tokens=input_tokens,
                     cache_read_tokens=cache_read,
                 )
-                record_cost(cost_usd, model=MODEL_DISCOVERY, feature="discovery_extract", session_id_hash="batch")
+                sid_hash = (
+                    hashlib.sha256(session_id.encode()).hexdigest()[:16]
+                    if session_id
+                    else "batch"
+                )
+                record_cost(
+                    cost_usd,
+                    model=MODEL_DISCOVERY,
+                    feature="discovery_extract",
+                    session_id_hash=sid_hash,
+                )
                 record_model_call(
                     model=MODEL_DISCOVERY,
                     feature="discovery_extract",
@@ -144,7 +176,13 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
                     cache_read_tokens=cache_read,
                     cost_usd=cost_usd,
                 )
-            record_operation_duration(elapsed, model=MODEL_DISCOVERY, operation="generate_content", status="ok")
+                add_session_cost(session_id, cost_usd)
+            record_operation_duration(
+                elapsed,
+                model=MODEL_DISCOVERY,
+                operation="generate_content",
+                status="ok",
+            )
         logger.info(
             f"Model call completed: model={MODEL_DISCOVERY} elapsed={elapsed:.2f}s"
         )
@@ -174,10 +212,14 @@ async def extract_discovery_fields(conversation_text: str) -> dict:
             "missing_priority": parsed.get("missing_priority", [])[:3],
         }
         logger.info(
-            f"Discovery extraction done: completeness={result['completeness']}% missing_priority={result['missing_priority']}"
+            "Discovery extraction done: "
+            f"completeness={result['completeness']}% "
+            f"missing_priority={result['missing_priority']}"
         )
         return result
 
+    except CostCircuitBreakerTripped:
+        raise
     except Exception as exc:
         logger.warning(f"extract_discovery_fields failed: {exc}")
         return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}

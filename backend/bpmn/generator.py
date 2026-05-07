@@ -9,9 +9,8 @@ Two functions:
 import json
 import time
 
-from google import genai
-
 from config import GOOGLE_API_KEY, MODEL_BPMN
+from google import genai
 from logger import get_logger
 from prompts.bpmn import BPMN_GENERATION_PROMPT, COMPLETENESS_PROMPT
 
