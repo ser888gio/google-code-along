@@ -227,7 +227,6 @@ def after_model_cb(callback_context, llm_response) -> None:
 
 
 def before_tool_cb(  # type: ignore[return-value]
-    callback_context,
     tool,
     args,
     tool_context,
@@ -261,7 +260,6 @@ def before_tool_cb(  # type: ignore[return-value]
 
 
 def after_tool_cb(  # type: ignore[return-value]
-    callback_context,
     tool,
     args,
     tool_context,
