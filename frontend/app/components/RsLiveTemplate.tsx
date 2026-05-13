@@ -4,6 +4,50 @@ import { RsPartialData } from "../../lib/api";
 import { RS_SECTIONS, Section } from "../generated/rsSchema";
 import { useLocale } from "../i18n/LocaleContext";
 
+const SECTION_TITLE_KEYS: Record<string, string> = {
+  "Identity & Current State": "rs.section.identity_current_state",
+  "Target State": "rs.section.target_state",
+  "Value & ROI": "rs.section.value_roi",
+  "Priority & Risk": "rs.section.priority_risk",
+  "Technical Context": "rs.section.technical_context",
+  "Additional": "rs.section.additional",
+};
+
+const FIELD_LABEL_KEYS: Record<string, string> = {
+  "Use Case Title (EN)": "rs.field.use_case_title",
+  "Customer Department": "rs.field.customer_department",
+  "Requestor": "rs.field.requestor",
+  "Product Owner": "rs.field.product_owner",
+  "Process Description / As-Is": "rs.field.process_description_as_is",
+  "Process Context": "rs.field.process_context",
+  "Trigger": "rs.field.trigger",
+  "Purpose / To-Be": "rs.field.purpose_to_be",
+  "Saved Time (hours/year)": "rs.field.saved_time_hours_per_year",
+  "Cost Saving": "rs.field.cost_saving",
+  "Revenue Increase": "rs.field.revenue_increase",
+  "Impacted Users": "rs.field.impacted_users",
+  "Added Value": "rs.field.added_value",
+  "Time Criticality": "rs.field.time_criticality",
+  "Strategic Impact": "rs.field.strategic_impact",
+  "Risk Avoidance": "rs.field.risk_avoidance",
+  "Systems & Tools Involved": "rs.field.systems_and_tools",
+  "Types of Documents Involved": "rs.field.document_types",
+  "Data Security Classification": "rs.field.data_security_classification",
+  "Solution Type": "rs.field.solution_type",
+  "Comments": "rs.field.comments",
+  "Attachments (GCS paths)": "rs.field.attachments",
+};
+
+function translateSectionTitle(title: string, t: (key: string) => string) {
+  const key = SECTION_TITLE_KEYS[title];
+  return key ? t(key) : title;
+}
+
+function translateFieldLabel(label: string, t: (key: string) => string) {
+  const key = FIELD_LABEL_KEYS[label];
+  return key ? t(key) : label;
+}
+
 // ─── Cards ────────────────────────────────────────────────────────────────────
 
 function PlaceholderCard({ label, pulsing = false }: { label: string; pulsing?: boolean }) {
@@ -61,7 +105,7 @@ function EditableCard({
           {label}
         </span>
         <span className="ml-auto shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
-          Direct
+          {t("rs.badge.direct")}
         </span>
       </div>
       {multiline ? (
@@ -100,6 +144,7 @@ function SectionGroup({
   onDirectFieldChange: (key: string, value: string) => void;
   isExtracting?: boolean;
 }) {
+  const { t } = useLocale();
   const filledCount = section.fields.filter((f) => {
     if (f.directInput) {
       return (directFields[f.key] ?? "").trim() !== "";
@@ -116,7 +161,7 @@ function SectionGroup({
           {section.number}
         </span>
         <span className="text-xs font-bold uppercase tracking-wide text-[#1a3a2a]">
-          {section.title}
+          {translateSectionTitle(section.title, t)}
         </span>
         <span className="ml-auto text-[10px] text-gray-400">
           {filledCount}/{total}
@@ -129,7 +174,7 @@ function SectionGroup({
             return (
               <EditableCard
                 key={f.key}
-                label={f.label}
+                label={translateFieldLabel(f.label, t)}
                 fieldKey={f.key}
                 value={directFields[f.key] ?? ""}
                 onChange={onDirectFieldChange}
@@ -145,9 +190,9 @@ function SectionGroup({
             entry.value.trim() !== "";
 
           return isFilled ? (
-            <FilledCard key={f.key} label={f.label} value={entry!.value!} />
+            <FilledCard key={f.key} label={translateFieldLabel(f.label, t)} value={entry!.value!} />
           ) : (
-            <PlaceholderCard key={f.key} label={f.label} pulsing={isExtracting} />
+            <PlaceholderCard key={f.key} label={translateFieldLabel(f.label, t)} pulsing={isExtracting} />
           );
         })}
       </div>
