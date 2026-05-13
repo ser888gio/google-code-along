@@ -64,6 +64,55 @@ function dispatchSseEvent(
   return false;
 }
 
+function dispatchSsePayload(
+  payload: string,
+  callbacks: StreamChatCallbacks,
+): boolean {
+  if (payload === "[DONE]") {
+    callbacks.onDone();
+    return true;
+  }
+
+  try {
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    return dispatchSseEvent(parsed, callbacks);
+  } catch {
+    return false;
+  }
+}
+
+function dispatchSseLine(
+  line: string,
+  callbacks: StreamChatCallbacks,
+): boolean {
+  if (!line.startsWith("data: ")) return false;
+  return dispatchSsePayload(line.slice(6), callbacks);
+}
+
+async function consumeSseStream(
+  body: ReadableStream<Uint8Array>,
+  callbacks: StreamChatCallbacks,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (dispatchSseLine(line, callbacks)) return;
+    }
+  }
+
+  callbacks.onDone();
+}
+
 /**
  * Send a message and stream the response via SSE.
  *
@@ -108,35 +157,7 @@ export async function streamChat(
     onFinalizing, onFieldUpdate, onActiveField, onMessageId,
   };
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const payload = line.slice(6);
-      if (payload === "[DONE]") {
-        onDone();
-        return;
-      }
-      try {
-        const parsed = JSON.parse(payload) as Record<string, unknown>;
-        if (dispatchSseEvent(parsed, callbacks)) return;
-      } catch {
-        // ignore malformed lines
-      }
-    }
-  }
-
-  onDone();
+  await consumeSseStream(res.body, callbacks);
 }
 
 export async function submitFeedback(
