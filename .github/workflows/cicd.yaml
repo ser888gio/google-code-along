@@ -33,14 +33,6 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v3.0.1
 
-      - name: Enable runtime observability APIs
-        run: |-
-          gcloud services enable \
-            run.googleapis.com \
-            logging.googleapis.com \
-            monitoring.googleapis.com \
-            cloudtrace.googleapis.com
-
       - name: Configure Docker Auth for Artifact Registry
         run: |-
           gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
