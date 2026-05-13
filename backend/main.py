@@ -383,6 +383,12 @@ async def _prepare_workflow_turn(
         "coverage_gaps": [],
     }
 
+    solution_type_value: str | None = (
+        ((discovery_state or {}).get("fields") or {})
+        .get("solution_type", {})
+        .get("value")
+    )
+
     tail_text = _build_conversation_tail(session, req.message)
     if workflow.get("phase") == "wrap_up":
         if _is_finalize_choice(req.message):
@@ -396,7 +402,7 @@ async def _prepare_workflow_turn(
             )
     elif previous_active:
         classification = await classify_user_turn(
-            previous_active, req.message, tail_text
+            previous_active, req.message, tail_text, solution_type=solution_type_value
         )
         await rate_answer(
             previous_active,
@@ -558,6 +564,7 @@ async def _prepare_workflow_turn(
         "deferred_fields": list(deferred_fields.keys()),
         "classification": classification,
         "tail_text": tail_text,
+        "solution_type": solution_type_value,
     }
 
 
@@ -949,7 +956,11 @@ async def chat_stream(req: ChatRequest):
             tail_text = workflow_turn["tail_text"]
 
             new_state = await asyncio.wait_for(
-                extract_discovery_fields(tail_text, session_id=session_id),
+                extract_discovery_fields(
+                    tail_text,
+                    session_id=session_id,
+                    solution_type=workflow_turn.get("solution_type"),
+                ),
                 timeout=4.0,
             )
             new_fields = new_state.get("fields") or {}
@@ -1595,7 +1606,16 @@ async def context_extract(req: ContextRequest):
             f"preview={conversation_text[:200]!r}"
         )
         try:
-            result = await extract_discovery_fields(conversation_text, session_id=sid)
+            loop = asyncio.get_running_loop()
+            _saved_state = await loop.run_in_executor(None, get_discovery_state, sid)
+            _sol_type: str | None = (
+                ((_saved_state or {}).get("fields") or {})
+                .get("solution_type", {})
+                .get("value")
+            )
+            result = await extract_discovery_fields(
+                conversation_text, session_id=sid, solution_type=_sol_type
+            )
         except CostCircuitBreakerTripped as exc:
             raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
         logger.info(
@@ -1913,9 +1933,18 @@ async def _run_turn_postprocessing(
 
         # Extract discovery fields for the finalizer
         try:
+            _fin_saved = await loop.run_in_executor(
+                None, get_discovery_state, session_id
+            )
+            _fin_sol_type: str | None = (
+                ((_fin_saved or {}).get("fields") or {})
+                .get("solution_type", {})
+                .get("value")
+            )
             discovery_fields = await extract_discovery_fields(
                 conversation_text,
                 session_id=session_id,
+                solution_type=_fin_sol_type,
             )
             logger.debug(
                 f"Discovery fields for finalizer: session={session_id} "

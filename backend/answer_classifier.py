@@ -16,8 +16,8 @@ from field_schema import (
     DIRECT_FIELD_TERMS,
     FIELD_LABELS,
     FIELD_SCHEMA,
-    format_field_rubric_block,
 )
+from solution_configs import get_field_rubric_block
 from logger import get_logger
 from prompts.context import ACTIVE_FIELD_CLASSIFIER_PROMPT
 from utils import format_prompt_data_lines
@@ -118,6 +118,7 @@ async def classify_user_turn(
     active_field: str | None,
     message: str,
     conversation_tail: str = "",
+    solution_type: str | None = None,
 ) -> ClassifierResult:
     """Classify the latest user reply against the active field.
 
@@ -159,20 +160,21 @@ async def classify_user_turn(
             "coverage_gaps": [],
         }
 
-    return await _classify_with_llm(active_field, text, conversation_tail)
+    return await _classify_with_llm(active_field, text, conversation_tail, solution_type)
 
 
 async def _classify_with_llm(
     active_field: str,
     message: str,
     conversation_tail: str,
+    solution_type: str | None = None,
 ) -> ClassifierResult:
     """Use Gemini Flash for ambiguous classification and proactive extraction."""
     try:
         from google import genai
 
         client = genai.Client(api_key=GOOGLE_API_KEY)
-        rubric_block = format_field_rubric_block(active_field) or "(no rubric defined)"
+        rubric_block = get_field_rubric_block(active_field, solution_type) or "(no rubric defined)"
         prompt = (
             ACTIVE_FIELD_CLASSIFIER_PROMPT.replace("{active_field}", active_field)
             .replace(

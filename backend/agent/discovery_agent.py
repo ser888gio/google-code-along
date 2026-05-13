@@ -29,8 +29,8 @@ from field_schema import (
     FIELD_SCHEMA,
     OPTIONAL_FIELDS,
     REQUIRED_FIELDS,
-    format_all_field_shapes,
 )
+from solution_configs import get_all_field_shapes
 from google import genai
 from google.adk.agents import Agent
 from logger import get_logger
@@ -78,6 +78,7 @@ discovery_agent = Agent(
 async def extract_discovery_fields(
     conversation_text: str,
     session_id: str | None = None,
+    solution_type: str | None = None,
 ) -> dict:
     """Extract all 22 form fields from a conversation transcript.
 
@@ -106,7 +107,7 @@ async def extract_discovery_fields(
         # Use .replace() not .format() — user transcript may contain literal braces
         # that would cause a KeyError if str.format() tried to interpret them.
         prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
-            "{field_shapes}", format_all_field_shapes()
+            "{field_shapes}", get_all_field_shapes(solution_type)
         ).replace(
             "{conversation}", format_prompt_data_lines(conversation_text)
         )

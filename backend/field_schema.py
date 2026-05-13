@@ -74,7 +74,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         ],
         "validation_mode": "strict",
         "expected_shape": "Specific department / business unit name or code.",
-        "example_good": "Patent department (3-letter code level)",
+        "example_good": "Finance department",
         "rubric": [
             "Identifies a specific department, not a generic role",
             "Includes code or hierarchy level if relevant",
@@ -91,7 +91,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "direct_chat_patterns": [r"\brequestor\b", r"\bzadatel\b", r"\bzadavatel\b"],
         "validation_mode": "strict",
         "expected_shape": "Name, email, or department-code of the person making the request.",
-        "example_good": "Jane Novak, Patent department",
+        "example_good": "Jane Novak, Finance department",
         "rubric": [
             "Identifies a specific person or department code",
             "Not just a role title like 'manager'",
@@ -117,7 +117,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         ],
         "validation_mode": "strict",
         "expected_shape": "Named individual designated as product owner.",
-        "example_good": "John Smith (Patent dept. lead)",
+        "example_good": "John Smith (Finance team lead)",
         "rubric": [
             "Identifies a named person",
             "Not just a department or 'TBD'",
@@ -129,7 +129,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 1,
         "validation_mode": "soft",
         "expected_shape": "Who will consume the deliverable (audience, roles, or departments).",
-        "example_good": "Recipients of the annual presentation; all employees viewing the BI report.",
+        "example_good": "All employees in the requesting department; line managers for approval workflows.",
         "rubric": [
             "Identifies the audience by role, group, or department",
             "Distinguishes primary vs. secondary users when relevant",
@@ -141,7 +141,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 1,
         "validation_mode": "strict",
         "expected_shape": "One of: Daily, Weekly, Monthly, Ad-hoc — plus any cadence detail.",
-        "example_good": "Monthly refresh; annual report cycle in January.",
+        "example_good": "Weekly refresh; ad-hoc on-demand export available.",
         "rubric": [
             "Picks an explicit cadence from the standard list",
             "Notes any special cycles (annual, on-demand)",
@@ -153,7 +153,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 1,
         "validation_mode": "soft",
         "expected_shape": "Description of how the work is done today, including manual steps and pain points.",
-        "example_good": "Manual processing of data from WinPAT and supporting Excel files into a PowerPoint report; manual distribution by email; ad-hoc lookups in WinPAT to answer employee questions.",
+        "example_good": "Data collected manually from multiple spreadsheets and emailed in a Word document; recipients must request updates individually.",
         "rubric": [
             "Describes concrete current-state steps",
             "Mentions tools or systems used today",
@@ -166,7 +166,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 1,
         "validation_mode": "soft",
         "expected_shape": "What happens before/after this process and how it connects to other processes.",
-        "example_good": "Triggered annually after patent application data is closed for the year; output feeds into management presentation cycle.",
+        "example_good": "Triggered at month-end after source data is closed; output feeds into the management reporting cycle.",
         "rubric": [
             "Describes upstream input or trigger",
             "Describes downstream consumer or follow-up",
@@ -178,7 +178,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 1,
         "validation_mode": "soft",
         "expected_shape": "The event, deadline, or condition that starts this process.",
-        "example_good": "Annual review cycle — required by 14.01.2026.",
+        "example_good": "Quarter-end closing — required by the 5th working day of each quarter.",
         "rubric": [
             "Names a concrete trigger (date, event, request type)",
             "Indicates urgency or recurrence",
@@ -190,7 +190,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 2,
         "validation_mode": "soft",
         "expected_shape": "The desired future state — what changes, what improves, what new capability is enabled.",
-        "example_good": "Automate annual report preparation, eliminate manual rewriting and errors, expand the report with historical insight, ensure BI report availability via a single link without forwarding presentations.",
+        "example_good": "Automate monthly reporting, eliminate manual data consolidation, give stakeholders self-service access to up-to-date figures.",
         "rubric": [
             "Describes a concrete future-state outcome",
             "Names at least one improvement vs. as-is",
@@ -204,7 +204,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "multiline": True,
         "validation_mode": "soft",
         "expected_shape": "List of 2-5 specific business questions the deliverable must answer.",
-        "example_good": "1) How many patent applications were filed in a given period? 2) How does the count break down by department over time? 3) Who in each department has the most applications?",
+        "example_good": "1) What is our monthly sales trend by region? 2) Which products are underperforming vs. target? 3) Where are the largest cost overruns?",
         "rubric": [
             "Lists at least 2 concrete questions",
             "Each question is answerable from data",
@@ -218,7 +218,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "multiline": True,
         "validation_mode": "strict",
         "expected_shape": "Named metrics with definition, unit, and breakdown detail.",
-        "example_good": "Number of patent applications: count of PRIO + EP + PCT in the selected period. Unit: count.",
+        "example_good": "Monthly active users: count of unique logins per month. Revenue per region: sum of invoiced EUR by country.",
         "rubric": [
             "Names each KPI explicitly",
             "States the unit (count, %, currency, hours)",
@@ -234,7 +234,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "match_terms": ["saved time", "uspora casu", "hours"],
         "validation_mode": "strict",
         "expected_shape": "Numeric estimate of hours saved per year (approximate is OK).",
-        "example_good": "~120 hours/year across the patent team",
+        "example_good": "~80 hours/year across the reporting team",
         "rubric": [
             "Provides a numeric value, not just 'a lot'",
             "Time horizon is per year",
@@ -275,7 +275,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 3,
         "validation_mode": "strict",
         "expected_shape": "Number of users affected and how much time each saves.",
-        "example_good": "~15 patent department employees; ~8 hours/year each.",
+        "example_good": "~20 employees across finance and operations; ~4 hours/year each.",
         "rubric": [
             "Gives a user count (or range)",
             "Gives time-saved-per-user or aggregate savings",
@@ -287,7 +287,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 3,
         "validation_mode": "soft",
         "expected_shape": "Qualitative or strategic value beyond pure cost savings.",
-        "example_good": "Self-service access for employees; historical trend visibility; reduced risk of manual transcription errors.",
+        "example_good": "Self-service access for stakeholders; reduced dependency on a single analyst; faster decision-making.",
         "rubric": [
             "Names at least one qualitative benefit",
             "Goes beyond money/time savings",
@@ -299,7 +299,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 4,
         "validation_mode": "strict",
         "expected_shape": "Priority level and any regulatory/business deadline.",
-        "example_good": "Priority: Medium. Required by 14.01.2026 for annual review.",
+        "example_good": "Priority: Medium. Needed before Q1 close; no hard regulatory deadline.",
         "rubric": [
             "Picks a priority level (Low / Medium / High)",
             "Names a deadline or explicitly says none",
@@ -311,7 +311,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 4,
         "validation_mode": "soft",
         "expected_shape": "Strategic importance to the organisation and the way it matters.",
-        "example_good": "Supports IP strategy reporting to the executive team; aligns with the company-wide BI self-service initiative.",
+        "example_good": "Supports quarterly business review reporting; aligns with the company-wide data self-service initiative.",
         "rubric": [
             "Connects to a named strategic objective or initiative",
             "Not just 'important' without justification",
@@ -323,7 +323,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 4,
         "validation_mode": "soft",
         "expected_shape": "Specific financial or operational risk addressed, plus estimated amount if known.",
-        "example_good": "Mitigates risk of inaccurate annual figures distributed to executives; ~€20k operational exposure.",
+        "example_good": "Mitigates risk of inaccurate figures in executive reporting; ~€15k estimated exposure from manual errors.",
         "rubric": [
             "Names a specific risk avoided",
             "Provides an estimated amount or explicit 'unknown'",
@@ -336,7 +336,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "multiline": True,
         "validation_mode": "soft",
         "expected_shape": "List of conditions that must hold for the deliverable to be accepted.",
-        "example_good": "Counts in Power BI match WinPAT for selected period; correct department mapping; replaces page 2 of the PPT with interactive filtering; export/share without emailing the PPT; employees can filter their own applications.",
+        "example_good": "Output figures match source system for selected period; correct organisational mapping; users can filter and export without requesting IT support; accessible via a shared link.",
         "rubric": [
             "Lists at least 3 acceptance conditions",
             "Each condition is verifiable",
@@ -349,7 +349,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 5,
         "validation_mode": "strict",
         "expected_shape": "Named systems and tools in the current process or target solution.",
-        "example_good": "WinPAT (source application), Excel exports, Databricks (planned integration), Power BI (target).",
+        "example_good": "SAP (source), Excel exports, cloud data warehouse (planned), target reporting/app platform.",
         "rubric": [
             "Names at least one source system",
             "Names target/output platform when known",
@@ -361,7 +361,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 5,
         "validation_mode": "strict",
         "expected_shape": "Specific document types (PDF, Excel, contract, invoice, etc.).",
-        "example_good": "Excel exports from WinPAT; PowerPoint annual report; tabular patent application data.",
+        "example_good": "Excel exports from the source system; Word/PowerPoint summaries; structured tabular data files.",
         "rubric": [
             "Names at least one document type or data format",
             "Distinguishes input vs. output where relevant",
@@ -374,7 +374,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "multiline": True,
         "validation_mode": "strict",
         "expected_shape": "Slice/dice dimensions (time, organisation, scenario, etc.) and critical combinations.",
-        "example_good": "Time: year (drill-down to quarter/month if available). Organisation: department hierarchy to 3-letter level. Critical combo: department × time.",
+        "example_good": "Time: month (drill-down to week if available). Organisation: department to team level. Critical combo: department × time period.",
         "rubric": [
             "Names time dimension and granularity",
             "Names organisational or other key dimensions",
@@ -387,7 +387,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 5,
         "validation_mode": "strict",
         "expected_shape": "Classification level (Public / Internal / Confidential / Restricted) plus any RLS rules.",
-        "example_good": "Confidential at source (patent names); Internal in the report after redaction; visible to all employees.",
+        "example_good": "Internal — source data is confidential; output report accessible to all department employees.",
         "rubric": [
             "Picks an explicit classification level",
             "Notes who may access (RLS / audience)",
@@ -399,7 +399,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "section": 5,
         "validation_mode": "strict",
         "expected_shape": "Probable solution category (Power BI, Power Platform, custom app, SharePoint, SAP extension, etc.).",
-        "example_good": "Power BI report (analytical) backed by Databricks once available, Excel exports in the interim.",
+        "example_good": "Reporting dashboard backed by a cloud data layer; Excel exports as interim fallback.",
         "rubric": [
             "Picks one solution category",
             "Mentions backing data layer if known",
@@ -513,46 +513,6 @@ def build_sections() -> list[dict[str, Any]]:
         sections.append({"number": section_number, "title": title, "fields": fields})
     return sections
 
-
-def format_field_rubric_block(field_key: str) -> str:
-    """Return a compact markdown block describing what 'good' looks like for one field.
-
-    Used inside extraction/classifier prompts so the LLM can judge answer quality
-    against per-field expectations rather than a generic rule.
-    """
-    field = FIELD_SCHEMA.get(field_key)
-    if not field:
-        return ""
-    parts: list[str] = []
-    label = field.get("label")
-    if label:
-        parts.append(f"Field: {label} (key: {field_key})")
-    mode = field.get("validation_mode")
-    if mode:
-        parts.append(f"Validation mode: {mode}")
-    shape = field.get("expected_shape")
-    if shape:
-        parts.append(f"Expected shape: {shape}")
-    rubric = field.get("rubric") or []
-    if rubric:
-        bullets = "\n".join(f"  - {item}" for item in rubric)
-        parts.append(f"Must cover:\n{bullets}")
-    example = field.get("example_good")
-    if example:
-        parts.append(f"Example of a strong answer: {example}")
-    return "\n".join(parts)
-
-
-def format_all_field_shapes() -> str:
-    """One-line `expected_shape` summary per field, for the bulk extractor prompt."""
-    lines: list[str] = []
-    for key, field in FIELD_SCHEMA.items():
-        shape = field.get("expected_shape")
-        if not shape:
-            continue
-        mode = field.get("validation_mode", "soft")
-        lines.append(f"- {key} [{mode}]: {shape}")
-    return "\n".join(lines)
 
 
 RS_TEMPLATE_SECTIONS = [
