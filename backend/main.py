@@ -7,9 +7,10 @@ import os
 import time
 import uuid
 import weakref
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
-from typing import Literal
+from typing import AsyncIterator, Literal
 
 from admin_sessions import get_admin_session, list_admin_sessions, require_admin
 from agent import audio_agent, rs_agent
@@ -264,18 +265,22 @@ def _safety_error_stream(session_id: str, detail: str) -> StreamingResponse:
     return StreamingResponse(generator(), media_type="text/event-stream")
 
 
+def _conversation_event_line(event) -> str | None:
+    if not event.content or not event.content.parts:
+        return None
+
+    text = "".join(p.text for p in event.content.parts if p.text).strip()
+    if not text:
+        return None
+
+    label = "User" if event.content.role == "user" else "Consultant"
+    return f"{label}: {text}"
+
+
 def _build_conversation_tail(session, latest_user_message: str, limit: int = 12) -> str:
     """Build a compact transcript tail for classifiers/extractors."""
-    tail_lines: list[str] = []
-    if session and getattr(session, "events", None):
-        for event in session.events[-limit:]:
-            if not event.content or not event.content.parts:
-                continue
-            role = event.content.role or "unknown"
-            text = "".join(p.text for p in event.content.parts if p.text).strip()
-            if text:
-                label = "User" if role == "user" else "Consultant"
-                tail_lines.append(f"{label}: {text}")
+    events = getattr(session, "events", None) if session else None
+    tail_lines = [line for event in (events or [])[-limit:] if (line := _conversation_event_line(event))]
     tail_lines.append(f"User: {latest_user_message}")
     return "\n".join(tail_lines)
 
@@ -624,6 +629,195 @@ class AdminSessionDetail(BaseModel):
     messages: list[AdminTranscriptMessage]
 
 
+@dataclass
+class StreamReplyState:
+    reply_parts: list[str] = field(default_factory=list)
+    chunk_times: list[float] = field(default_factory=list)
+    cost_aborted: bool = False
+    stream_started_at: float = field(default_factory=time.perf_counter)
+    ttft_recorded: bool = False
+
+
+def _sse_event(payload: dict) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
+def _event_text_parts(event) -> list[str]:
+    if not event.content or not event.content.parts:
+        return []
+    return [part.text for part in event.content.parts if part.text]
+
+
+def _field_update_sse_events(prev_fields: dict, new_fields: dict) -> list[str]:
+    events: list[str] = []
+    for key, entry in new_fields.items():
+        if not entry or not entry.get("filled"):
+            continue
+        new_value = entry.get("value")
+        if new_value is None:
+            continue
+        prev_entry = prev_fields.get(key) or {}
+        prev_filled = bool(prev_entry.get("filled"))
+        prev_value = prev_entry.get("value")
+        if (not prev_filled) or (prev_value != new_value):
+            events.append(_sse_event({"field_update": {"key": key, "value": new_value}}))
+    return events
+
+
+def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
+    now = time.perf_counter()
+    if not state.ttft_recorded:
+        ttft = now - state.stream_started_at
+        record_ttft(ttft, model=MODEL_ORCHESTRATOR, phase="chat")
+        set_stream_timings(ttft_ms=int(ttft * 1000))
+        state.ttft_recorded = True
+    state.chunk_times.append(now)
+    state.reply_parts.append(text)
+
+    clean = text.replace(FINALIZING_MARKER, "").strip()
+    if not clean:
+        return None
+    return _sse_event({"text": clean})
+
+
+async def _pre_stream_field_update_events(session_id: str, workflow_turn: dict) -> list[str]:
+    try:
+        loop = asyncio.get_running_loop()
+        prev_state = await loop.run_in_executor(None, get_discovery_state, session_id)
+        new_state = await asyncio.wait_for(
+            extract_discovery_fields(
+                workflow_turn["tail_text"],
+                session_id=session_id,
+                solution_type=workflow_turn.get("solution_type"),
+            ),
+            timeout=4.0,
+        )
+        events = _field_update_sse_events(
+            (prev_state or {}).get("fields") or {},
+            new_state.get("fields") or {},
+        )
+        logger.info(f"Pre-stream field_update: session={session_id} emitted={len(events)}")
+        return events
+    except asyncio.TimeoutError:
+        logger.warning(
+            f"Pre-stream extract timed out (>4s): event=extract_timeout_total session_id={session_id} timeout_seconds=4"
+        )
+    except CostCircuitBreakerTripped:
+        raise
+    except Exception as exc:
+        logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
+    return []
+
+
+async def _agent_stream_events(
+    *,
+    req: ChatRequest,
+    user_content: types.Content,
+    session_id: str,
+    state: StreamReplyState,
+) -> AsyncIterator[str]:
+    try:
+        async for event in runner.run_async(
+            user_id=req.user_id,
+            session_id=session_id,
+            new_message=user_content,
+        ):
+            for text in _event_text_parts(event):
+                if stream_event := _record_agent_text_chunk(text, state):
+                    yield stream_event
+    except CostCircuitBreakerTripped as exc:
+        state.cost_aborted = True
+        logger.warning(f"Stream aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")
+        yield _sse_event({"error": FRIENDLY_COST_ERROR})
+    except Exception as exc:
+        logger.error(
+            f"Streaming error for session_id={session_id}: {exc}",
+            exc_info=True,
+        )
+        yield _sse_event({"error": "An internal error occurred. Please try again."})
+
+
+async def _chat_stream_event_generator(
+    *,
+    req: ChatRequest,
+    session_id: str,
+    workflow_turn: dict,
+    user_content: types.Content,
+) -> AsyncIterator[str]:
+    message_id = str(uuid.uuid4())
+    trace_id, span_id = _current_trace_ids()
+    turn_token = start_turn(
+        session_id=session_id,
+        message_id=message_id,
+        phase="chat",
+    )
+    turn_t0 = time.perf_counter()
+
+    yield _sse_event({"session_id": session_id, "message_id": message_id})
+    active_field = workflow_turn["workflow"].get("active_field")
+    if active_field:
+        yield _sse_event({"active_field": active_field})
+
+    try:
+        for update_event in await _pre_stream_field_update_events(session_id, workflow_turn):
+            yield update_event
+    except CostCircuitBreakerTripped as exc:
+        logger.warning(
+            f"Stream aborted by cost circuit during extraction: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
+        )
+        reset_turn(turn_token)
+        yield _sse_event({"error": FRIENDLY_COST_ERROR})
+        yield "data: [DONE]\n\n"
+        return
+
+    stream_state = StreamReplyState()
+    async for stream_event in _agent_stream_events(
+        req=req,
+        user_content=user_content,
+        session_id=session_id,
+        state=stream_state,
+    ):
+        yield stream_event
+
+    if stream_state.cost_aborted:
+        reset_turn(turn_token)
+        yield "data: [DONE]\n\n"
+        return
+
+    if len(stream_state.chunk_times) >= 2:
+        avg_itl = (stream_state.chunk_times[-1] - stream_state.chunk_times[0]) / (len(stream_state.chunk_times) - 1)
+        record_itl(avg_itl)
+        set_stream_timings(itl_ms=int(avg_itl * 1000))
+
+    full_reply = "".join(stream_state.reply_parts)
+    set_stream_timings(latency_ms=int((time.perf_counter() - turn_t0) * 1000))
+    turn_summary = summarize_turn(current_turn())
+    logger.info(f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}")
+
+    is_finalizing = FINALIZING_MARKER in full_reply
+    if is_finalizing:
+        logger.info(f"[FINALIZING] detected for session_id={session_id} launching finalizer pipeline")
+        yield _sse_event({"event": "finalizing"})
+
+    asyncio.create_task(
+        _run_turn_postprocessing(
+            session_id=session_id,
+            user_id=req.user_id,
+            user_text=req.message,
+            assistant_text=full_reply,
+            is_finalizing=is_finalizing,
+            fallback_transcript=full_reply,
+            message_id=message_id,
+            trace_id=trace_id,
+            span_id=span_id,
+            turn_summary=turn_summary,
+        )
+    )
+
+    reset_turn(turn_token)
+    yield "data: [DONE]\n\n"
+
+
 # --- Endpoints ---
 
 
@@ -877,162 +1071,13 @@ async def chat_stream(req: ChatRequest):
         ],
     )
 
-    async def event_generator():
-        # Stable ID for this assistant turn — lets the frontend link feedback to traces.
-        message_id = str(uuid.uuid4())
-        trace_id, span_id = _current_trace_ids()
-        turn_token = start_turn(
-            session_id=session_id,
-            message_id=message_id,
-            phase="chat",
-        )
-        turn_t0 = time.perf_counter()
-
-        # First, send the session_id and message_id so the client can track them.
-        yield f'data: {{"session_id": "{session_id}", "message_id": "{message_id}"}}\n\n'
-        active_field = workflow_turn["workflow"].get("active_field")
-        if active_field:
-            yield f"data: {json.dumps({'active_field': active_field})}\n\n"
-
-        # ── Pre-stream quick extract ──────────────────────────────────────
-        # Before the agent starts responding, run a fast Gemini Flash extract
-        # on the conversation-so-far + the new user message. Diff against the
-        # previously persisted discovery state and emit a `field_update` SSE
-        # event for each newly-filled (or changed) field. This lets the right
-        # panel fill in progressively *before* the agent's reply starts
-        # streaming — the user sees immediate feedback that their input was
-        # heard. Hard-capped at 4s so the agent never stalls if Gemini is
-        # slow or down.
-        try:
-            prev_state = await loop.run_in_executor(None, get_discovery_state, session_id)
-            prev_fields = (prev_state or {}).get("fields") or {}
-
-            tail_text = workflow_turn["tail_text"]
-
-            new_state = await asyncio.wait_for(
-                extract_discovery_fields(
-                    tail_text,
-                    session_id=session_id,
-                    solution_type=workflow_turn.get("solution_type"),
-                ),
-                timeout=4.0,
-            )
-            new_fields = new_state.get("fields") or {}
-
-            emitted = 0
-            for key, entry in new_fields.items():
-                if not entry or not entry.get("filled"):
-                    continue
-                new_value = entry.get("value")
-                if new_value is None:
-                    continue
-                prev_entry = prev_fields.get(key) or {}
-                prev_filled = bool(prev_entry.get("filled"))
-                prev_value = prev_entry.get("value")
-                if (not prev_filled) or (prev_value != new_value):
-                    payload = json.dumps({"field_update": {"key": key, "value": new_value}})
-                    yield f"data: {payload}\n\n"
-                    emitted += 1
-            logger.info(f"Pre-stream field_update: session={session_id} emitted={emitted}")
-        except asyncio.TimeoutError:
-            logger.warning(
-                "Pre-stream extract timed out (>4s): "
-                f"event=extract_timeout_total session_id={session_id} "
-                "timeout_seconds=4"
-            )
-        except CostCircuitBreakerTripped as exc:
-            logger.warning(
-                f"Stream aborted by cost circuit during extraction: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
-            )
-            reset_turn(turn_token)
-            yield f"data: {json.dumps({'error': FRIENDLY_COST_ERROR})}\n\n"
-            yield "data: [DONE]\n\n"
-            return
-        except Exception as exc:
-            logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
-
-        reply_parts: list[str] = []
-        _stream_t0 = time.perf_counter()
-        _ttft_recorded = False
-        _chunk_times: list[float] = []
-        cost_aborted = False
-        try:
-            async for event in runner.run_async(
-                user_id=req.user_id,
-                session_id=session_id,
-                new_message=user_content,
-            ):
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.text:
-                            _now = time.perf_counter()
-                            if not _ttft_recorded:
-                                ttft = _now - _stream_t0
-                                record_ttft(ttft, model=MODEL_ORCHESTRATOR, phase="chat")
-                                set_stream_timings(ttft_ms=int(ttft * 1000))
-                                _ttft_recorded = True
-                            _chunk_times.append(_now)
-                            reply_parts.append(part.text)
-                            # Strip [FINALIZING] marker before sending to the client
-                            # so the user never sees the raw signal token.
-                            clean = part.text.replace(FINALIZING_MARKER, "").strip()
-                            if clean:
-                                yield f"data: {json.dumps({'text': clean})}\n\n"
-        except CostCircuitBreakerTripped as exc:
-            cost_aborted = True
-            logger.warning(f"Stream aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")
-            yield f"data: {json.dumps({'error': FRIENDLY_COST_ERROR})}\n\n"
-        except Exception as exc:
-            logger.error(
-                f"Streaming error for session_id={session_id}: {exc}",
-                exc_info=True,
-            )
-            yield f"data: {json.dumps({'error': 'An internal error occurred. Please try again.'})}\n\n"
-
-        if cost_aborted:
-            reset_turn(turn_token)
-            yield "data: [DONE]\n\n"
-            return
-
-        if len(_chunk_times) >= 2:
-            avg_itl = (_chunk_times[-1] - _chunk_times[0]) / (len(_chunk_times) - 1)
-            record_itl(avg_itl)
-            set_stream_timings(itl_ms=int(avg_itl * 1000))
-
-        full_reply = "".join(reply_parts)
-        set_stream_timings(latency_ms=int((time.perf_counter() - turn_t0) * 1000))
-        turn_summary = summarize_turn(current_turn())
-        logger.info(f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}")
-
-        is_finalizing = FINALIZING_MARKER in full_reply
-
-        # Signal frontend before [DONE] so it can show FinalizingOverlay
-        if is_finalizing:
-            logger.info(f"[FINALIZING] detected for session_id={session_id} — launching finalizer pipeline")
-            yield f"data: {json.dumps({'event': 'finalizing'})}\n\n"
-
-        # Shared pipeline: Firestore persist, discovery extraction, SRS,
-        # finalization — runs as a background task so [DONE] is sent promptly.
-        asyncio.create_task(
-            _run_turn_postprocessing(
-                session_id=session_id,
-                user_id=req.user_id,
-                user_text=req.message,
-                assistant_text=full_reply,
-                is_finalizing=is_finalizing,
-                fallback_transcript=full_reply,
-                message_id=message_id,
-                trace_id=trace_id,
-                span_id=span_id,
-                turn_summary=turn_summary,
-            )
-        )
-
-        reset_turn(turn_token)
-        yield "data: [DONE]\n\n"
-
     return StreamingResponse(
-        event_generator(),
+        _chat_stream_event_generator(
+            req=req,
+            session_id=session_id,
+            workflow_turn=workflow_turn,
+            user_content=user_content,
+        ),
         media_type="text/event-stream",
     )
 

@@ -9,6 +9,96 @@ interface FileUploadProps {
   onUploaded?: (file: UploadedFile) => void;
 }
 
+interface UploadDropZoneProps {
+  dragging: boolean;
+  uploading: boolean;
+  progress: number;
+  onClick: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: () => void;
+  onDrop: (e: React.DragEvent) => void;
+}
+
+function UploadDropZone({
+  dragging,
+  uploading,
+  progress,
+  onClick,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+}: UploadDropZoneProps) {
+  const { t } = useLocale();
+  const dropZoneClassName = `flex cursor-pointer flex-col items-center justify-center gap-1 rounded border-2 border-dashed px-4 py-3 text-center transition-colors ${
+    dragging
+      ? "border-[#4caf50] bg-[#f5fdf5]"
+      : uploading
+        ? "cursor-not-allowed border-gray-200 bg-gray-50"
+        : "border-gray-300 bg-white hover:border-[#4caf50] hover:bg-[#f5fdf5]"
+  }`;
+
+  return (
+    <div
+      onClick={onClick}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={dropZoneClassName}
+    >
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" className="text-gray-400">
+        <path
+          d="M10 3v10M6 7l4-4 4 4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M3 14v1a2 2 0 002 2h10a2 2 0 002-2v-1"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+      {uploading ? (
+        <span className="text-xs text-gray-500">{t("upload.uploading")} {progress}%</span>
+      ) : (
+        <span className="text-xs text-gray-500">
+          {t("upload.drop")} <span className="text-[#4caf50] font-medium">{t("upload.browse")}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function UploadProgressBar({ progress }: { progress: number }) {
+  return (
+    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-gray-200">
+      <div
+        className="h-1 rounded-full bg-[#4caf50] transition-all duration-200"
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+  );
+}
+
+function UploadedFileList({ files }: { files: UploadedFile[] }) {
+  if (files.length === 0) return null;
+
+  return (
+    <ul className="mt-2 space-y-1">
+      {files.map((f) => (
+        <li key={f.gcs_path} className="flex items-center gap-1.5 text-xs text-gray-600">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="shrink-0 text-[#4caf50]">
+            <path d="M2 6l2.5 2.5L10 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="truncate">{f.filename}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
   const { t } = useLocale();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,72 +151,19 @@ export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
 
   return (
     <div className="mt-2">
-      {/* Drop zone */}
-      <div
+      <UploadDropZone
+        dragging={dragging}
+        uploading={uploading}
+        progress={progress}
         onClick={() => !uploading && inputRef.current?.click()}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        className={`flex cursor-pointer flex-col items-center justify-center gap-1 rounded border-2 border-dashed px-4 py-3 text-center transition-colors ${
-          dragging
-            ? "border-[#4caf50] bg-[#f5fdf5]"
-            : uploading
-            ? "cursor-not-allowed border-gray-200 bg-gray-50"
-            : "border-gray-300 bg-white hover:border-[#4caf50] hover:bg-[#f5fdf5]"
-        }`}
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" className="text-gray-400">
-          <path
-            d="M10 3v10M6 7l4-4 4 4"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <path
-            d="M3 14v1a2 2 0 002 2h10a2 2 0 002-2v-1"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-        </svg>
-        {uploading ? (
-          <span className="text-xs text-gray-500">{t("upload.uploading")} {progress}%</span>
-        ) : (
-          <span className="text-xs text-gray-500">
-            {t("upload.drop")} <span className="text-[#4caf50] font-medium">{t("upload.browse")}</span>
-          </span>
-        )}
-      </div>
+      />
 
-      {/* Progress bar */}
-      {uploading && (
-        <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-gray-200">
-          <div
-            className="h-1 rounded-full bg-[#4caf50] transition-all duration-200"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-      )}
-
-      {/* Error */}
-      {error && (
-        <p className="mt-1 text-xs text-red-500">{error}</p>
-      )}
-
-      {/* Uploaded list */}
-      {uploaded.length > 0 && (
-        <ul className="mt-2 space-y-1">
-          {uploaded.map((f) => (
-            <li key={f.gcs_path} className="flex items-center gap-1.5 text-xs text-gray-600">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="shrink-0 text-[#4caf50]">
-                <path d="M2 6l2.5 2.5L10 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span className="truncate">{f.filename}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+      {uploading && <UploadProgressBar progress={progress} />}
+      {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+      <UploadedFileList files={uploaded} />
 
       <input
         ref={inputRef}
