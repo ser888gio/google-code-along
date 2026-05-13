@@ -94,7 +94,12 @@ def search_past_analyses(query: str, max_results: int = 3) -> dict:
                 form = data.get("use_case_form", {})
                 tech = data.get("technology_recommendation", {})
                 tier = data.get("priority_tier", {})
-                summary_text = f"{form.get('use_case_title', '')} {form.get('department', '')} {form.get('process_as_is', '')} {form.get('purpose_to_be', '')}".lower()
+                summary_text = (
+                    f"{form.get('use_case_title', '')} "
+                    f"{form.get('department', '')} "
+                    f"{form.get('process_as_is', '')} "
+                    f"{form.get('purpose_to_be', '')}"
+                ).lower()
                 score = sum(1 for t in query_tokens if t in summary_text)
                 scored.append(
                     (

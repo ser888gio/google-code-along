@@ -37,7 +37,9 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
             model=MODEL_DATAFLOW, contents=prompt
         )
         logger.info(
-            f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
+            "Model call completed: "
+            f"model={MODEL_DATAFLOW} "
+            f"elapsed={time.perf_counter() - _t0:.2f}s"
         )
         raw = (response.text or "").strip()
         if raw.startswith("```"):
@@ -62,7 +64,9 @@ async def generate_dataflow_diagram(conversation_text: str) -> str:
         model=MODEL_DATAFLOW, contents=prompt
     )
     logger.info(
-        f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s"
+        "Model call completed: "
+        f"model={MODEL_DATAFLOW} "
+        f"elapsed={time.perf_counter() - _t0:.2f}s"
     )
     mermaid = (response.text or "").strip()
 

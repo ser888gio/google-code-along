@@ -707,10 +707,16 @@ async def upload_file(
     if len(contents) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+            detail=(
+                "File exceeds maximum allowed size of "
+                f"{_MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
+            ),
         )
     logger.info(
-        f"Upload received: file={safe_filename} size={len(contents)}B session_id={safe_session_id}"
+        "Upload received: "
+        f"file={safe_filename} "
+        f"size={len(contents)}B "
+        f"session_id={safe_session_id}"
     )
     gcs_path = write_file(
         path=destination,
@@ -836,7 +842,9 @@ async def chat(req: ChatRequest):
     except CostCircuitBreakerTripped as exc:
         turn_summary = summarize_turn(current_turn())
         logger.warning(
-            f"Chat aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
+            "Chat aborted by cost circuit: "
+            f"session_id={session_id} "
+            f"cost_usd={exc.cost_usd:.6f}"
         )
         raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
     finally:
@@ -1330,7 +1338,10 @@ async def download_docx(req: SessionRef):
 
 @app.post("/document/rs-template/docx")
 async def download_rs_template_docx(req: SessionRef):
-    """Generate a Word doc from the 22 RSLiveTemplate fields, save to GCS, and return for download."""
+    """Generate a Word doc from the 22 RSLiveTemplate fields.
+
+    Save to GCS and return it for download.
+    """
     t0 = time.perf_counter()
     loop = asyncio.get_running_loop()
     state = await loop.run_in_executor(None, get_discovery_state, req.session_id)
@@ -1551,7 +1562,9 @@ async def context_extract(req: ContextRequest):
             )
         if saved:
             logger.info(
-                f"ADK session missing, returning saved discovery state: session_id={sid} completeness={saved.get('completeness')}%"
+                "ADK session missing, returning saved discovery state: "
+                f"session_id={sid} "
+                f"completeness={saved.get('completeness')}%"
             )
             return {"completeness": saved["completeness"], "fields": saved["fields"]}
         logger.info(f"No ADK session and no saved state for session_id={sid}")
@@ -1577,12 +1590,15 @@ async def context_extract(req: ContextRequest):
                 saved = await loop.run_in_executor(None, get_discovery_state, sid)
             except Exception as exc:
                 logger.warning(
-                    f"Firestore get_discovery_state (coalesced) failed: session_id={sid} {exc}"
+                    "Firestore get_discovery_state (coalesced) failed: "
+                    f"session_id={sid} {exc}"
                 )
                 saved = None
             if saved:
                 logger.info(
-                    f"Returning coalesced extraction result: session_id={sid} completeness={saved.get('completeness')}%"
+                    "Returning coalesced extraction result: "
+                    f"session_id={sid} "
+                    f"completeness={saved.get('completeness')}%"
                 )
                 return {
                     "completeness": saved["completeness"],
@@ -1623,7 +1639,9 @@ async def context_extract(req: ContextRequest):
         except CostCircuitBreakerTripped as exc:
             raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
         logger.info(
-            f"Discovery fields extracted: session_id={sid} completeness={result.get('completeness')}%"
+            "Discovery fields extracted: "
+            f"session_id={sid} "
+            f"completeness={result.get('completeness')}%"
         )
 
         # Fire-and-forget: persist discovery state + full SRS to Firestore
@@ -1667,7 +1685,9 @@ async def discovery_state(session_id: str):
     saved = await loop.run_in_executor(None, get_discovery_state, session_id)
     if saved:
         logger.debug(
-            f"Discovery state retrieved: session_id={session_id} completeness={saved.get('completeness')}%"
+            "Discovery state retrieved: "
+            f"session_id={session_id} "
+            f"completeness={saved.get('completeness')}%"
         )
         return {"completeness": saved["completeness"], "fields": saved["fields"]}
     logger.debug(f"No saved discovery state for session_id={session_id}")
@@ -1690,7 +1710,9 @@ async def patch_direct_fields(session_id: str, body: DirectFieldsPatch):
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, upsert_direct_fields, session_id, body.fields)
     logger.info(
-        f"Direct fields patched: session_id={session_id} keys={list(body.fields.keys())}"
+        "Direct fields patched: "
+        f"session_id={session_id} "
+        f"keys={list(body.fields.keys())}"
     )
     merged = await loop.run_in_executor(None, get_discovery_state, session_id)
     if merged:
@@ -1809,7 +1831,8 @@ async def get_history(session_id: str):
 async def get_analysis(session_id: str):
     """Return the finalized analysis for a session, or status if still pending.
 
-    The frontend polls this endpoint every 5 s after receiving the "finalizing" SSE event.
+    The frontend polls this endpoint every 5 s after receiving the
+    "finalizing" SSE event.
 
     Returns:
       {"status": "not_found"}                          — finalization never triggered
@@ -2168,14 +2191,16 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         # Rare: text content in audio mode (non-transcription)
                         elif part.text:
                             logger.debug(
-                                f"[WS] Text content event (role={getattr(event.content, 'role', '?')}): "
+                                "[WS] Text content event "
+                                f"(role={getattr(event.content, 'role', '?')}): "
                                 f"{part.text[:80]}"
                             )
 
                 # ── 2. User input transcription ───────────────────────────
                 if event.input_transcription and event.input_transcription.text:
                     if not event.partial:
-                        # Final accumulated user transcription — send as one complete bubble
+                        # Final accumulated user transcription.
+                        # Send as one complete bubble.
                         user_transcript_final = event.input_transcription.text
                         clean = user_transcript_final.strip()
                         if clean:
@@ -2195,7 +2220,8 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                 # ── 3. Assistant output transcription ─────────────────────
                 if event.output_transcription and event.output_transcription.text:
                     if not event.partial:
-                        # Final accumulated assistant transcription — send as one complete bubble
+                        # Final accumulated assistant transcription.
+                        # Send as one complete bubble.
                         assistant_transcript_final = event.output_transcription.text
                         clean = assistant_transcript_final.replace(
                             FINALIZING_MARKER, ""
@@ -2210,18 +2236,21 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                                 )
                             )
                         logger.debug(
-                            f"[WS] Assistant transcription final ({len(assistant_transcript_final)} chars): "
+                            "[WS] Assistant transcription final "
+                            f"({len(assistant_transcript_final)} chars): "
                             f"{assistant_transcript_final[:100]}"
                         )
 
-                # ── 4. Turn complete: inject into orchestrator session, THEN notify frontend ──
+                # 4. Turn complete: inject into orchestrator session,
+                # then notify frontend.
                 if event.is_final_response():
                     user_text = user_transcript_final.strip()
                     assistant_text = assistant_transcript_final.strip()
 
                     logger.info(
                         f"[WS] Turn complete: session={session_id} "
-                        f"user_chars={len(user_text)} assistant_chars={len(assistant_text)}"
+                        f"user_chars={len(user_text)} "
+                        f"assistant_chars={len(assistant_text)}"
                     )
 
                     # Check for [FINALIZING] marker (needed for turn_complete msg)
@@ -2301,7 +2330,8 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
         except WebSocketDisconnect:
             logger.debug("[WS] Client disconnected during downstream")
         except GenaiAPIError as e:
-            # Code 1000 = normal WebSocket close (user toggled voice off or navigated away)
+            # Code 1000 = normal WebSocket close
+            # (user toggled voice off or navigated away).
             if "1000" in str(e):
                 logger.info(
                     f"[WS] Gemini Live session closed normally: session={session_id}"
@@ -2313,7 +2343,10 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         json.dumps(
                             {
                                 "type": "error",
-                                "message": "A voice API error occurred. Please try again.",
+                                "message": (
+                                    "A voice API error occurred. "
+                                    "Please try again."
+                                ),
                             }
                         )
                     )

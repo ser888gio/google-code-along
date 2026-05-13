@@ -466,7 +466,8 @@ def upsert_final_analysis(session_id: str, analysis: dict) -> None:
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "finalization_status": "complete",
             "finalized_at": datetime.now(timezone.utc).isoformat(),
-            # Full JSON stored as a string so sub-field types don't need a Firestore schema
+            # Full JSON stored as a string so sub-field types do not
+            # need a Firestore schema.
             "final_analysis_json": json.dumps(analysis, ensure_ascii=False),
         },
         merge=True,
@@ -529,7 +530,7 @@ def upsert_discovery_state(session_id: str, discovery: dict) -> None:
 
 
 def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
-    """Merge *direct* key-value pairs into *state* in-place and recompute completeness."""
+    """Merge *direct* key-value pairs into *state* and recompute completeness."""
     fields = state.setdefault("fields", {})
     for key, value in direct.items():
         if value is not None and str(value).strip():

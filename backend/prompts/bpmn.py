@@ -27,8 +27,9 @@ Conversation:
 """
 
 BPMN_GENERATION_PROMPT = """\
-You are an expert business analyst. Based on the requirements conversation below, \
-generate a Mermaid.js flowchart that represents the To-Be business process as a BPMN-style diagram.
+You are an expert business analyst. Based on the requirements conversation
+below, generate a Mermaid.js flowchart that represents the To-Be business
+process as a BPMN-style diagram.
 
 Rules:
 - Use `flowchart TD` syntax.

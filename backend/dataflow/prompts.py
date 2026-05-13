@@ -33,9 +33,10 @@ Data Flow Diagram (DFD).
 
 Rules:
 - Use `flowchart LR` syntax (left-to-right layout).
-- Represent **external entities** (actors, systems outside the boundary) as rectangles `[...]` \
-  prefixed with `ext_`.
-- Represent **processes** (functions, transformations inside the system) as rounded boxes `([...])`.
+- Represent **external entities** (actors, systems outside the boundary)
+  as rectangles `[...]` prefixed with `ext_`.
+- Represent **processes** (functions, transformations inside the system)
+  as rounded boxes `([...])`.
 - Represent **data stores** (databases, files, caches) as cylinders `[(...)]`.
 - Draw **data flows** as labelled directed arrows `-- <data name> -->` between nodes.
 - Group internal nodes inside a `subgraph System Boundary` block.

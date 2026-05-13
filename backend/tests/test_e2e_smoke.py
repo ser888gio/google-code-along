@@ -34,7 +34,8 @@ SCRIPTED_TURNS = [
         "Could you describe your current process — what do you do today?",
     ),
     (
-        "Currently, a sales analyst manually pulls data from spreadsheets every morning. "
+        "Currently, a sales analyst manually pulls data from "
+        "spreadsheets every morning. "
         "It takes about 2 hours and is very error-prone.",
         "Understood. That's a significant daily overhead. "
         "What would the ideal future state look like for your team?",
@@ -51,7 +52,8 @@ SCRIPTED_TURNS = [
         "and what level of availability do you expect from the system?",
     ),
     (
-        "About 10 managers will receive it. We need it to work on at least 99% of business days.",
+        "About 10 managers will receive it. We need it to work on "
+        "at least 99% of business days.",
         "I have enough information to generate your Requirement Specification. "
         "May I proceed?\n\n"
         + RS_MARKER
@@ -83,16 +85,21 @@ PDF report, and delivers it by email to all managers by 07:00 CET on every busin
 - Historical trend analysis beyond 90 days
 
 ## 5. Functional Requirements
-FR-001: The system SHALL connect to Salesforce via the REST API and extract the previous day's closed deals.
-FR-002: The system SHALL aggregate sales data by region, product line, and sales representative.
+FR-001: The system SHALL connect to Salesforce via the REST API and
+extract the previous day's closed deals.
+FR-002: The system SHALL aggregate sales data by region, product line,
+and sales representative.
 FR-003: The system SHALL generate a PDF report from a predefined template.
-FR-004: The system SHALL deliver the report by email to a configurable recipient list by 07:00 CET.
-FR-005: The system SHALL send an alert email if the pipeline fails or data is unavailable.
+FR-004: The system SHALL deliver the report by email to a configurable
+recipient list by 07:00 CET.
+FR-005: The system SHALL send an alert email if the pipeline fails or
+data is unavailable.
 
 ## 6. Non-Functional Requirements
 NFR-001: Report generation must complete within 3 minutes.
 NFR-002: The pipeline must succeed on at least 99% of business days.
-NFR-003: Salesforce credentials must be stored in a secrets manager; no plain-text configuration.
+NFR-003: Salesforce credentials must be stored in a secrets manager;
+no plain-text configuration.
 NFR-004: A non-developer must be able to update the recipient list without code changes.
 
 ## 7. Assumptions & Constraints

@@ -12,6 +12,8 @@ import os
 import uuid
 from dataclasses import dataclass
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,7 +152,6 @@ async def _probe(
 
 
 async def run() -> int:
-    import httpx
     from logger import setup_logging
 
     from observability.tracing import setup_telemetry

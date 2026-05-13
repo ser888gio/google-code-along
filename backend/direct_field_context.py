@@ -72,7 +72,8 @@ def build_augmented_user_message(
 
     if fields or deferred:
         lines.append(
-            "Context from the Requirements Specification form, entered manually by the user."
+            "Context from the Requirements Specification form, "
+            "entered manually by the user."
         )
     if fields:
         lines.append(
@@ -112,7 +113,8 @@ def _render_workflow_context(
             for key in deferred:
                 lines.append(f"  - {labels.get(key, key)}")
         lines.append(
-            "- Ask whether the user wants to fill any of them now, or finalize with them as open questions."
+            "- Ask whether the user wants to fill any of them now, "
+            "or finalize with them as open questions."
         )
         return lines
 
@@ -127,7 +129,8 @@ def _render_workflow_context(
 
     if context.get("clarification_requested"):
         lines.append(
-            "- The user just asked for clarification. Explain the active field briefly, then ask again."
+            "- The user just asked for clarification. Explain the "
+            "active field briefly, then ask again."
         )
 
     active_gaps = context.get("active_field_coverage_gaps") or []
@@ -163,7 +166,8 @@ def _render_workflow_context(
 
     if context.get("ready_to_finalize"):
         lines.append(
-            "- The user chose to finalize. Summarize briefly and emit [FINALIZING] on its own line."
+            "- The user chose to finalize. Summarize briefly and emit "
+            "[FINALIZING] on its own line."
         )
 
     return lines
