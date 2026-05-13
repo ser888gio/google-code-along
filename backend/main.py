@@ -11,7 +11,12 @@ from datetime import datetime, timezone
 from functools import partial
 from typing import AsyncIterator, Literal
 
-from admin_sessions import get_admin_session, list_admin_sessions, require_admin
+from admin_sessions import (
+    get_admin_metrics,
+    get_admin_session,
+    list_admin_sessions,
+    require_admin,
+)
 from agent import audio_agent, rs_agent
 from agent.discovery_agent import (
     extract_discovery_fields,
@@ -621,6 +626,67 @@ class AdminSessionDetail(BaseModel):
     trace_id: str | None = None
     cloud_trace_url: str | None = None
     messages: list[AdminTranscriptMessage]
+
+
+class AdminMetricsSource(BaseModel):
+    messages_view: str
+    feedback_view: str
+
+
+class AdminMetricsSummary(BaseModel):
+    sessions: int
+    messages: int
+    assistant_messages: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    avg_ttft_ms: float | None = None
+    p50_ttft_ms: float | None = None
+    p95_ttft_ms: float | None = None
+    avg_itl_ms: float | None = None
+    p50_latency_ms: float | None = None
+    p95_latency_ms: float | None = None
+    safety_finishes: int
+    thumbs_up: int
+    thumbs_down: int
+    avg_session_rating: float | None = None
+
+
+class AdminModelMetric(BaseModel):
+    model: str
+    phase: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    avg_ttft_ms: float | None = None
+    p95_ttft_ms: float | None = None
+    avg_latency_ms: float | None = None
+    p95_latency_ms: float | None = None
+    safety_finishes: int
+
+
+class AdminDailyMetric(BaseModel):
+    date: str
+    sessions: int
+    assistant_messages: int
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cost_usd: float
+    avg_ttft_ms: float | None = None
+    p95_latency_ms: float | None = None
+
+
+class AdminMetricsResponse(BaseModel):
+    window_days: int
+    generated_at: str
+    source: AdminMetricsSource
+    summary: AdminMetricsSummary
+    by_model: list[AdminModelMetric]
+    daily: list[AdminDailyMetric]
 
 
 @dataclass
@@ -1663,6 +1729,23 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
 
 
 # --- Firestore data retrieval ---
+
+
+@app.get("/admin/metrics", response_model=AdminMetricsResponse)
+async def admin_metrics(
+    _: None = Depends(require_admin),
+    days: int = Query(default=7, ge=1, le=90),
+):
+    """Return BigQuery-backed LLM observability aggregates for the admin UI."""
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, partial(get_admin_metrics, days=days))
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Admin metrics query failed: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not query admin metrics from BigQuery.",
+        ) from exc
 
 
 @app.get("/admin/sessions", response_model=list[AdminSessionSummary])

@@ -80,6 +80,12 @@ export default function AdminSessionsPage() {
             </h1>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/admin/metrics"
+              className="rounded border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 hover:border-gray-300"
+            >
+              Metrics
+            </Link>
             <button
               type="button"
               onClick={() => updateFilter(undefined)}

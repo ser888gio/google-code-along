@@ -195,6 +195,12 @@ export default function AdminSessionDetailPage() {
             >
               Back to sessions
             </Link>
+            <Link
+              href="/admin/metrics"
+              className="ml-4 text-sm font-medium text-[#4a6659] hover:underline"
+            >
+              Metrics
+            </Link>
             <h1 className="mt-2 truncate text-2xl font-semibold text-gray-950">
               {session?.project_name ?? sessionId}
             </h1>

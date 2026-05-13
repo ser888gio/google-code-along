@@ -656,6 +656,77 @@ export interface AdminSessionDetail {
   messages: AdminTranscriptMessage[];
 }
 
+interface AdminMetricsSummary {
+  sessions: number;
+  messages: number;
+  assistant_messages: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  avg_ttft_ms: number | null;
+  p50_ttft_ms: number | null;
+  p95_ttft_ms: number | null;
+  avg_itl_ms: number | null;
+  p50_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  safety_finishes: number;
+  thumbs_up: number;
+  thumbs_down: number;
+  avg_session_rating: number | null;
+}
+
+export interface AdminModelMetric {
+  model: string;
+  phase: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  avg_ttft_ms: number | null;
+  p95_ttft_ms: number | null;
+  avg_latency_ms: number | null;
+  p95_latency_ms: number | null;
+  safety_finishes: number;
+}
+
+export interface AdminDailyMetric {
+  date: string;
+  sessions: number;
+  assistant_messages: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cost_usd: number;
+  avg_ttft_ms: number | null;
+  p95_latency_ms: number | null;
+}
+
+export interface AdminMetricsResponse {
+  window_days: number;
+  generated_at: string;
+  source: {
+    messages_view: string;
+    feedback_view: string;
+  };
+  summary: AdminMetricsSummary;
+  by_model: AdminModelMetric[];
+  daily: AdminDailyMetric[];
+}
+
+export async function getAdminMetrics(days = 7): Promise<AdminMetricsResponse> {
+  const params = new URLSearchParams({ days: String(days) });
+  const res = await fetch(`${API_URL}/admin/metrics?${params.toString()}`, {
+    headers: adminHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `Error ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function getAdminSessions(
   filter?: AdminSessionFilter,
   limit = 50,

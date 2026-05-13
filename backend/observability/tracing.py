@@ -9,6 +9,7 @@ credentials error is raised.
 
 from __future__ import annotations
 
+import logging
 import os
 
 from opentelemetry import metrics, trace
@@ -21,6 +22,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 _SENTINEL = object()
 _initialized = False
+logger = logging.getLogger(__name__)
 
 
 def _gcp_resource() -> Resource:
@@ -47,9 +49,11 @@ def setup_telemetry(app=None) -> None:  # noqa: ANN001
         from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
 
         tracer_provider.add_span_processor(BatchSpanProcessor(CloudTraceSpanExporter()))
-    except Exception:
+        logger.info("Cloud Trace exporter configured for OpenTelemetry spans.")
+    except Exception as exc:
         # Credentials not available (local dev) — traces are still collected
         # in memory; they just won't be exported.
+        logger.warning("Cloud Trace exporter disabled: %s", exc)
         pass
 
     trace.set_tracer_provider(tracer_provider)
@@ -65,7 +69,9 @@ def setup_telemetry(app=None) -> None:  # noqa: ANN001
             export_interval_millis=60_000,
         )
         meter_provider = MeterProvider(resource=resource, metric_readers=[reader])
-    except Exception:
+        logger.info("Cloud Monitoring exporter configured for OpenTelemetry metrics.")
+    except Exception as exc:
+        logger.warning("Cloud Monitoring exporter disabled: %s", exc)
         meter_provider = MeterProvider(resource=resource)
 
     metrics.set_meter_provider(meter_provider)

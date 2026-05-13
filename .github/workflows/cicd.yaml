@@ -33,6 +33,14 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v3.0.1
 
+      - name: Enable runtime observability APIs
+        run: |-
+          gcloud services enable \
+            run.googleapis.com \
+            logging.googleapis.com \
+            monitoring.googleapis.com \
+            cloudtrace.googleapis.com
+
       - name: Configure Docker Auth for Artifact Registry
         run: |-
           gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
@@ -59,11 +67,16 @@ jobs:
           service: business-persona-ai-backend
           region: europe-west4
           image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+          env_vars: |
+            GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}
+            APP_ENV=production
+            BIGQUERY_DATASET=observability
           secrets: |
             GOOGLE_API_KEY=GOOGLE_API_KEY:latest
             GCS_BUCKET_NAME=GCS_BUCKET_NAME:latest
             FIRESTORE_COLLECTION=FIRESTORE_COLLECTION:latest
             FIRESTORE_DATABASE=FIRESTORE_DATABASE:latest
+            ADMIN_BEARER_TOKEN=ADMIN_BEARER_TOKEN:latest
 
       # ==========================================
       # 2. FRONTEND SERVICE (europe-west4)
@@ -73,6 +86,7 @@ jobs:
           docker build \
             --build-arg NEXT_PUBLIC_API_URL=${{ steps.deploy-backend.outputs.url }} \
             --build-arg NEXT_PUBLIC_WS_URL=wss://$(echo "${{ steps.deploy-backend.outputs.url }}" | sed 's|https://||') \
+            --build-arg NEXT_PUBLIC_ADMIN_API_TOKEN=${{ secrets.ADMIN_BEARER_TOKEN }} \
             -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }} \
             ./frontend
           docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}

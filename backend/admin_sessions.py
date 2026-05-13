@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -178,6 +178,134 @@ def list_admin_sessions(
             }
         )
     return summaries
+
+
+def get_admin_metrics(*, days: int = 7) -> dict[str, Any]:
+    """Return BigQuery-backed observability aggregates for the admin UI."""
+    from google.cloud import bigquery
+
+    bounded_days = min(max(days, 1), 90)
+    messages_table = _table("BIGQUERY_MESSAGES_VIEW", BIGQUERY_MESSAGES_VIEW)
+    feedback_table = _table("BIGQUERY_FEEDBACK_VIEW", BIGQUERY_FEEDBACK_VIEW)
+    client = bigquery.Client(project=GCP_PROJECT or None)
+    params = [bigquery.ScalarQueryParameter("days", "INT64", bounded_days)]
+
+    summary_query = f"""
+    WITH scoped AS (
+      SELECT *
+      FROM {messages_table}
+      WHERE created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+    ),
+    feedback_scoped AS (
+      SELECT *
+      FROM {feedback_table}
+      WHERE COALESCE(updated_at, created_at) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+    )
+    SELECT
+      COUNT(DISTINCT scoped.session_id) AS sessions,
+      COUNT(*) AS messages,
+      COUNTIF(role = 'assistant') AS assistant_messages,
+      COALESCE(SUM(CAST(input_tokens AS INT64)), 0) AS input_tokens,
+      COALESCE(SUM(CAST(output_tokens AS INT64)), 0) AS output_tokens,
+      COALESCE(SUM(CAST(cache_read_tokens AS INT64)), 0) AS cache_read_tokens,
+      COALESCE(SUM(CAST(cost_usd AS FLOAT64)), 0) AS cost_usd,
+      AVG(IF(role = 'assistant', ttft_ms, NULL)) AS avg_ttft_ms,
+      APPROX_QUANTILES(IF(role = 'assistant', ttft_ms, NULL), 100)[SAFE_OFFSET(50)] AS p50_ttft_ms,
+      APPROX_QUANTILES(IF(role = 'assistant', ttft_ms, NULL), 100)[SAFE_OFFSET(95)] AS p95_ttft_ms,
+      AVG(IF(role = 'assistant', itl_ms, NULL)) AS avg_itl_ms,
+      APPROX_QUANTILES(IF(role = 'assistant', latency_ms, NULL), 100)[SAFE_OFFSET(50)] AS p50_latency_ms,
+      APPROX_QUANTILES(IF(role = 'assistant', latency_ms, NULL), 100)[SAFE_OFFSET(95)] AS p95_latency_ms,
+      COUNTIF(UPPER(COALESCE(finish_reason, '')) LIKE '%SAFETY%') AS safety_finishes,
+      (
+        SELECT COUNTIF(vote = 'up')
+        FROM feedback_scoped
+        WHERE feedback_type = 'message'
+      ) AS thumbs_up,
+      (
+        SELECT COUNTIF(vote = 'down')
+        FROM feedback_scoped
+        WHERE feedback_type = 'message'
+      ) AS thumbs_down,
+      (
+        SELECT AVG(rating)
+        FROM feedback_scoped
+        WHERE feedback_type = 'session'
+      ) AS avg_session_rating
+    FROM scoped
+    """
+    summary_rows = list(client.query(summary_query, job_config=_query_job_config(params)).result())
+    summary = _row_dict(summary_rows[0]) if summary_rows else {}
+
+    by_model_query = f"""
+    SELECT
+      COALESCE(model, 'unknown') AS model,
+      COALESCE(phase, 'unknown') AS phase,
+      COUNT(*) AS calls,
+      COALESCE(SUM(CAST(input_tokens AS INT64)), 0) AS input_tokens,
+      COALESCE(SUM(CAST(output_tokens AS INT64)), 0) AS output_tokens,
+      COALESCE(SUM(CAST(cache_read_tokens AS INT64)), 0) AS cache_read_tokens,
+      COALESCE(SUM(CAST(cost_usd AS FLOAT64)), 0) AS cost_usd,
+      AVG(ttft_ms) AS avg_ttft_ms,
+      APPROX_QUANTILES(ttft_ms, 100)[SAFE_OFFSET(95)] AS p95_ttft_ms,
+      AVG(latency_ms) AS avg_latency_ms,
+      APPROX_QUANTILES(latency_ms, 100)[SAFE_OFFSET(95)] AS p95_latency_ms,
+      COUNTIF(UPPER(COALESCE(finish_reason, '')) LIKE '%SAFETY%') AS safety_finishes
+    FROM {messages_table}
+    WHERE role = 'assistant'
+      AND created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+    GROUP BY model, phase
+    ORDER BY cost_usd DESC, calls DESC
+    LIMIT 25
+    """
+    by_model = [_row_dict(row) for row in client.query(by_model_query, job_config=_query_job_config(params)).result()]
+
+    daily_query = f"""
+    SELECT
+      DATE(created_at) AS date,
+      COUNT(DISTINCT session_id) AS sessions,
+      COUNTIF(role = 'assistant') AS assistant_messages,
+      COALESCE(SUM(CAST(input_tokens AS INT64)), 0) AS input_tokens,
+      COALESCE(SUM(CAST(output_tokens AS INT64)), 0) AS output_tokens,
+      COALESCE(SUM(CAST(cache_read_tokens AS INT64)), 0) AS cache_read_tokens,
+      COALESCE(SUM(CAST(cost_usd AS FLOAT64)), 0) AS cost_usd,
+      AVG(IF(role = 'assistant', ttft_ms, NULL)) AS avg_ttft_ms,
+      APPROX_QUANTILES(IF(role = 'assistant', latency_ms, NULL), 100)[SAFE_OFFSET(95)] AS p95_latency_ms
+    FROM {messages_table}
+    WHERE created_at >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @days DAY)
+    GROUP BY date
+    ORDER BY date
+    """
+    daily = [_row_dict(row) for row in client.query(daily_query, job_config=_query_job_config(params)).result()]
+
+    return {
+        "window_days": bounded_days,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "source": {
+            "messages_view": BIGQUERY_MESSAGES_VIEW,
+            "feedback_view": BIGQUERY_FEEDBACK_VIEW,
+        },
+        "summary": {
+            "sessions": int(summary.get("sessions") or 0),
+            "messages": int(summary.get("messages") or 0),
+            "assistant_messages": int(summary.get("assistant_messages") or 0),
+            "input_tokens": int(summary.get("input_tokens") or 0),
+            "output_tokens": int(summary.get("output_tokens") or 0),
+            "cache_read_tokens": int(summary.get("cache_read_tokens") or 0),
+            "cost_usd": float(summary.get("cost_usd") or 0),
+            "avg_ttft_ms": summary.get("avg_ttft_ms"),
+            "p50_ttft_ms": summary.get("p50_ttft_ms"),
+            "p95_ttft_ms": summary.get("p95_ttft_ms"),
+            "avg_itl_ms": summary.get("avg_itl_ms"),
+            "p50_latency_ms": summary.get("p50_latency_ms"),
+            "p95_latency_ms": summary.get("p95_latency_ms"),
+            "safety_finishes": int(summary.get("safety_finishes") or 0),
+            "thumbs_up": int(summary.get("thumbs_up") or 0),
+            "thumbs_down": int(summary.get("thumbs_down") or 0),
+            "avg_session_rating": summary.get("avg_session_rating"),
+        },
+        "by_model": by_model,
+        "daily": daily,
+    }
 
 
 def get_admin_session(session_id: str) -> dict[str, Any] | None:
