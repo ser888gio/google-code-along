@@ -8,6 +8,7 @@ each section into a properly formatted Word document.
 import io
 
 from docx import Document
+from docx.document import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import RGBColor
 from field_schema import RS_TEMPLATE_SECTIONS
@@ -19,7 +20,7 @@ def _set_heading_color(paragraph, color: tuple[int, int, int]):
         run.font.color.rgb = RGBColor(*color)
 
 
-def _add_section_heading(doc: Document, text: str, level: int):
+def _add_section_heading(doc: DocxDocument, text: str, level: int):
     """Add a numbered heading at the given level (1-4)."""
     p = doc.add_heading(text, level=level)
     colors = {
@@ -32,7 +33,7 @@ def _add_section_heading(doc: Document, text: str, level: int):
     return p
 
 
-def _add_placeholder(doc: Document, text: str):
+def _add_placeholder(doc: DocxDocument, text: str | None):
     """Add body text. If text is empty/None, add a TBD note."""
     content = (text or "").strip()
     if not content:

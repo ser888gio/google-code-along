@@ -204,9 +204,7 @@ def after_model_cb(callback_context, llm_response) -> None:
     # Record operation duration
     if invocation_id and invocation_id in _call_start:
         elapsed = time.perf_counter() - _call_start.pop(invocation_id)
-        status = (
-            "ok" if finish_reason not in ("SAFETY", "ERROR") else str(finish_reason)
-        )
+        status = "ok" if finish_reason not in ("SAFETY", "ERROR") else str(finish_reason)
         record_operation_duration(
             elapsed,
             model=model or "unknown",

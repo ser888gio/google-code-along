@@ -37,14 +37,12 @@ SCRIPTED_TURNS = [
         "Currently, a sales analyst manually pulls data from "
         "spreadsheets every morning. "
         "It takes about 2 hours and is very error-prone.",
-        "Understood. That's a significant daily overhead. "
-        "What would the ideal future state look like for your team?",
+        "Understood. That's a significant daily overhead. What would the ideal future state look like for your team?",
     ),
     (
         "We want an automated system that connects to our CRM, generates a PDF report, "
         "and emails it to managers by 07:00 every morning.",
-        "Great. Let me ask about the functional requirements. "
-        "Which CRM do you use, and does it have an API?",
+        "Great. Let me ask about the functional requirements. Which CRM do you use, and does it have an API?",
     ),
     (
         "We use Salesforce and it has a REST API.",
@@ -52,8 +50,7 @@ SCRIPTED_TURNS = [
         "and what level of availability do you expect from the system?",
     ),
     (
-        "About 10 managers will receive it. We need it to work on "
-        "at least 99% of business days.",
+        "About 10 managers will receive it. We need it to work on at least 99% of business days.",
         "I have enough information to generate your Requirement Specification. "
         "May I proceed?\n\n"
         + RS_MARKER
@@ -176,9 +173,7 @@ async def test_automated_sales_report_smoke(smoke_app):
     """
     app, session_id = smoke_app
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # — Turn 1: Greeting —
         r = await client.post(
             "/chat",
@@ -195,10 +190,7 @@ async def test_automated_sales_report_smoke(smoke_app):
             json={"message": SCRIPTED_TURNS[1][0], "session_id": session_id},
         )
         assert r.status_code == 200
-        assert (
-            "future" in r.json()["reply"].lower()
-            or "ideal" in r.json()["reply"].lower()
-        )
+        assert "future" in r.json()["reply"].lower() or "ideal" in r.json()["reply"].lower()
 
         # — Turn 3: To-Be —
         r = await client.post(

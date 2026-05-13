@@ -31,12 +31,8 @@ async def check_completeness(conversation_text: str) -> dict:
     try:
         logger.info(f"Model call started: model={MODEL_BPMN} caller=check_completeness")
         _t0 = time.perf_counter()
-        response = _genai_client.models.generate_content(
-            model=MODEL_BPMN, contents=prompt
-        )
-        logger.info(
-            f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s"
-        )
+        response = _genai_client.models.generate_content(model=MODEL_BPMN, contents=prompt)
+        logger.info(f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s")
         raw = (response.text or "").strip()
         # Strip accidental markdown fences
         if raw.startswith("```"):
@@ -56,9 +52,7 @@ async def generate_bpmn_diagram(conversation_text: str) -> str:
     logger.info(f"Model call started: model={MODEL_BPMN} caller=generate_bpmn_diagram")
     _t0 = time.perf_counter()
     response = _genai_client.models.generate_content(model=MODEL_BPMN, contents=prompt)
-    logger.info(
-        f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s"
-    )
+    logger.info(f"Model call completed: model={MODEL_BPMN} elapsed={time.perf_counter() - _t0:.2f}s")
     mermaid = (response.text or "").strip()
 
     # Strip markdown fences if the model wrapped the output anyway

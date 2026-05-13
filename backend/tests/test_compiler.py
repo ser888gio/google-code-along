@@ -76,9 +76,7 @@ async def test_returns_none_when_no_marker_in_history():
     session = _make_session(events)
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result is None
 
@@ -96,9 +94,7 @@ async def test_extracts_rs_body_after_marker():
     session = _make_session(events)
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result is not None
     assert "# Requirement Specification" in result
@@ -116,9 +112,7 @@ async def test_strips_leading_whitespace_from_rs_body():
     session = _make_session(events)
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result == rs_document.strip()
 
@@ -138,9 +132,7 @@ async def test_returns_most_recent_rs_when_multiple_generations():
     session = _make_session(events)
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result is not None
     assert "Second Version" in result
@@ -157,9 +149,7 @@ async def test_ignores_user_messages_containing_marker():
     session = _make_session(events)
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result is None
 
@@ -170,9 +160,7 @@ async def test_returns_none_for_empty_event_list():
     session = _make_session([])
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result is None
 
@@ -188,9 +176,7 @@ async def test_handles_event_with_no_content():
     session = _make_session(events)
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result is not None
     assert "Valid RS" in result
@@ -237,9 +223,7 @@ NFR-002: 99% availability on business days
     session = _make_session(events)
     svc = _make_session_service(session)
 
-    result = await compile_rs_from_session(
-        session_service=svc, app_name="app", user_id="user", session_id="s1"
-    )
+    result = await compile_rs_from_session(session_service=svc, app_name="app", user_id="user", session_id="s1")
 
     assert result is not None
     for section in [

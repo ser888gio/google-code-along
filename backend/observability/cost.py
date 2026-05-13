@@ -101,22 +101,14 @@ def compute_cost(model: str, usage_metadata) -> float:
 
         input_tokens: int = getattr(usage_metadata, "prompt_token_count", 0) or 0
         output_tokens: int = getattr(usage_metadata, "candidates_token_count", 0) or 0
-        cache_read_tokens: int = (
-            getattr(usage_metadata, "cached_content_token_count", 0) or 0
-        )
-        cache_write_tokens: int = (
-            getattr(usage_metadata, "cache_creation_token_count", 0) or 0
-        )
+        cache_read_tokens: int = getattr(usage_metadata, "cached_content_token_count", 0) or 0
+        cache_write_tokens: int = getattr(usage_metadata, "cache_creation_token_count", 0) or 0
 
         # Uncached input = total input minus the cache-read portion
         uncached_input = max(0, input_tokens - cache_read_tokens)
 
         # Choose long vs. short context tier based on total input
-        input_rate = (
-            price.input_long
-            if input_tokens > _LONG_CONTEXT_THRESHOLD
-            else price.input_short
-        )
+        input_rate = price.input_long if input_tokens > _LONG_CONTEXT_THRESHOLD else price.input_short
 
         cost = (
             uncached_input * input_rate / _PER_MILLION

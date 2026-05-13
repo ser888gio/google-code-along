@@ -28,11 +28,7 @@ def require_admin(request: Request) -> None:
 
     auth_header = request.headers.get("authorization", "")
     scheme, _, token = auth_header.partition(" ")
-    if (
-        ADMIN_BEARER_TOKEN
-        and scheme.lower() == "bearer"
-        and token.strip() == ADMIN_BEARER_TOKEN
-    ):
+    if ADMIN_BEARER_TOKEN and scheme.lower() == "bearer" and token.strip() == ADMIN_BEARER_TOKEN:
         return
 
     if APP_ENV not in {"production", "prod", "staging"} and not ADMIN_BEARER_TOKEN:
@@ -63,10 +59,7 @@ def _row_dict(row: Any) -> dict[str, Any]:
 def _cloud_trace_url(trace_id: str | None) -> str | None:
     if not trace_id or not GCP_PROJECT:
         return None
-    return (
-        "https://console.cloud.google.com/traces/list"
-        f"?project={GCP_PROJECT}&tid={trace_id}"
-    )
+    return f"https://console.cloud.google.com/traces/list?project={GCP_PROJECT}&tid={trace_id}"
 
 
 def _project_name(first_user_message: str | None, session_id: str) -> str:
@@ -109,9 +102,7 @@ def list_admin_sessions(
     messages_table = _table("BIGQUERY_MESSAGES_VIEW", BIGQUERY_MESSAGES_VIEW)
     feedback_table = _table("BIGQUERY_FEEDBACK_VIEW", BIGQUERY_FEEDBACK_VIEW)
     thumbs_down_only = filter_value == "thumbs_down"
-    where_clause = (
-        "WHERE COALESCE(f.thumbs_down_count, 0) > 0" if thumbs_down_only else ""
-    )
+    where_clause = "WHERE COALESCE(f.thumbs_down_count, 0) > 0" if thumbs_down_only else ""
 
     query = f"""
     WITH message_sessions AS (
@@ -160,9 +151,7 @@ def list_admin_sessions(
     LIMIT @limit
     """
     client = bigquery.Client(project=GCP_PROJECT or None)
-    job_config = _query_job_config(
-        [bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit)]
-    )
+    job_config = _query_job_config([bigquery.ScalarQueryParameter("limit", "INT64", bounded_limit)])
     rows = client.query(query, job_config=job_config).result()
 
     summaries: list[dict[str, Any]] = []
@@ -228,12 +217,8 @@ def get_admin_session(session_id: str) -> dict[str, Any] | None:
     ORDER BY m.created_at, m.message_id
     """
     client = bigquery.Client(project=GCP_PROJECT or None)
-    job_config = _query_job_config(
-        [bigquery.ScalarQueryParameter("session_id", "STRING", session_id)]
-    )
-    rows = [
-        _row_dict(row) for row in client.query(query, job_config=job_config).result()
-    ]
+    job_config = _query_job_config([bigquery.ScalarQueryParameter("session_id", "STRING", session_id)])
+    rows = [_row_dict(row) for row in client.query(query, job_config=job_config).result()]
     if not rows:
         return None
 

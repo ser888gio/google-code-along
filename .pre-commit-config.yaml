@@ -1,0 +1,62 @@
+# .pre-commit-config.yaml
+repos:
+  # ----------------------------------------------------
+  # GENERAL / CONFIG: Whitespace, YAML, TOML
+  # ----------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        # Optional: Exclude generated frontend files
+        exclude: ^frontend/(dist|build|node_modules)/.*
+      - id: end-of-file-fixer
+        exclude: ^frontend/(dist|build|node_modules)/.*
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+
+  # ----------------------------------------------------
+  # SCRIPTS: ShellCheck
+  # ----------------------------------------------------
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning"]
+
+  # ----------------------------------------------------
+  # LOCAL HOOKS: Ruff, Mypy, and Knip
+  # ----------------------------------------------------
+  - repo: local
+    hooks:
+      # BACKEND: Ruff Check (Linting)
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+        require_serial: true
+
+      # BACKEND: Ruff Format
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+        require_serial: true
+
+      # BACKEND: Mypy (Type Checking)
+      - id: mypy
+        name: mypy check
+        entry: bash -c 'backend/.venv/Scripts/python -m mypy backend/'
+        language: system
+        pass_filenames: false
+        files: ^backend/
+
+      # FRONTEND: Knip (Unused code/dependencies)
+      - id: knip
+        name: run knip
+        entry: bash -c 'cd frontend && npx knip'
+        language: system
+        pass_filenames: false
+        files: ^frontend/

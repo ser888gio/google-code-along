@@ -35,6 +35,7 @@ import hashlib
 import json
 import os
 import time
+from typing import Any, cast
 
 from config import GCS_PREFIX_SESSIONS, GOOGLE_API_KEY, MODEL_FINALIZER, TEXT_EXTENSIONS
 from firestore.writer import (
@@ -141,13 +142,9 @@ async def run_finalizer(
         try:
             uploads = await read_session_uploads(session_id)
             file_count = len(uploads.get("files", []))
-            logger.debug(
-                f"Session uploads loaded: session_id={session_id} files={file_count}"
-            )
+            logger.debug(f"Session uploads loaded: session_id={session_id} files={file_count}")
         except Exception as exc:
-            logger.warning(
-                f"read_session_uploads failed (continuing without): session_id={session_id} error={exc}"
-            )
+            logger.warning(f"read_session_uploads failed (continuing without): session_id={session_id} error={exc}")
             uploads = {"files": []}
 
         # 2. Assemble the full input context for the model. User-controlled text is
@@ -155,9 +152,7 @@ async def run_finalizer(
         prompt_parts = [
             types.Part.from_text(text=FINALIZER_SYSTEM_PROMPT),
             types.Part.from_text(text=USER_DATA_GUARDRAIL),
-            types.Part.from_text(
-                text=_format_conversation_transcript(conversation_text)
-            ),
+            types.Part.from_text(text=_format_conversation_transcript(conversation_text)),
             types.Part.from_text(
                 text=(
                     "## Extracted Form Fields (22 fields)\n"
@@ -168,22 +163,15 @@ async def run_finalizer(
         if research_context:
             prompt_parts.append(
                 types.Part.from_text(
-                    text=(
-                        "## Research Context (from knowledge base / past analyses)\n"
-                        f"{research_context}"
-                    )
+                    text=(f"## Research Context (from knowledge base / past analyses)\n{research_context}")
                 )
             )
         prompt_parts.extend(_build_uploaded_file_parts(uploads))
         contents = [types.Content(role="user", parts=prompt_parts)]
 
         # 3. Call Gemini Pro directly (not via ADK runner — background task, no ADK session)
-        logger.debug(
-            f"Calling Gemini model={MODEL_FINALIZER} for final analysis: session_id={session_id}"
-        )
-        logger.info(
-            f"Model call started: model={MODEL_FINALIZER} caller=run_finalizer session_id={session_id}"
-        )
+        logger.debug(f"Calling Gemini model={MODEL_FINALIZER} for final analysis: session_id={session_id}")
+        logger.info(f"Model call started: model={MODEL_FINALIZER} caller=run_finalizer session_id={session_id}")
         tracer = trace.get_tracer("rs-generator")
         _t0 = time.perf_counter()
         with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
@@ -195,7 +183,7 @@ async def run_finalizer(
             response = await asyncio.to_thread(
                 _genai_client.models.generate_content,
                 model=MODEL_FINALIZER,
-                contents=contents,
+                contents=cast(Any, contents),
             )
             elapsed = time.perf_counter() - _t0
             usage = getattr(response, "usage_metadata", None)
@@ -254,9 +242,7 @@ async def run_finalizer(
                 operation="generate_content",
                 status="ok",
             )
-        logger.info(
-            f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}"
-        )
+        logger.info(f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}")
 
         # 4. Parse JSON output
         raw = (response.text or "").strip()
@@ -348,9 +334,7 @@ async def read_session_uploads(session_id: str) -> dict:
             # TODO: handle PDF / DOCX — see docstring above
         except Exception as exc:
             logger.warning(f"Could not read uploaded file: path={path} error={exc}")
-        files.append(
-            {"filename": filename, "gcs_path": gcs_path, "text_content": text_content}
-        )
+        files.append({"filename": filename, "gcs_path": gcs_path, "text_content": text_content})
 
     return {"files": files}
 

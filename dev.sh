@@ -1,7 +1,5 @@
-#To start should be run from the root project. Command: bash bash.sh
-
-
 #!/bin/bash
+# To start should be run from the root project. Command: bash dev.sh
 
 echo "Starting Backend..."
 (cd backend && source .venv/Scripts/activate && uvicorn main:app --reload) &

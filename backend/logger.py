@@ -22,11 +22,7 @@ def setup_logging(level: str = "INFO") -> None:
 
     # Prefer Cloud Logging when running on GCP (K_SERVICE is set on Cloud Run)
     # or when credentials are explicitly available.
-    if (
-        os.getenv("K_SERVICE")
-        or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        or os.getenv("GOOGLE_CLOUD_PROJECT")
-    ):
+    if os.getenv("K_SERVICE") or os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GOOGLE_CLOUD_PROJECT"):
         try:
             import google.cloud.logging as cloud_logging
 

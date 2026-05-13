@@ -38,9 +38,7 @@ def extract_conversation_text(session: Session) -> str:
     return "\n".join(lines)
 
 
-def format_prompt_data_lines(
-    text: str, *, default_label: str = "Transcript line"
-) -> str:
+def format_prompt_data_lines(text: str, *, default_label: str = "Transcript line") -> str:
     """Prefix free-form user-controlled prompt data with stable line labels."""
     labeled_lines: list[str] = []
     known_prefixes = ("User:", "Consultant:", "Assistant:", "AI:", "System:")

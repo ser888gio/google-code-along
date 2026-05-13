@@ -18,6 +18,7 @@ Two variants:
 """
 
 from functools import cached_property
+from typing import Any, cast
 
 from config import GOOGLE_API_KEY, MODEL_AUDIO, MODEL_ORCHESTRATOR
 from google.adk.agents import Agent
@@ -67,7 +68,7 @@ rs_agent = Agent(
     ),
     model=MODEL_ORCHESTRATOR,
     instruction=ORCHESTRATOR_SYSTEM_PROMPT,
-    tools=RESEARCH_TOOLS,  # search_past_analyses, list_knowledge_base_docs, search_vertex_ai
+    tools=cast(Any, RESEARCH_TOOLS),  # search_past_analyses, list_knowledge_base_docs, search_vertex_ai
     before_model_callback=before_model_cb,
     after_model_callback=after_model_cb,
     before_tool_callback=before_tool_cb,

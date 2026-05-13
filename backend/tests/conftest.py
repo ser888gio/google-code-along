@@ -87,9 +87,7 @@ def _install_google_adk_stubs():
     # --- google.adk.tools ---
     tools_mod = types.ModuleType("google.adk.tools")
     tools_mod.FunctionTool = MagicMock(
-        side_effect=lambda *args, **kwargs: (
-            kwargs.get("func") or (args[0] if args else MagicMock())
-        )
+        side_effect=lambda *args, **kwargs: kwargs.get("func") or (args[0] if args else MagicMock())
     )
     sys.modules["google.adk.tools"] = tools_mod
 

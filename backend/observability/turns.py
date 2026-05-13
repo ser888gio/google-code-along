@@ -113,15 +113,9 @@ def summarize_turn(telemetry: TurnTelemetry | None) -> dict[str, Any]:
     output_tokens = sum(call.output_tokens for call in telemetry.model_calls)
     cache_read_tokens = sum(call.cache_read_tokens for call in telemetry.model_calls)
     cost_usd = round(sum(call.cost_usd for call in telemetry.model_calls), 8)
-    model = next(
-        (call.model for call in reversed(telemetry.model_calls) if call.model), None
-    )
+    model = next((call.model for call in reversed(telemetry.model_calls) if call.model), None)
     finish_reason = next(
-        (
-            call.finish_reason
-            for call in reversed(telemetry.model_calls)
-            if call.finish_reason
-        ),
+        (call.finish_reason for call in reversed(telemetry.model_calls) if call.finish_reason),
         None,
     )
 

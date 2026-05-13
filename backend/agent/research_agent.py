@@ -31,7 +31,7 @@ Bucket layout this agent reads from:
 import json
 
 from gcs.connector import list_files, read_text
-from google.adk.tools import FunctionTool
+from google.adk.tools import BaseTool, FunctionTool
 from logger import get_logger
 
 logger = get_logger(__name__)
@@ -74,14 +74,8 @@ def search_past_analyses(query: str, max_results: int = 3) -> dict:
     TODO: add in-memory cache with TTL to avoid re-reading all GCS files every call.
     """
     try:
-        analysis_paths = [
-            p
-            for p in list_files(prefix="analyses/")
-            if p.endswith("final_analysis.json")
-        ]
-        logger.debug(
-            f"Searching past analyses: query='{query}' found={len(analysis_paths)} files"
-        )
+        analysis_paths = [p for p in list_files(prefix="analyses/") if p.endswith("final_analysis.json")]
+        logger.debug(f"Searching past analyses: query='{query}' found={len(analysis_paths)} files")
         if not analysis_paths:
             return {"found": False, "results": []}
 
@@ -105,14 +99,10 @@ def search_past_analyses(query: str, max_results: int = 3) -> dict:
                     (
                         score,
                         {
-                            "session_id": data.get("_meta", {}).get(
-                                "session_id", path.split("/")[1]
-                            ),
+                            "session_id": data.get("_meta", {}).get("session_id", path.split("/")[1]),
                             "use_case_title": form.get("use_case_title", ""),
                             "department": form.get("department", ""),
-                            "solution_type": form.get(
-                                "solution_type", tech.get("primary", "")
-                            ),
+                            "solution_type": form.get("solution_type", tech.get("primary", "")),
                             "priority_tier": tier.get("tier", ""),
                             "summary": tech.get("rationale", ""),
                         },
@@ -124,9 +114,7 @@ def search_past_analyses(query: str, max_results: int = 3) -> dict:
         # Return top matches; if no keywords matched still return all (at most max_results)
         scored.sort(key=lambda x: x[0], reverse=True)
         results = [r for _, r in scored[:max_results]]
-        logger.debug(
-            f"Past analyses search returned {len(results)} results for query='{query}'"
-        )
+        logger.debug(f"Past analyses search returned {len(results)} results for query='{query}'")
         return {"found": bool(results), "results": results}
 
     except Exception as exc:
@@ -177,7 +165,7 @@ def list_knowledge_base_docs() -> dict:
 # so it can call them without the research sub-agent hop.
 # ---------------------------------------------------------------------------
 
-RESEARCH_TOOLS = [
+RESEARCH_TOOLS: list[BaseTool] = [
     FunctionTool(func=search_vertex_ai),
     FunctionTool(func=search_past_analyses),
     FunctionTool(func=list_knowledge_base_docs),

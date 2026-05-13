@@ -11,6 +11,7 @@ import re
 from xml.sax.saxutils import escape
 
 from config import REQ_ID_PATTERN as _REQ_ID_PATTERN
+from reportlab.lib.colors import HexColor
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -39,7 +40,7 @@ def _build_styles() -> dict[str, ParagraphStyle]:
             fontSize=16,
             spaceBefore=18,
             spaceAfter=8,
-            textColor="#1a1a2e",
+            textColor=HexColor("#1a1a2e"),
         ),
         "h2": ParagraphStyle(
             "RSH2",
@@ -47,7 +48,7 @@ def _build_styles() -> dict[str, ParagraphStyle]:
             fontSize=13,
             spaceBefore=14,
             spaceAfter=6,
-            textColor="#16213e",
+            textColor=HexColor("#16213e"),
         ),
         "h3": ParagraphStyle(
             "RSH3",
@@ -55,7 +56,7 @@ def _build_styles() -> dict[str, ParagraphStyle]:
             fontSize=11,
             spaceBefore=10,
             spaceAfter=4,
-            textColor="#0f3460",
+            textColor=HexColor("#0f3460"),
         ),
         "body": ParagraphStyle(
             "RSBody",
@@ -83,7 +84,7 @@ def _build_styles() -> dict[str, ParagraphStyle]:
             spaceAfter=2,
             leftIndent=10,
             leading=14,
-            textColor="#333333",
+            textColor=HexColor("#333333"),
         ),
     }
     return styles
@@ -155,9 +156,7 @@ def _parse_markdown_to_flowables(markdown: str, styles: dict) -> list:
         req_match = _REQ_ID_PATTERN.match(line)
         if req_match:
             text = _inline_markdown(line)
-            flowables.append(
-                Paragraph(f"<b>{text}</b>" if ":" in text else text, styles["req_id"])
-            )
+            flowables.append(Paragraph(f"<b>{text}</b>" if ":" in text else text, styles["req_id"]))
             i += 1
             continue
 

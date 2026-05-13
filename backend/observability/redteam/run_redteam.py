@@ -144,10 +144,7 @@ async def _probe(
         timeout=45,
     )
     blocked = _is_blocked(response)
-    logger.info(
-        "Red-team prompt result: "
-        f"category={prompt.category} status={response.status_code} blocked={blocked}"
-    )
+    logger.info(f"Red-team prompt result: category={prompt.category} status={response.status_code} blocked={blocked}")
     return blocked
 
 
@@ -163,9 +160,7 @@ async def run() -> int:
 
     target = os.getenv("REDTEAM_TARGET_URL", "").rstrip("/")
     if not target:
-        logger.error(
-            "REDTEAM_TARGET_URL is required, e.g. https://backend-staging.run.app"
-        )
+        logger.error("REDTEAM_TARGET_URL is required, e.g. https://backend-staging.run.app")
         return 2
 
     endpoint = os.getenv("REDTEAM_ENDPOINT", "/chat")
@@ -185,10 +180,7 @@ async def run() -> int:
         headers["Authorization"] = f"Bearer {bearer}"
 
     async with httpx.AsyncClient(headers=headers) as client:
-        results = [
-            await _probe(client, url, prompt, index)
-            for index, prompt in enumerate(suite)
-        ]
+        results = [await _probe(client, url, prompt, index) for index, prompt in enumerate(suite)]
 
     block_rate = sum(1 for item in results if item) / max(1, len(results))
     record_injection_block_rate(suite="daily_known_bad", block_rate=block_rate)
@@ -199,9 +191,7 @@ async def run() -> int:
         f"blocked={sum(1 for item in results if item)} block_rate={block_rate:.4f}"
     )
     if block_rate < required:
-        logger.error(
-            f"Red-team block rate below threshold: {block_rate:.4f} < {required:.4f}"
-        )
+        logger.error(f"Red-team block rate below threshold: {block_rate:.4f} < {required:.4f}")
         return 1
     return 0
 

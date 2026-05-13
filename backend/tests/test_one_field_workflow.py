@@ -61,9 +61,7 @@ def test_direct_answer_cleaning_and_clarification_heuristic():
 
 
 def test_direct_fast_path_detects_proactive_other_field_mentions():
-    assert mentions_other_direct_field(
-        "department", "Je to pro HR a requestor je Jan Novak"
-    )
+    assert mentions_other_direct_field("department", "Je to pro HR a requestor je Jan Novak")
     assert not mentions_other_direct_field("department", "HR")
 
 

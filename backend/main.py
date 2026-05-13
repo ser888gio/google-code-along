@@ -23,6 +23,7 @@ from agent.discovery_agent import (
 from agent.finalizer_agent import run_finalizer
 from answer_classifier import (
     DIRECT_FIELD_KEYS,
+    ClassifierResult,
     classify_user_turn,
     is_deferred_answer,
     normalize_for_match,
@@ -210,9 +211,7 @@ session_bridge = SessionBridge(
 # the ~40s extraction call can finish).
 # WeakValueDictionary so entries are evicted automatically once no request
 # holds a reference to the lock — no unbounded growth across sessions.
-_extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
-    weakref.WeakValueDictionary()
-)
+_extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 _session_started_at: dict[str, float] = {}
 _session_outcomes_recorded: set[str] = set()
 
@@ -372,12 +371,10 @@ async def _prepare_workflow_turn(
     }
     if incoming_deferred:
         deferred_fields.update(incoming_deferred)
-        await loop.run_in_executor(
-            None, upsert_deferred_fields, session_id, incoming_deferred
-        )
+        await loop.run_in_executor(None, upsert_deferred_fields, session_id, incoming_deferred)
 
     previous_active = workflow.get("active_field")
-    classification = {
+    classification: ClassifierResult = {
         "classification": "not_answered",
         "value": None,
         "confidence": 0.0,
@@ -386,9 +383,7 @@ async def _prepare_workflow_turn(
     }
 
     solution_type_value: str | None = (
-        ((discovery_state or {}).get("fields") or {})
-        .get("solution_type", {})
-        .get("value")
+        ((discovery_state or {}).get("fields") or {}).get("solution_type", {}).get("value")
     )
 
     tail_text = _build_conversation_tail(session, req.message)
@@ -408,9 +403,7 @@ async def _prepare_workflow_turn(
         )
         await rate_answer(
             previous_active,
-            str(
-                (workflow.get("last_question_by_field") or {}).get(previous_active, "")
-            ),
+            str((workflow.get("last_question_by_field") or {}).get(previous_active, "")),
             req.message,
             classification["classification"],
         )
@@ -436,31 +429,21 @@ async def _prepare_workflow_turn(
                         "fields": {},
                         "missing_priority": [],
                     }
-                discovery_state.setdefault("fields", {})[previous_active] = (
-                    _field_entry(value)
-                )
+                discovery_state.setdefault("fields", {})[previous_active] = _field_entry(value)
                 _recompute_discovery_completeness(discovery_state)
-                await loop.run_in_executor(
-                    None, upsert_discovery_state, session_id, discovery_state
-                )
+                await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
                 if previous_active in DIRECT_FIELD_KEYS:
                     direct_fields[previous_active] = value
-                    await loop.run_in_executor(
-                        None, upsert_direct_fields, session_id, {previous_active: value}
-                    )
+                    await loop.run_in_executor(None, upsert_direct_fields, session_id, {previous_active: value})
                 if previous_active in deferred_fields:
                     deferred_fields.pop(previous_active, None)
-                    await loop.run_in_executor(
-                        None, remove_deferred_fields, session_id, [previous_active]
-                    )
+                    await loop.run_in_executor(None, remove_deferred_fields, session_id, [previous_active])
             else:
                 statuses[previous_active] = "missing"
         elif classification["classification"] == "deferred":
             statuses[previous_active] = "deferred"
             miss_counts[previous_active] = 0
-            deferred_fields[previous_active] = {
-                "deferred_at": datetime.now(timezone.utc).isoformat()
-            }
+            deferred_fields[previous_active] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
             await loop.run_in_executor(
                 None,
                 upsert_deferred_fields,
@@ -469,15 +452,11 @@ async def _prepare_workflow_turn(
             )
         elif classification["classification"] == "clarification_requested":
             statuses[previous_active] = "clarification_requested"
-            clarification_counts[previous_active] = (
-                int(clarification_counts.get(previous_active) or 0) + 1
-            )
+            clarification_counts[previous_active] = int(clarification_counts.get(previous_active) or 0) + 1
         else:
             if is_deferred_answer(req.message):
                 statuses[previous_active] = "deferred"
-                deferred_fields[previous_active] = {
-                    "deferred_at": datetime.now(timezone.utc).isoformat()
-                }
+                deferred_fields[previous_active] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
                 await loop.run_in_executor(
                     None,
                     upsert_deferred_fields,
@@ -486,9 +465,7 @@ async def _prepare_workflow_turn(
                 )
             else:
                 statuses[previous_active] = "missing"
-                miss_counts[previous_active] = (
-                    int(miss_counts.get(previous_active) or 0) + 1
-                )
+                miss_counts[previous_active] = int(miss_counts.get(previous_active) or 0) + 1
 
         proactive_updates: dict[str, str] = {}
         for key, entry in (classification.get("proactive_fields") or {}).items():
@@ -509,9 +486,7 @@ async def _prepare_workflow_turn(
             for key, value in proactive_updates.items():
                 fields[key] = _field_entry(value)
             _recompute_discovery_completeness(discovery_state)
-            await loop.run_in_executor(
-                None, upsert_discovery_state, session_id, discovery_state
-            )
+            await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
 
     if workflow.get("phase") == "ready_to_finalize":
         active_field = None
@@ -541,22 +516,13 @@ async def _prepare_workflow_turn(
     workflow_context = {
         "phase": workflow.get("phase"),
         "active_field": active_field_for_ctx,
-        "clarification_requested": classification["classification"]
-        == "clarification_requested",
-        "miss_count": int(
-            (workflow.get("miss_counts") or {}).get(active_field_for_ctx) or 0
-        ),
+        "clarification_requested": classification["classification"] == "clarification_requested",
+        "miss_count": int((workflow.get("miss_counts") or {}).get(active_field_for_ctx) or 0),
         "answered_fields": answered_values,
         "deferred_fields": list(deferred_fields.keys()),
         "ready_to_finalize": workflow.get("phase") == "ready_to_finalize",
-        "active_field_coverage_gaps": list(
-            coverage_gaps_map.get(active_field_for_ctx) or []
-        ),
-        "previous_field_coverage_gaps": list(
-            coverage_gaps_map.get(previous_active) or []
-        )
-        if previous_active
-        else [],
+        "active_field_coverage_gaps": list(coverage_gaps_map.get(active_field_for_ctx) or []),
+        "previous_field_coverage_gaps": list(coverage_gaps_map.get(previous_active) or []) if previous_active else [],
     }
 
     return {
@@ -707,17 +673,9 @@ async def upload_file(
     if len(contents) > _MAX_UPLOAD_BYTES:
         raise HTTPException(
             status_code=413,
-            detail=(
-                "File exceeds maximum allowed size of "
-                f"{_MAX_UPLOAD_BYTES // (1024 * 1024)} MB."
-            ),
+            detail=(f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB."),
         )
-    logger.info(
-        "Upload received: "
-        f"file={safe_filename} "
-        f"size={len(contents)}B "
-        f"session_id={safe_session_id}"
-    )
+    logger.info(f"Upload received: file={safe_filename} size={len(contents)}B session_id={safe_session_id}")
     gcs_path = write_file(
         path=destination,
         data=contents,
@@ -789,14 +747,10 @@ async def chat(req: ChatRequest):
     else:
         logger.debug(f"Resumed existing session: {session_id}")
 
-    stored_direct_fields = await loop.run_in_executor(
-        None, get_direct_fields, session_id
-    )
+    stored_direct_fields = await loop.run_in_executor(None, get_direct_fields, session_id)
     direct_fields = merge_direct_fields(stored_direct_fields, req.direct_fields)
     if req.direct_fields:
-        await loop.run_in_executor(
-            None, upsert_direct_fields, session_id, req.direct_fields
-        )
+        await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
 
     workflow_turn = await _prepare_workflow_turn(
         session_id=session_id,
@@ -841,11 +795,7 @@ async def chat(req: ChatRequest):
         turn_summary = summarize_turn(current_turn())
     except CostCircuitBreakerTripped as exc:
         turn_summary = summarize_turn(current_turn())
-        logger.warning(
-            "Chat aborted by cost circuit: "
-            f"session_id={session_id} "
-            f"cost_usd={exc.cost_usd:.6f}"
-        )
+        logger.warning(f"Chat aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")
         raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
     finally:
         reset_turn(turn_token)
@@ -900,14 +850,10 @@ async def chat_stream(req: ChatRequest):
     else:
         logger.debug(f"Resumed existing session: {session_id}")
 
-    stored_direct_fields = await loop.run_in_executor(
-        None, get_direct_fields, session_id
-    )
+    stored_direct_fields = await loop.run_in_executor(None, get_direct_fields, session_id)
     direct_fields = merge_direct_fields(stored_direct_fields, req.direct_fields)
     if req.direct_fields:
-        await loop.run_in_executor(
-            None, upsert_direct_fields, session_id, req.direct_fields
-        )
+        await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
 
     workflow_turn = await _prepare_workflow_turn(
         session_id=session_id,
@@ -958,9 +904,7 @@ async def chat_stream(req: ChatRequest):
         # heard. Hard-capped at 4s so the agent never stalls if Gemini is
         # slow or down.
         try:
-            prev_state = await loop.run_in_executor(
-                None, get_discovery_state, session_id
-            )
+            prev_state = await loop.run_in_executor(None, get_discovery_state, session_id)
             prev_fields = (prev_state or {}).get("fields") or {}
 
             tail_text = workflow_turn["tail_text"]
@@ -986,14 +930,10 @@ async def chat_stream(req: ChatRequest):
                 prev_filled = bool(prev_entry.get("filled"))
                 prev_value = prev_entry.get("value")
                 if (not prev_filled) or (prev_value != new_value):
-                    payload = json.dumps(
-                        {"field_update": {"key": key, "value": new_value}}
-                    )
+                    payload = json.dumps({"field_update": {"key": key, "value": new_value}})
                     yield f"data: {payload}\n\n"
                     emitted += 1
-            logger.info(
-                f"Pre-stream field_update: session={session_id} emitted={emitted}"
-            )
+            logger.info(f"Pre-stream field_update: session={session_id} emitted={emitted}")
         except asyncio.TimeoutError:
             logger.warning(
                 "Pre-stream extract timed out (>4s): "
@@ -1002,8 +942,7 @@ async def chat_stream(req: ChatRequest):
             )
         except CostCircuitBreakerTripped as exc:
             logger.warning(
-                f"Stream aborted by cost circuit during extraction: "
-                f"session_id={session_id} cost_usd={exc.cost_usd:.6f}"
+                f"Stream aborted by cost circuit during extraction: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
             )
             reset_turn(turn_token)
             yield f"data: {json.dumps({'error': FRIENDLY_COST_ERROR})}\n\n"
@@ -1029,9 +968,7 @@ async def chat_stream(req: ChatRequest):
                             _now = time.perf_counter()
                             if not _ttft_recorded:
                                 ttft = _now - _stream_t0
-                                record_ttft(
-                                    ttft, model=MODEL_ORCHESTRATOR, phase="chat"
-                                )
+                                record_ttft(ttft, model=MODEL_ORCHESTRATOR, phase="chat")
                                 set_stream_timings(ttft_ms=int(ttft * 1000))
                                 _ttft_recorded = True
                             _chunk_times.append(_now)
@@ -1043,10 +980,7 @@ async def chat_stream(req: ChatRequest):
                                 yield f"data: {json.dumps({'text': clean})}\n\n"
         except CostCircuitBreakerTripped as exc:
             cost_aborted = True
-            logger.warning(
-                f"Stream aborted by cost circuit: "
-                f"session_id={session_id} cost_usd={exc.cost_usd:.6f}"
-            )
+            logger.warning(f"Stream aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")
             yield f"data: {json.dumps({'error': FRIENDLY_COST_ERROR})}\n\n"
         except Exception as exc:
             logger.error(
@@ -1068,17 +1002,13 @@ async def chat_stream(req: ChatRequest):
         full_reply = "".join(reply_parts)
         set_stream_timings(latency_ms=int((time.perf_counter() - turn_t0) * 1000))
         turn_summary = summarize_turn(current_turn())
-        logger.info(
-            f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}"
-        )
+        logger.info(f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}")
 
         is_finalizing = FINALIZING_MARKER in full_reply
 
         # Signal frontend before [DONE] so it can show FinalizingOverlay
         if is_finalizing:
-            logger.info(
-                f"[FINALIZING] detected for session_id={session_id} — launching finalizer pipeline"
-            )
+            logger.info(f"[FINALIZING] detected for session_id={session_id} — launching finalizer pipeline")
             yield f"data: {json.dumps({'event': 'finalizing'})}\n\n"
 
         # Shared pipeline: Firestore persist, discovery extraction, SRS,
@@ -1190,11 +1120,7 @@ async def submit_session_feedback(req: SessionFeedbackRequest):
 
     _record_session_outcome(req.session_id, "abandoned")
     record_feedback_vote(vote=f"rating_{req.rating}", phase="session")
-    logger.info(
-        "Session feedback recorded: "
-        f"event=session_feedback session_id={req.session_id} "
-        f"rating={req.rating}"
-    )
+    logger.info(f"Session feedback recorded: event=session_feedback session_id={req.session_id} rating={req.rating}")
     return {"status": "ok"}
 
 
@@ -1260,9 +1186,7 @@ async def download_pdf(req: SessionRef):
             operation="document.pdf",
             status=status,
         )
-        logger.warning(
-            f"PDF export requested but no RS document found: session_id={req.session_id}"
-        )
+        logger.warning(f"PDF export requested but no RS document found: session_id={req.session_id}")
         raise HTTPException(
             status_code=404,
             detail="No RS document found. Complete the conversation first.",
@@ -1280,9 +1204,7 @@ async def download_pdf(req: SessionRef):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": "attachment; filename=requirement_specification.pdf"
-        },
+        headers={"Content-Disposition": "attachment; filename=requirement_specification.pdf"},
     )
 
 
@@ -1310,9 +1232,7 @@ async def download_docx(req: SessionRef):
             operation="document.docx",
             status=status,
         )
-        logger.warning(
-            f"DOCX export failed — SRS could not be compiled: session_id={req.session_id}"
-        )
+        logger.warning(f"DOCX export failed — SRS could not be compiled: session_id={req.session_id}")
         raise HTTPException(
             status_code=422,
             detail="Could not compile SRS from the conversation. Keep chatting to provide more details.",
@@ -1330,9 +1250,7 @@ async def download_docx(req: SessionRef):
     return Response(
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={
-            "Content-Disposition": "attachment; filename=requirement_specification.docx"
-        },
+        headers={"Content-Disposition": "attachment; filename=requirement_specification.docx"},
     )
 
 
@@ -1466,9 +1384,7 @@ async def dataflow_generate(req: DataflowRequest):
     completeness = await check_dfd_completeness(conversation_text)
     score: int = completeness.get("score", 0)
     missing: list[str] = completeness.get("missing", [])
-    logger.info(
-        f"Dataflow completeness check: session_id={req.session_id} score={score}%"
-    )
+    logger.info(f"Dataflow completeness check: session_id={req.session_id} score={score}%")
 
     if score < 70:
         logger.debug(f"Dataflow not ready (score < 70): missing={missing}")
@@ -1544,9 +1460,7 @@ async def context_extract(req: ContextRequest):
             f"Failed to get session for extraction: session_id={sid}: {exc}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=500, detail=f"Session lookup failed: {type(exc).__name__}"
-        )
+        raise HTTPException(status_code=500, detail=f"Session lookup failed: {type(exc).__name__}")
 
     if session is None:
         # ADK session gone — return last persisted discovery state if available
@@ -1554,12 +1468,8 @@ async def context_extract(req: ContextRequest):
             loop = asyncio.get_running_loop()
             saved = await loop.run_in_executor(None, get_discovery_state, sid)
         except Exception as exc:
-            logger.error(
-                f"Firestore fallback failed for session_id={sid}: {exc}", exc_info=True
-            )
-            raise HTTPException(
-                status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}"
-            )
+            logger.error(f"Firestore fallback failed for session_id={sid}: {exc}", exc_info=True)
+            raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
         if saved:
             logger.info(
                 "ADK session missing, returning saved discovery state: "
@@ -1589,16 +1499,11 @@ async def context_extract(req: ContextRequest):
             try:
                 saved = await loop.run_in_executor(None, get_discovery_state, sid)
             except Exception as exc:
-                logger.warning(
-                    "Firestore get_discovery_state (coalesced) failed: "
-                    f"session_id={sid} {exc}"
-                )
+                logger.warning(f"Firestore get_discovery_state (coalesced) failed: session_id={sid} {exc}")
                 saved = None
             if saved:
                 logger.info(
-                    "Returning coalesced extraction result: "
-                    f"session_id={sid} "
-                    f"completeness={saved.get('completeness')}%"
+                    f"Returning coalesced extraction result: session_id={sid} completeness={saved.get('completeness')}%"
                 )
                 return {
                     "completeness": saved["completeness"],
@@ -1628,30 +1533,18 @@ async def context_extract(req: ContextRequest):
         try:
             loop = asyncio.get_running_loop()
             _saved_state = await loop.run_in_executor(None, get_discovery_state, sid)
-            _sol_type: str | None = (
-                ((_saved_state or {}).get("fields") or {})
-                .get("solution_type", {})
-                .get("value")
-            )
-            result = await extract_discovery_fields(
-                conversation_text, session_id=sid, solution_type=_sol_type
-            )
+            _sol_type: str | None = ((_saved_state or {}).get("fields") or {}).get("solution_type", {}).get("value")
+            result = await extract_discovery_fields(conversation_text, session_id=sid, solution_type=_sol_type)
         except CostCircuitBreakerTripped as exc:
             raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
-        logger.info(
-            "Discovery fields extracted: "
-            f"session_id={sid} "
-            f"completeness={result.get('completeness')}%"
-        )
+        logger.info(f"Discovery fields extracted: session_id={sid} completeness={result.get('completeness')}%")
 
         # Fire-and-forget: persist discovery state + full SRS to Firestore
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(None, upsert_discovery_state, sid, result)
         except Exception as exc:
-            logger.warning(
-                f"Firestore upsert_discovery_state failed: session_id={sid} {exc}"
-            )
+            logger.warning(f"Firestore upsert_discovery_state failed: session_id={sid} {exc}")
 
         asyncio.create_task(
             _persist_srs_to_firestore(
@@ -1664,9 +1557,7 @@ async def context_extract(req: ContextRequest):
         try:
             merged = await loop.run_in_executor(None, get_discovery_state, sid)
         except Exception as exc:
-            logger.warning(
-                f"Firestore get_discovery_state failed: session_id={sid} {exc}"
-            )
+            logger.warning(f"Firestore get_discovery_state failed: session_id={sid} {exc}")
             merged = None
         if merged:
             return {"completeness": merged["completeness"], "fields": merged["fields"]}
@@ -1684,11 +1575,7 @@ async def discovery_state(session_id: str):
     loop = asyncio.get_running_loop()
     saved = await loop.run_in_executor(None, get_discovery_state, session_id)
     if saved:
-        logger.debug(
-            "Discovery state retrieved: "
-            f"session_id={session_id} "
-            f"completeness={saved.get('completeness')}%"
-        )
+        logger.debug(f"Discovery state retrieved: session_id={session_id} completeness={saved.get('completeness')}%")
         return {"completeness": saved["completeness"], "fields": saved["fields"]}
     logger.debug(f"No saved discovery state for session_id={session_id}")
     return {"completeness": 0, "fields": {}}
@@ -1709,11 +1596,7 @@ async def patch_direct_fields(session_id: str, body: DirectFieldsPatch):
     """
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, upsert_direct_fields, session_id, body.fields)
-    logger.info(
-        "Direct fields patched: "
-        f"session_id={session_id} "
-        f"keys={list(body.fields.keys())}"
-    )
+    logger.info(f"Direct fields patched: session_id={session_id} keys={list(body.fields.keys())}")
     merged = await loop.run_in_executor(None, get_discovery_state, session_id)
     if merged:
         return {"completeness": merged["completeness"], "fields": merged["fields"]}
@@ -1737,9 +1620,7 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
             await loop.run_in_executor(None, upsert_srs_fields, session_id, srs_json)
             logger.debug(f"SRS persisted to Firestore: session_id={session_id}")
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            f"Firestore SRS upsert failed: session_id={session_id} error={exc}"
-        )
+        logger.warning(f"Firestore SRS upsert failed: session_id={session_id} error={exc}")
 
 
 # --- Firestore data retrieval ---
@@ -1870,13 +1751,10 @@ async def firestore_data(session_id: str):
         doc = await loop.run_in_executor(None, get_srs_fields, session_id)
     except Exception as exc:
         logger.error(
-            "Firestore read failed: "
-            f"event=firestore_unavailable_total session_id={session_id} {exc}",
+            f"Firestore read failed: event=firestore_unavailable_total session_id={session_id} {exc}",
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}"
-        )
+        raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
     return FirestoreDataResponse(session_id=session_id, data=doc)
 
 
@@ -1938,9 +1816,7 @@ async def _run_turn_postprocessing(
     #    so we extract them here (only on finalization, not every turn).
     if is_finalizing:
         _record_session_outcome(session_id, "finalized")
-        logger.info(
-            f"[FINALIZING] detected: session={session_id} — launching finalizer"
-        )
+        logger.info(f"[FINALIZING] detected: session={session_id} — launching finalizer")
         loop.run_in_executor(None, set_finalization_pending, session_id)
 
         # Build conversation transcript for the finalizer
@@ -1952,22 +1828,13 @@ async def _run_turn_postprocessing(
         conversation_text = (
             extract_conversation_text(session_snap)
             if session_snap
-            else (
-                fallback_transcript
-                or f"User: {user_text}\nConsultant: {assistant_text}"
-            )
+            else (fallback_transcript or f"User: {user_text}\nConsultant: {assistant_text}")
         )
 
         # Extract discovery fields for the finalizer
         try:
-            _fin_saved = await loop.run_in_executor(
-                None, get_discovery_state, session_id
-            )
-            _fin_sol_type: str | None = (
-                ((_fin_saved or {}).get("fields") or {})
-                .get("solution_type", {})
-                .get("value")
-            )
+            _fin_saved = await loop.run_in_executor(None, get_discovery_state, session_id)
+            _fin_sol_type: str | None = ((_fin_saved or {}).get("fields") or {}).get("solution_type", {}).get("value")
             discovery_fields = await extract_discovery_fields(
                 conversation_text,
                 session_id=session_id,
@@ -1977,20 +1844,13 @@ async def _run_turn_postprocessing(
                 f"Discovery fields for finalizer: session={session_id} "
                 f"completeness={discovery_fields.get('completeness')}%"
             )
-            loop.run_in_executor(
-                None, upsert_discovery_state, session_id, discovery_fields
-            )
+            loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_fields)
         except CostCircuitBreakerTripped as exc:
-            logger.warning(
-                f"Finalizer skipped by cost circuit: "
-                f"session={session_id} cost_usd={exc.cost_usd:.6f}"
-            )
+            logger.warning(f"Finalizer skipped by cost circuit: session={session_id} cost_usd={exc.cost_usd:.6f}")
             loop.run_in_executor(None, set_finalization_error, session_id)
             return
         except Exception as exc:
-            logger.warning(
-                f"extract_discovery_fields failed: session={session_id} {exc}"
-            )
+            logger.warning(f"extract_discovery_fields failed: session={session_id} {exc}")
             discovery_fields = {
                 "completeness": 0,
                 "fields": {},
@@ -2212,10 +2072,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                                     }
                                 )
                             )
-                        logger.debug(
-                            f"[WS] User transcription final ({len(clean)} chars): "
-                            f"{clean[:100]}"
-                        )
+                        logger.debug(f"[WS] User transcription final ({len(clean)} chars): {clean[:100]}")
 
                 # ── 3. Assistant output transcription ─────────────────────
                 if event.output_transcription and event.output_transcription.text:
@@ -2223,9 +2080,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         # Final accumulated assistant transcription.
                         # Send as one complete bubble.
                         assistant_transcript_final = event.output_transcription.text
-                        clean = assistant_transcript_final.replace(
-                            FINALIZING_MARKER, ""
-                        ).strip()
+                        clean = assistant_transcript_final.replace(FINALIZING_MARKER, "").strip()
                         if clean:
                             await websocket.send_text(
                                 json.dumps(
@@ -2279,9 +2134,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                             _content_evts = [
                                 e
                                 for e in (_verify.events or [])
-                                if e.content
-                                and e.content.parts
-                                and any(p.text for p in e.content.parts if p.text)
+                                if e.content and e.content.parts and any(p.text for p in e.content.parts if p.text)
                             ]
                             logger.info(
                                 f"[WS] Post-injection verify: session={session_id} "
@@ -2289,10 +2142,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                                 f"content_text_events={len(_content_evts)}"
                             )
                         else:
-                            logger.warning(
-                                f"[WS] Post-injection: session NOT FOUND in storage! "
-                                f"session={session_id}"
-                            )
+                            logger.warning(f"[WS] Post-injection: session NOT FOUND in storage! session={session_id}")
                     except Exception as exc:
                         logger.error(
                             "[WS] SessionBridge injection failed: "
@@ -2333,9 +2183,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
             # Code 1000 = normal WebSocket close
             # (user toggled voice off or navigated away).
             if "1000" in str(e):
-                logger.info(
-                    f"[WS] Gemini Live session closed normally: session={session_id}"
-                )
+                logger.info(f"[WS] Gemini Live session closed normally: session={session_id}")
             else:
                 logger.error(f"[WS] Gemini Live API error: {e}", exc_info=True)
                 try:
@@ -2343,10 +2191,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                         json.dumps(
                             {
                                 "type": "error",
-                                "message": (
-                                    "A voice API error occurred. "
-                                    "Please try again."
-                                ),
+                                "message": ("A voice API error occurred. Please try again."),
                             }
                         )
                     )

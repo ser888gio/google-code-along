@@ -11,7 +11,7 @@ and extraction prompts — it merges field_schema defaults with the override.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from field_schema import FIELD_SCHEMA
 
@@ -47,20 +47,14 @@ _POWER_BI: SolutionConfig = {
         ],
     },
     "target_users": {
-        "example_good": (
-            "All employees viewing the annual BI report; "
-            "patent department analysts."
-        ),
+        "example_good": ("All employees viewing the annual BI report; patent department analysts."),
         "rubric": [
             "Names the primary audience (role, group, or department)",
             "Distinguishes report consumers from report editors if relevant",
         ],
     },
     "report_frequency": {
-        "example_good": (
-            "Monthly data refresh; annual summary report "
-            "published in January."
-        ),
+        "example_good": ("Monthly data refresh; annual summary report published in January."),
         "rubric": [
             "States refresh cadence (daily/weekly/monthly/annual/ad-hoc)",
             "Notes any special publishing cycle",
@@ -112,10 +106,7 @@ _POWER_BI: SolutionConfig = {
         ],
     },
     "kpis_and_metrics": {
-        "expected_shape": (
-            "Named metrics with definition, unit, "
-            "and dimension breakdown."
-        ),
+        "expected_shape": ("Named metrics with definition, unit, and dimension breakdown."),
         "example_good": (
             "Number of patent applications: count of PRIO + EP + PCT "
             "in the selected period. Unit: count. Breakdown: by "
@@ -146,10 +137,7 @@ _POWER_BI: SolutionConfig = {
         ],
     },
     "time_criticality": {
-        "example_good": (
-            "Priority: Medium. Required by 14.01.2026 for annual "
-            "management review."
-        ),
+        "example_good": ("Priority: Medium. Required by 14.01.2026 for annual management review."),
         "rubric": [
             "Picks a priority level (Low / Medium / High) or numeric tier",
             "Names a deadline or explicitly says none",
@@ -178,10 +166,7 @@ _POWER_BI: SolutionConfig = {
         ],
     },
     "systems_and_tools": {
-        "example_good": (
-            "WinPAT (source), Excel exports, Databricks (planned), "
-            "Power BI (target)."
-        ),
+        "example_good": ("WinPAT (source), Excel exports, Databricks (planned), Power BI (target)."),
         "rubric": [
             "Names at least one source system by name",
             "Names the target/output platform (Power BI)",
@@ -189,10 +174,7 @@ _POWER_BI: SolutionConfig = {
         ],
     },
     "document_types": {
-        "example_good": (
-            "Excel exports from WinPAT; PowerPoint annual report; "
-            "tabular patent application data."
-        ),
+        "example_good": ("Excel exports from WinPAT; PowerPoint annual report; tabular patent application data."),
         "rubric": [
             "Names at least one input document or data format",
             "Names the output format (report, dashboard, export)",
@@ -212,19 +194,16 @@ _POWER_BI: SolutionConfig = {
     },
     "data_security_classification": {
         "example_good": (
-            "Confidential at source (patent names); Internal in the report after redaction; "
-            "visible to all employees."
+            "Confidential at source (patent names); Internal in the report after redaction; visible to all employees."
         ),
         "rubric": [
-            "Picks an explicit classification level "
-            "(Public / Internal / Confidential / Restricted)",
+            "Picks an explicit classification level (Public / Internal / Confidential / Restricted)",
             "Notes who may access the report (audience or RLS rules)",
         ],
     },
     "solution_type": {
         "example_good": (
-            "Power BI report (analytical) backed by Databricks once "
-            "available, Excel exports in the interim."
+            "Power BI report (analytical) backed by Databricks once available, Excel exports in the interim."
         ),
         "rubric": [
             "Confirms Power BI as the target platform",
@@ -250,10 +229,7 @@ _POWER_APPS: SolutionConfig = {
         ],
     },
     "target_users": {
-        "example_good": (
-            "F Academy training coordinators; managers reviewing "
-            "participation data."
-        ),
+        "example_good": ("F Academy training coordinators; managers reviewing participation data."),
         "rubric": [
             "Names the primary app users by role",
             "Distinguishes data-entry users from read-only viewers if relevant",
@@ -303,10 +279,7 @@ _POWER_APPS: SolutionConfig = {
         ],
     },
     "kpis_and_metrics": {
-        "expected_shape": (
-            "Training KPIs: event count, participant count, "
-            "target group coverage."
-        ),
+        "expected_shape": ("Training KPIs: event count, participant count, target group coverage."),
         "example_good": (
             "Number of training events organised: count per period. "
             "Number of participants: headcount per event and cumulative. "
@@ -319,10 +292,7 @@ _POWER_APPS: SolutionConfig = {
         ],
     },
     "systems_and_tools": {
-        "example_good": (
-            "SAP (source for bookings), Booking tool, SharePoint "
-            "(document storage)."
-        ),
+        "example_good": ("SAP (source for bookings), Booking tool, SharePoint (document storage)."),
         "rubric": [
             "Names the source system(s) where training data lives",
             "Names the target platform (Power App, SharePoint, Power Automate)",
@@ -352,20 +322,14 @@ _POWER_APPS: SolutionConfig = {
         ],
     },
     "data_security_classification": {
-        "example_good": (
-            "Internal — training participation data visible to HR "
-            "and managers."
-        ),
+        "example_good": ("Internal — training participation data visible to HR and managers."),
         "rubric": [
             "Picks Internal or Confidential",
             "Notes who can access (HR, managers, all employees)",
         ],
     },
     "time_criticality": {
-        "example_good": (
-            "Low urgency — time criticality tier 1 "
-            "(>24 months to critical impact)."
-        ),
+        "example_good": ("Low urgency — time criticality tier 1 (>24 months to critical impact)."),
         "rubric": [
             "Picks a priority tier or level",
             "Notes any deadline or confirms none",
@@ -378,20 +342,14 @@ _POWER_APPS: SolutionConfig = {
         ],
     },
     "strategic_impact": {
-        "example_good": (
-            "Small strategic impact — supports HR KPI tracking and "
-            "F Academy reporting."
-        ),
+        "example_good": ("Small strategic impact — supports HR KPI tracking and F Academy reporting."),
         "rubric": [
             "States impact level (Small / Medium / Large)",
             "Links to a specific KPI or strategic initiative",
         ],
     },
     "solution_type": {
-        "example_good": (
-            "Power App (canvas app for data entry and overview) "
-            "backed by SharePoint list."
-        ),
+        "example_good": ("Power App (canvas app for data entry and overview) backed by SharePoint list."),
         "rubric": [
             "Confirms Power Apps or Power Platform as the target",
             "Mentions backing data store (SharePoint, Dataverse)",
@@ -410,10 +368,7 @@ _MACHINE_LEARNING: SolutionConfig = {
         ],
     },
     "purpose_to_be": {
-        "expected_shape": (
-            "What the model predicts, replaces, or automates, "
-            "and how it improves decisions."
-        ),
+        "expected_shape": ("What the model predicts, replaces, or automates, and how it improves decisions."),
         "example_good": (
             "Predict weekly demand per SKU 4 weeks ahead to reduce "
             "overstock and stockouts; replace manual planner estimates "
@@ -437,17 +392,14 @@ _MACHINE_LEARNING: SolutionConfig = {
         ],
     },
     "kpis_and_metrics": {
-        "expected_shape": (
-            "Model performance metrics + business impact metrics."
-        ),
+        "expected_shape": ("Model performance metrics + business impact metrics."),
         "example_good": (
             "Model accuracy: MAPE ≤ 15% on held-out test set. "
             "Business impact: reduce overstock by 10%, stockouts by 15%. "
             "Retraining frequency: weekly."
         ),
         "rubric": [
-            "Names at least one model performance metric "
-            "(MAPE, AUC, F1, RMSE)",
+            "Names at least one model performance metric (MAPE, AUC, F1, RMSE)",
             "States the acceptance threshold for the metric",
             "Includes at least one business outcome metric",
         ],
@@ -478,8 +430,7 @@ _MACHINE_LEARNING: SolutionConfig = {
     },
     "document_types": {
         "example_good": (
-            "Historical sales CSV exports from SAP; inventory "
-            "snapshots; model artefact files (.pkl / .joblib)."
+            "Historical sales CSV exports from SAP; inventory snapshots; model artefact files (.pkl / .joblib)."
         ),
         "rubric": [
             "Names training data format/source",
@@ -511,8 +462,7 @@ _MACHINE_LEARNING: SolutionConfig = {
     },
     "data_security_classification": {
         "example_good": (
-            "Internal — sales and inventory data; model outputs visible "
-            "to planners and supply chain managers."
+            "Internal — sales and inventory data; model outputs visible to planners and supply chain managers."
         ),
         "rubric": [
             "Picks classification level for training data",
@@ -520,10 +470,7 @@ _MACHINE_LEARNING: SolutionConfig = {
         ],
     },
     "solution_type": {
-        "example_good": (
-            "Machine learning forecasting model (Python / Azure ML) "
-            "with Power BI output dashboard."
-        ),
+        "example_good": ("Machine learning forecasting model (Python / Azure ML) with Power BI output dashboard."),
         "rubric": [
             "Names the ML approach (forecasting, classification, clustering, NLP)",
             "Names the platform or framework",
@@ -532,8 +479,7 @@ _MACHINE_LEARNING: SolutionConfig = {
     },
     "add_value": {
         "example_good": (
-            "Frees planners from manual estimation; reduces overstock cost; "
-            "enables data-driven safety stock decisions."
+            "Frees planners from manual estimation; reduces overstock cost; enables data-driven safety stock decisions."
         ),
         "rubric": [
             "Names at least one operational benefit beyond accuracy",
@@ -595,7 +541,7 @@ def get_field_rubric_block(field_key: str, solution_type: str | None = None) -> 
     The solution-type config wins over field_schema defaults for any key it provides.
     Falls back gracefully if either layer is missing.
     """
-    base = FIELD_SCHEMA.get(field_key, {})
+    base: Any = FIELD_SCHEMA.get(field_key, {})
     override = get_solution_config(solution_type).get(field_key, {})
 
     label = base.get("label", field_key)

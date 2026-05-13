@@ -71,14 +71,9 @@ def build_augmented_user_message(
         lines.extend(_render_workflow_context(workflow_context, labels))
 
     if fields or deferred:
-        lines.append(
-            "Context from the Requirements Specification form, "
-            "entered manually by the user."
-        )
+        lines.append("Context from the Requirements Specification form, entered manually by the user.")
     if fields:
-        lines.append(
-            "Treat these fields as already provided and do not ask for them again:"
-        )
+        lines.append("Treat these fields as already provided and do not ask for them again:")
         for key, label in labels.items():
             value = fields.get(key)
             if value:
@@ -107,31 +102,25 @@ def _render_workflow_context(
         lines.append("- Required fields are all answered, deferred, or not applicable.")
         lines.append("- Do not ask ordinary discovery questions.")
         lines.append("- Summarize what was captured in one short paragraph.")
-        deferred = [str(k) for k in context.get("deferred_fields", []) or []]
+        deferred_raw = context.get("deferred_fields", []) or []
+        deferred = [str(k) for k in deferred_raw] if isinstance(deferred_raw, (list, tuple)) else []
         if deferred:
             lines.append("- List deferred or unknown fields explicitly:")
             for key in deferred:
                 lines.append(f"  - {labels.get(key, key)}")
-        lines.append(
-            "- Ask whether the user wants to fill any of them now, "
-            "or finalize with them as open questions."
-        )
+        lines.append("- Ask whether the user wants to fill any of them now, or finalize with them as open questions.")
         return lines
 
     active_field = context.get("active_field")
     if isinstance(active_field, str) and active_field:
         lines.append(
-            f"- Active field: {labels.get(active_field, active_field)}. "
-            "Ask exactly one question about this field."
+            f"- Active field: {labels.get(active_field, active_field)}. Ask exactly one question about this field."
         )
     else:
         lines.append("- No active field. Do not invent a new field question.")
 
     if context.get("clarification_requested"):
-        lines.append(
-            "- The user just asked for clarification. Explain the "
-            "active field briefly, then ask again."
-        )
+        lines.append("- The user just asked for clarification. Explain the active field briefly, then ask again.")
 
     active_gaps = context.get("active_field_coverage_gaps") or []
     if isinstance(active_gaps, list) and active_gaps:
@@ -146,10 +135,7 @@ def _render_workflow_context(
 
     miss_count = context.get("miss_count")
     if isinstance(miss_count, int) and miss_count >= 2:
-        lines.append(
-            f"- The user has missed this field {miss_count} times. "
-            "Offer to mark it unknown or fill it later."
-        )
+        lines.append(f"- The user has missed this field {miss_count} times. Offer to mark it unknown or fill it later.")
 
     answered = context.get("answered_fields")
     if isinstance(answered, Mapping) and answered:
@@ -158,16 +144,14 @@ def _render_workflow_context(
             if value is not None and str(value).strip():
                 lines.append(f"  - {labels.get(str(key), str(key))}: {value}")
 
-    deferred = [str(k) for k in context.get("deferred_fields", []) or []]
+    deferred_raw = context.get("deferred_fields", []) or []
+    deferred = [str(k) for k in deferred_raw] if isinstance(deferred_raw, (list, tuple)) else []
     if deferred:
         lines.append("- Deferred, do not ask now; revisit at wrap-up:")
         for key in deferred:
             lines.append(f"  - {labels.get(key, key)}")
 
     if context.get("ready_to_finalize"):
-        lines.append(
-            "- The user chose to finalize. Summarize briefly and emit "
-            "[FINALIZING] on its own line."
-        )
+        lines.append("- The user chose to finalize. Summarize briefly and emit [FINALIZING] on its own line.")
 
     return lines

@@ -73,11 +73,11 @@ export interface Section {{
 
 export const RS_SECTIONS: Section[] = {sections_json};
 
-export const REQUIRED_FIELD_KEYS = {required_json} as const;
-export const OPTIONAL_FIELD_KEYS = {optional_json} as const;
+const REQUIRED_FIELD_KEYS = {required_json} as const;
+const OPTIONAL_FIELD_KEYS = {optional_json} as const;
 export const STRICT_DIRECT_FIELD_KEYS = {strict_direct_json} as const;
 export const SUGGESTABLE_DIRECT_FIELD_KEYS = {suggestable_direct_json} as const;
-export const DIRECT_CHAT_FIELD_KEYS = {direct_chat_keys_json} as const;
+const DIRECT_CHAT_FIELD_KEYS = {direct_chat_keys_json} as const;
 export type DirectChatFieldKey = (typeof DIRECT_CHAT_FIELD_KEYS)[number];
 
 export const DIRECT_CHAT_FIELD_PATTERNS: Array<{{

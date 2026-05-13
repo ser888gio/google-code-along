@@ -42,10 +42,7 @@ class CostCircuitBreakerTripped(RuntimeError):
         self.session_id = session_id
         self.cost_usd = cost_usd
         self.limit_usd = limit_usd
-        super().__init__(
-            f"session {session_id} exceeded cost limit: "
-            f"{cost_usd:.4f} > {limit_usd:.4f}"
-        )
+        super().__init__(f"session {session_id} exceeded cost limit: {cost_usd:.4f} > {limit_usd:.4f}")
 
 
 class UnsafePromptBlocked(ValueError):
@@ -72,8 +69,7 @@ _PROMPT_RISKS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"\b(system|developer|hidden|initial)\b.{0,50}"
-            r"\b(prompt|instructions?|message|policy)\b",
+            r"\b(system|developer|hidden|initial)\b.{0,50}" r"\b(prompt|instructions?|message|policy)\b",
             re.I | re.S,
         ),
         "prompt_extraction",
@@ -89,16 +85,14 @@ _PROMPT_RISKS: list[tuple[re.Pattern[str], str]] = [
     ),
     (
         re.compile(
-            r"\b(jailbreak|DAN mode|developer mode|god mode|disable safety|"
-            r"bypass safety|no filters?|uncensored)\b",
+            r"\b(jailbreak|DAN mode|developer mode|god mode|disable safety|" r"bypass safety|no filters?|uncensored)\b",
             re.I,
         ),
         "jailbreak",
     ),
     (
         re.compile(
-            r"\b(base64|rot13|hex encode|obfuscate)\b.{0,80}"
-            r"\b(secret|prompt|password|token|api[_ -]?key|policy)\b",
+            r"\b(base64|rot13|hex encode|obfuscate)\b.{0,80}" r"\b(secret|prompt|password|token|api[_ -]?key|policy)\b",
             re.I | re.S,
         ),
         "obfuscated_exfiltration",

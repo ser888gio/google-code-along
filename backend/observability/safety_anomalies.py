@@ -33,14 +33,10 @@ def _configured_table_id() -> str:
     if not table_id and project:
         table_id = f"{project}.{dataset}.safety_anomalous_sessions"
     if not table_id:
-        raise RuntimeError(
-            "SAFETY_ANOMALIES_TABLE is not configured and GOOGLE_CLOUD_PROJECT "
-            "is empty."
-        )
+        raise RuntimeError("SAFETY_ANOMALIES_TABLE is not configured and GOOGLE_CLOUD_PROJECT is empty.")
     if not _TABLE_ID_RE.fullmatch(table_id):
         raise RuntimeError(
-            "SAFETY_ANOMALIES_TABLE must be project.dataset.table with only "
-            "letters, numbers, underscores, or hyphens."
+            "SAFETY_ANOMALIES_TABLE must be project.dataset.table with only letters, numbers, underscores, or hyphens."
         )
     return table_id
 
@@ -50,9 +46,7 @@ def _lookback_hours() -> int:
     try:
         value = int(raw)
     except ValueError as exc:
-        raise RuntimeError(
-            "SAFETY_ANOMALIES_LOOKBACK_HOURS must be an integer."
-        ) from exc
+        raise RuntimeError("SAFETY_ANOMALIES_LOOKBACK_HOURS must be an integer.") from exc
     return max(1, min(value, 168))
 
 
@@ -117,8 +111,7 @@ def run() -> int:
 
     force_flush_metrics()
     logger.info(
-        "Safety anomaly metric sync complete: "
-        f"source_table={table_id} lookback_hours={lookback_hours} rows={len(rows)}"
+        f"Safety anomaly metric sync complete: source_table={table_id} lookback_hours={lookback_hours} rows={len(rows)}"
     )
     return 0
 

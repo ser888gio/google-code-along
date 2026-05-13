@@ -97,9 +97,7 @@ cost_circuit_counter = _meter.create_counter(
 
 prompt_injection_attempt_counter = _meter.create_counter(
     name="rs.safety.injection_attempt_total",
-    description=(
-        "Known-bad prompt injection or exfiltration attempts seen by safety checks."
-    ),
+    description=("Known-bad prompt injection or exfiltration attempts seen by safety checks."),
     unit="events",
 )
 

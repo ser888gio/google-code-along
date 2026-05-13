@@ -97,9 +97,7 @@ async def compile_srs_json_from_session(
         # Use .replace() not .format(): user transcript may contain braces
         # that would cause a KeyError if str.format() tried to interpret them.
         prompt = SRS_EXTRACTION_PROMPT.replace("{conversation}", conversation_text)
-        response = _genai_client.models.generate_content(
-            model=MODEL_SRS_COMPILER, contents=prompt
-        )
+        response = _genai_client.models.generate_content(model=MODEL_SRS_COMPILER, contents=prompt)
         raw = (response.text or "").strip()
 
         # Strip markdown fences if present.

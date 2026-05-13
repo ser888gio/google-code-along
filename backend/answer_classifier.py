@@ -7,7 +7,7 @@ import json
 import re
 import time
 import unicodedata
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
 from field_schema import (
@@ -160,9 +160,7 @@ async def classify_user_turn(
             "coverage_gaps": [],
         }
 
-    return await _classify_with_llm(
-        active_field, text, conversation_tail, solution_type
-    )
+    return await _classify_with_llm(active_field, text, conversation_tail, solution_type)
 
 
 async def _classify_with_llm(
@@ -176,18 +174,12 @@ async def _classify_with_llm(
         from google import genai
 
         client = genai.Client(api_key=GOOGLE_API_KEY)
-        rubric_block = (
-            get_field_rubric_block(active_field, solution_type) or "(no rubric defined)"
-        )
+        rubric_block = get_field_rubric_block(active_field, solution_type) or "(no rubric defined)"
         prompt = (
             ACTIVE_FIELD_CLASSIFIER_PROMPT.replace("{active_field}", active_field)
-            .replace(
-                "{active_field_label}", FIELD_LABELS.get(active_field, active_field)
-            )
+            .replace("{active_field_label}", FIELD_LABELS.get(active_field, active_field))
             .replace("{active_field_rubric}", rubric_block)
-            .replace(
-                "{field_labels_json}", json.dumps(FIELD_LABELS, ensure_ascii=False)
-            )
+            .replace("{field_labels_json}", json.dumps(FIELD_LABELS, ensure_ascii=False))
             .replace(
                 "{conversation_tail}",
                 format_prompt_data_lines(conversation_tail),
@@ -197,18 +189,14 @@ async def _classify_with_llm(
                 format_prompt_data_lines(message, default_label="Latest user line"),
             )
         )
-        logger.info(
-            f"Model call started: model={MODEL_DISCOVERY} caller=classify_user_turn"
-        )
+        logger.info(f"Model call started: model={MODEL_DISCOVERY} caller=classify_user_turn")
         start = time.perf_counter()
         response = await asyncio.to_thread(
             client.models.generate_content,
             model=MODEL_DISCOVERY,
             contents=prompt,
         )
-        logger.info(
-            f"Model call completed: model={MODEL_DISCOVERY} elapsed={time.perf_counter() - start:.2f}s"
-        )
+        logger.info(f"Model call completed: model={MODEL_DISCOVERY} elapsed={time.perf_counter() - start:.2f}s")
         raw = (response.text or "").strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -242,16 +230,10 @@ async def _classify_with_llm(
 
     value = active.get("value")
     raw_gaps = active.get("coverage_gaps") or []
-    coverage_gaps: list[str] = [
-        str(gap).strip()
-        for gap in raw_gaps
-        if isinstance(gap, str) and str(gap).strip()
-    ]
+    coverage_gaps: list[str] = [str(gap).strip() for gap in raw_gaps if isinstance(gap, str) and str(gap).strip()]
     return {
-        "classification": classification,
-        "value": str(value).strip()
-        if value is not None and str(value).strip()
-        else None,
+        "classification": cast(Classification, classification),
+        "value": str(value).strip() if value is not None and str(value).strip() else None,
         "confidence": float(active.get("confidence") or 0.0),
         "proactive_fields": proactive,
         "coverage_gaps": coverage_gaps,

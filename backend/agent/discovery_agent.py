@@ -106,13 +106,10 @@ async def extract_discovery_fields(
     try:
         # Use .replace() not .format() — user transcript may contain literal braces
         # that would cause a KeyError if str.format() tried to interpret them.
-        prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
-            "{field_shapes}", get_all_field_shapes(solution_type)
-        ).replace("{conversation}", format_prompt_data_lines(conversation_text))
-        logger.info(
-            "Model call started: "
-            f"model={MODEL_DISCOVERY} caller=extract_discovery_fields"
+        prompt = DISCOVERY_EXTRACTION_PROMPT.replace("{field_shapes}", get_all_field_shapes(solution_type)).replace(
+            "{conversation}", format_prompt_data_lines(conversation_text)
         )
+        logger.info(f"Model call started: model={MODEL_DISCOVERY} caller=extract_discovery_fields")
         _t0 = time.perf_counter()
         with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
             span.set_attribute("gen_ai.operation.name", "generate_content")
@@ -159,11 +156,7 @@ async def extract_discovery_fields(
                     input_tokens=input_tokens,
                     cache_read_tokens=cache_read,
                 )
-                sid_hash = (
-                    hashlib.sha256(session_id.encode()).hexdigest()[:16]
-                    if session_id
-                    else "batch"
-                )
+                sid_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16] if session_id else "batch"
                 record_cost(
                     cost_usd,
                     model=MODEL_DISCOVERY,
@@ -185,9 +178,7 @@ async def extract_discovery_fields(
                 operation="generate_content",
                 status="ok",
             )
-        logger.info(
-            f"Model call completed: model={MODEL_DISCOVERY} elapsed={elapsed:.2f}s"
-        )
+        logger.info(f"Model call completed: model={MODEL_DISCOVERY} elapsed={elapsed:.2f}s")
         raw = (response.text or "").strip()
 
         # Strip markdown fences the model sometimes adds despite instructions
@@ -282,8 +273,7 @@ def normalize_workflow_state(state: dict | None) -> dict:
     if not isinstance(statuses, dict):
         statuses = {}
     normalized["field_status"] = {
-        key: statuses.get(key) if statuses.get(key) in FIELD_STATUSES else "missing"
-        for key in FIELD_SCHEMA
+        key: statuses.get(key) if statuses.get(key) in FIELD_STATUSES else "missing" for key in FIELD_SCHEMA
     }
 
     for key in ("clarification_counts", "miss_counts", "last_question_by_field"):

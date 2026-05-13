@@ -5,6 +5,9 @@ TASKS.md
 .claude
 /gcp-key.json
 
+# Mypy cache
+.mypy_cache/
+
 # Environment files — never commit real secrets
 backend/.env
 frontend/.env

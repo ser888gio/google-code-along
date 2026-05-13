@@ -95,18 +95,13 @@ class SessionBridge:
         assistant_text = (assistant_text or "").strip()
 
         if not user_text and not assistant_text:
-            logger.debug(
-                "[SessionBridge] Skipping injection — both transcripts empty: "
-                f"session={session_id}"
-            )
+            logger.debug(f"[SessionBridge] Skipping injection — both transcripts empty: session={session_id}")
             return
 
         session = await self._get_or_create_session(user_id, session_id)
 
         # Log session state before injection for debugging
-        content_events = [
-            e for e in (session.events or []) if e.content and e.content.parts
-        ]
+        content_events = [e for e in (session.events or []) if e.content and e.content.parts]
         logger.info(
             f"[SessionBridge] Session state before injection: "
             f"session={session_id} total_events={len(session.events or [])} "
@@ -117,19 +112,13 @@ class SessionBridge:
         if user_text:
             user_event = self._make_user_event(user_text)
             await self._session_service.append_event(session, user_event)
-            logger.debug(
-                f"[SessionBridge] Injected user event ({len(user_text)} chars): "
-                f"session={session_id}"
-            )
+            logger.debug(f"[SessionBridge] Injected user event ({len(user_text)} chars): session={session_id}")
 
         # --- Inject model (assistant) event ---
         if assistant_text:
             model_event = self._make_model_event(assistant_text)
             await self._session_service.append_event(session, model_event)
-            logger.debug(
-                f"[SessionBridge] Injected model event ({len(assistant_text)} chars): "
-                f"session={session_id}"
-            )
+            logger.debug(f"[SessionBridge] Injected model event ({len(assistant_text)} chars): session={session_id}")
 
         logger.info(
             f"[SessionBridge] Voice turn injected into orchestrator session: "
@@ -159,10 +148,7 @@ class SessionBridge:
                 user_id=user_id,
                 session_id=session_id,
             )
-            logger.info(
-                f"[SessionBridge] Created orchestrator session on demand: "
-                f"session={session_id}"
-            )
+            logger.info(f"[SessionBridge] Created orchestrator session on demand: session={session_id}")
         return session
 
     def _make_user_event(self, text: str) -> Event:

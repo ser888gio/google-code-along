@@ -14,7 +14,7 @@ have a value — previously filled fields are never erased.
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from config import (
     FIRESTORE_COLLECTION,
@@ -24,7 +24,19 @@ from config import (
 )
 from field_schema import REQUIRED_FIELDS
 from google.cloud import firestore
+from google.cloud.firestore_v1.base_document import DocumentSnapshot
 from privacy import hash_text, redact_text
+
+
+def _snap(ref: Any) -> DocumentSnapshot:
+    """Synchronous DocumentReference.get() always returns a DocumentSnapshot.
+
+    The stubs over-broaden the return type to a sync/async union; this helper
+    narrows it back to the sync type so call sites can use .exists/.to_dict()
+    without scattered casts.
+    """
+    return cast(DocumentSnapshot, ref.get())
+
 
 _COLLECTION = FIRESTORE_COLLECTION
 _FEEDBACK_COLLECTION = "feedback"
@@ -39,12 +51,8 @@ def _client() -> firestore.Client:
     if _firestore_client is None:
         require_config_value("GCP_PROJECT", GCP_PROJECT, "using Firestore")
         require_config_value("FIRESTORE_COLLECTION", _COLLECTION, "using Firestore")
-        require_config_value(
-            "FIRESTORE_DATABASE", FIRESTORE_DATABASE, "using Firestore"
-        )
-        _firestore_client = firestore.Client(
-            project=GCP_PROJECT, database=FIRESTORE_DATABASE
-        )
+        require_config_value("FIRESTORE_DATABASE", FIRESTORE_DATABASE, "using Firestore")
+        _firestore_client = firestore.Client(project=GCP_PROJECT, database=FIRESTORE_DATABASE)
     return _firestore_client
 
 
@@ -100,7 +108,7 @@ def get_srs_fields(session_id: str) -> dict[str, Any] | None:
     """Return the stored SRS document for *session_id*, or None if not found."""
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
+    snap = _snap(ref)
     if not snap.exists:
         return None
     return snap.to_dict()
@@ -230,10 +238,10 @@ def get_conversation_history(session_id: str) -> list[dict[str, Any]]:
     """Return the messages list for *session_id*, or [] if not found."""
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
+    snap = _snap(ref)
     if not snap.exists:
         return []
-    return snap.to_dict().get("messages", [])
+    return (snap.to_dict() or {}).get("messages", [])
 
 
 def _find_assistant_message(
@@ -241,10 +249,7 @@ def _find_assistant_message(
     message_id: str,
 ) -> dict[str, Any] | None:
     for message in messages:
-        if (
-            message.get("message_id") == message_id
-            and message.get("role") == "assistant"
-        ):
+        if message.get("message_id") == message_id and message.get("role") == "assistant":
             return message
     return None
 
@@ -265,19 +270,19 @@ def upsert_message_feedback(
 
     client = _client()
     session_ref = client.collection(_COLLECTION).document(session_id)
-    session_snap = session_ref.get()
+    session_snap = _snap(session_ref)
     if not session_snap.exists:
         return None
 
-    messages = session_snap.to_dict().get("messages", [])
+    messages = (session_snap.to_dict() or {}).get("messages", [])
     message = _find_assistant_message(messages, message_id)
     if message is None:
         return None
 
     now = datetime.now(timezone.utc).isoformat()
     feedback_ref = client.collection(_FEEDBACK_COLLECTION).document(message_id)
-    existing_snap = feedback_ref.get()
-    existing = existing_snap.to_dict() if existing_snap.exists else {}
+    existing_snap = _snap(feedback_ref)
+    existing = (existing_snap.to_dict() or {}) if existing_snap.exists else {}
 
     doc: dict[str, Any] = {
         "feedback_id": message_id,
@@ -311,11 +316,11 @@ def update_feedback_comment(
     """Update the optional comment for an existing feedback document."""
     client = _client()
     feedback_ref = client.collection(_FEEDBACK_COLLECTION).document(message_id)
-    snap = feedback_ref.get()
+    snap = _snap(feedback_ref)
     if not snap.exists:
         return None
 
-    existing = snap.to_dict()
+    existing = snap.to_dict() or {}
     if existing.get("session_id") != session_id:
         return None
 
@@ -341,15 +346,15 @@ def upsert_session_feedback(
 
     client = _client()
     session_ref = client.collection(_COLLECTION).document(session_id)
-    session_snap = session_ref.get()
+    session_snap = _snap(session_ref)
     if not session_snap.exists:
         return None
 
     now = datetime.now(timezone.utc).isoformat()
     feedback_id = f"session:{session_id}"
     feedback_ref = client.collection(_FEEDBACK_COLLECTION).document(feedback_id)
-    existing_snap = feedback_ref.get()
-    existing = existing_snap.to_dict() if existing_snap.exists else {}
+    existing_snap = _snap(feedback_ref)
+    existing = (existing_snap.to_dict() or {}) if existing_snap.exists else {}
 
     doc: dict[str, Any] = {
         "feedback_id": feedback_id,
@@ -385,7 +390,7 @@ def list_sessions() -> list[dict[str, Any]]:
     client = _client()
     results = []
     for doc in client.collection(_COLLECTION).stream():
-        data = doc.to_dict()
+        data = doc.to_dict() or {}
 
         # Prefer the project name (use_case_title) as the conversation label.
         # Fall back to the discovery_state_json fields, then the first user message.
@@ -410,9 +415,7 @@ def list_sessions() -> list[dict[str, Any]]:
                     pass
         if not preview:
             messages = data.get("messages", [])
-            preview = next(
-                (m["text"] for m in messages if m.get("role") == "user"), None
-            )
+            preview = next((m["text"] for m in messages if m.get("role") == "user"), None)
 
         results.append(
             {
@@ -485,10 +488,10 @@ def get_final_analysis(session_id: str) -> dict | None:
     """
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
+    snap = _snap(ref)
     if not snap.exists:
         return None
-    data = snap.to_dict()
+    data = snap.to_dict() or {}
     status = data.get("finalization_status")
     if not status:
         return None
@@ -538,9 +541,7 @@ def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
         elif key in fields and not fields[key].get("filled"):
             # Keep null entry consistent
             fields[key] = {"filled": False, "value": None}
-    filled_required = sum(
-        1 for k in REQUIRED_FIELDS if fields.get(k, {}).get("filled", False)
-    )
+    filled_required = sum(1 for k in REQUIRED_FIELDS if fields.get(k, {}).get("filled", False))
     state["completeness"] = round((filled_required / len(REQUIRED_FIELDS)) * 100)
 
 
@@ -553,8 +554,8 @@ def upsert_direct_fields(session_id: str, fields: dict[str, str]) -> None:
     """
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
-    existing_json = snap.to_dict().get("direct_fields_json") if snap.exists else None
+    snap = _snap(ref)
+    existing_json = (snap.to_dict() or {}).get("direct_fields_json") if snap.exists else None
     try:
         existing: dict[str, str] = json.loads(existing_json) if existing_json else {}
     except Exception:
@@ -574,10 +575,10 @@ def get_direct_fields(session_id: str) -> dict[str, str]:
     """Return the directly-set field values for *session_id* (empty dict if none)."""
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
+    snap = _snap(ref)
     if not snap.exists:
         return {}
-    json_str = snap.to_dict().get("direct_fields_json")
+    json_str = (snap.to_dict() or {}).get("direct_fields_json")
     if not json_str:
         return {}
     try:
@@ -597,8 +598,8 @@ def upsert_deferred_fields(session_id: str, fields: dict[str, Any]) -> None:
 
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
-    existing_json = snap.to_dict().get("deferred_fields_json") if snap.exists else None
+    snap = _snap(ref)
+    existing_json = (snap.to_dict() or {}).get("deferred_fields_json") if snap.exists else None
     try:
         existing: dict[str, Any] = json.loads(existing_json) if existing_json else {}
     except Exception:
@@ -627,10 +628,10 @@ def get_deferred_fields(session_id: str) -> dict[str, Any]:
     """Return persisted deferred fields for *session_id*."""
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
+    snap = _snap(ref)
     if not snap.exists:
         return {}
-    json_str = snap.to_dict().get("deferred_fields_json")
+    json_str = (snap.to_dict() or {}).get("deferred_fields_json")
     if not json_str:
         return {}
     try:
@@ -651,10 +652,10 @@ def get_workflow_state(session_id: str) -> dict | None:
     """Return persisted workflow cursor state for *session_id*."""
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
+    snap = _snap(ref)
     if not snap.exists:
         return None
-    json_str = snap.to_dict().get("workflow_state_json")
+    json_str = (snap.to_dict() or {}).get("workflow_state_json")
     if not json_str:
         return None
     try:
@@ -689,10 +690,10 @@ def get_discovery_state(session_id: str) -> dict | None:
     """
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    snap = ref.get()
+    snap = _snap(ref)
     if not snap.exists:
         return None
-    data = snap.to_dict()
+    data = snap.to_dict() or {}
     ai_json = data.get("discovery_state_json")
     direct_json = data.get("direct_fields_json")
 
@@ -700,11 +701,7 @@ def get_discovery_state(session_id: str) -> dict | None:
         return None
 
     try:
-        state: dict = (
-            json.loads(ai_json)
-            if ai_json
-            else {"completeness": 0, "fields": {}, "missing_priority": []}
-        )
+        state: dict = json.loads(ai_json) if ai_json else {"completeness": 0, "fields": {}, "missing_priority": []}
     except Exception:
         state = {"completeness": 0, "fields": {}, "missing_priority": []}
 

@@ -29,18 +29,10 @@ async def check_dfd_completeness(conversation_text: str) -> dict:
     prompt = DATAFLOW_COMPLETENESS_PROMPT.replace("{conversation}", conversation_text)
 
     try:
-        logger.info(
-            f"Model call started: model={MODEL_DATAFLOW} caller=check_dfd_completeness"
-        )
+        logger.info(f"Model call started: model={MODEL_DATAFLOW} caller=check_dfd_completeness")
         _t0 = time.perf_counter()
-        response = _genai_client.models.generate_content(
-            model=MODEL_DATAFLOW, contents=prompt
-        )
-        logger.info(
-            "Model call completed: "
-            f"model={MODEL_DATAFLOW} "
-            f"elapsed={time.perf_counter() - _t0:.2f}s"
-        )
+        response = _genai_client.models.generate_content(model=MODEL_DATAFLOW, contents=prompt)
+        logger.info(f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s")
         raw = (response.text or "").strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
@@ -56,18 +48,10 @@ async def generate_dataflow_diagram(conversation_text: str) -> str:
     # Use .replace() not .format() — user transcript may contain literal braces.
     prompt = DATAFLOW_GENERATION_PROMPT.replace("{conversation}", conversation_text)
 
-    logger.info(
-        f"Model call started: model={MODEL_DATAFLOW} caller=generate_dataflow_diagram"
-    )
+    logger.info(f"Model call started: model={MODEL_DATAFLOW} caller=generate_dataflow_diagram")
     _t0 = time.perf_counter()
-    response = _genai_client.models.generate_content(
-        model=MODEL_DATAFLOW, contents=prompt
-    )
-    logger.info(
-        "Model call completed: "
-        f"model={MODEL_DATAFLOW} "
-        f"elapsed={time.perf_counter() - _t0:.2f}s"
-    )
+    response = _genai_client.models.generate_content(model=MODEL_DATAFLOW, contents=prompt)
+    logger.info(f"Model call completed: model={MODEL_DATAFLOW} elapsed={time.perf_counter() - _t0:.2f}s")
     mermaid = (response.text or "").strip()
 
     # Strip markdown fences if the model wrapped the output

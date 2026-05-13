@@ -1,6 +1,6 @@
 from config import GCS_BUCKET_NAME as BUCKET_NAME
 from config import require_config_value
-from google.cloud import storage
+from google.cloud import storage  # type: ignore[attr-defined]
 
 _storage_client: storage.Client | None = None
 
@@ -14,9 +14,7 @@ def _client() -> storage.Client:
 
 def get_bucket_name(bucket_name: str | None = None) -> str:
     """Resolve the configured GCS bucket name."""
-    return require_config_value(
-        "GCS_BUCKET_NAME", bucket_name or BUCKET_NAME, "using GCS storage"
-    ).strip("/")
+    return require_config_value("GCS_BUCKET_NAME", bucket_name or BUCKET_NAME, "using GCS storage").strip("/")
 
 
 def list_files(prefix: str = "", bucket_name: str = BUCKET_NAME) -> list[str]:
@@ -32,9 +30,7 @@ def read_file(path: str, bucket_name: str = BUCKET_NAME) -> bytes:
     return _client().bucket(bucket_name).blob(path).download_as_bytes()
 
 
-def read_text(
-    path: str, bucket_name: str = BUCKET_NAME, encoding: str = "utf-8"
-) -> str:
+def read_text(path: str, bucket_name: str = BUCKET_NAME, encoding: str = "utf-8") -> str:
     """Download a text blob and return it as a string."""
     return read_file(path, bucket_name).decode(encoding)
 
