@@ -3,8 +3,13 @@ import Providers from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RS Generator — Discovery Agent",
+  title: "RS Generator â€” Discovery Agent",
   description: "AI-powered Requirement Specification Generator",
+  icons: {
+    icon: "/skoda.png",
+    shortcut: "/skoda.png",
+    apple: "/skoda.png",
+  },
 };
 
 export default function RootLayout({
