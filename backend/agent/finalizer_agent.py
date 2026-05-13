@@ -107,6 +107,40 @@ def _build_uploaded_file_parts(uploads: dict) -> list[types.Part]:
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _record_model_usage(span: Any, session_id: str, usage: Any, elapsed: float) -> None:
+    """Record token counts, cost, and latency metrics for a finalizer model call."""
+    input_tokens = getattr(usage, "prompt_token_count", 0) or 0
+    output_tokens = getattr(usage, "candidates_token_count", 0) or 0
+    cache_read = getattr(usage, "cached_content_token_count", 0) or 0
+    span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+    span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+    span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read)
+    cost_usd = compute_cost(MODEL_FINALIZER, usage)
+    span.set_attribute("cost_usd", cost_usd)
+    sid_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16]
+    record_tokens(input_tokens, model=MODEL_FINALIZER, token_type="input", feature="finalize")
+    record_tokens(output_tokens, model=MODEL_FINALIZER, token_type="output", feature="finalize")
+    if cache_read:
+        record_tokens(cache_read, model=MODEL_FINALIZER, token_type="cache_read", feature="finalize")
+    record_cache_hit_ratio(model=MODEL_FINALIZER, input_tokens=input_tokens, cache_read_tokens=cache_read)
+    record_cost(cost_usd, model=MODEL_FINALIZER, feature="finalize", session_id_hash=sid_hash)
+    record_model_call(
+        model=MODEL_FINALIZER,
+        feature="finalize",
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read,
+        cost_usd=cost_usd,
+    )
+    add_session_cost(session_id, cost_usd)
+    record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
+
+
+# ---------------------------------------------------------------------------
 # Main entry point — called from main.py as an asyncio background task
 # ---------------------------------------------------------------------------
 
@@ -188,60 +222,9 @@ async def run_finalizer(
             elapsed = time.perf_counter() - _t0
             usage = getattr(response, "usage_metadata", None)
             if usage:
-                input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-                output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-                cache_read = getattr(usage, "cached_content_token_count", 0) or 0
-                span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
-                span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
-                span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read)
-                cost_usd = compute_cost(MODEL_FINALIZER, usage)
-                span.set_attribute("cost_usd", cost_usd)
-                sid_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16]
-                record_tokens(
-                    input_tokens,
-                    model=MODEL_FINALIZER,
-                    token_type="input",
-                    feature="finalize",
-                )
-                record_tokens(
-                    output_tokens,
-                    model=MODEL_FINALIZER,
-                    token_type="output",
-                    feature="finalize",
-                )
-                if cache_read:
-                    record_tokens(
-                        cache_read,
-                        model=MODEL_FINALIZER,
-                        token_type="cache_read",
-                        feature="finalize",
-                    )
-                record_cache_hit_ratio(
-                    model=MODEL_FINALIZER,
-                    input_tokens=input_tokens,
-                    cache_read_tokens=cache_read,
-                )
-                record_cost(
-                    cost_usd,
-                    model=MODEL_FINALIZER,
-                    feature="finalize",
-                    session_id_hash=sid_hash,
-                )
-                record_model_call(
-                    model=MODEL_FINALIZER,
-                    feature="finalize",
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cache_read_tokens=cache_read,
-                    cost_usd=cost_usd,
-                )
-                add_session_cost(session_id, cost_usd)
-            record_operation_duration(
-                elapsed,
-                model=MODEL_FINALIZER,
-                operation="generate_content",
-                status="ok",
-            )
+                _record_model_usage(span, session_id, usage, elapsed)
+            else:
+                record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
         logger.info(f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}")
 
         # 4. Parse JSON output

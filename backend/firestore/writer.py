@@ -385,43 +385,63 @@ def upsert_session_feedback(
     return doc
 
 
+def _json_object(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _preview_from_direct_fields(data: dict[str, Any]) -> str | None:
+    direct = _json_object(data.get("direct_fields_json"))
+    return direct.get("use_case_title") or None
+
+
+def _preview_from_discovery_state(data: dict[str, Any]) -> str | None:
+    discovery = _json_object(data.get("discovery_state_json"))
+    fields = discovery.get("fields", {})
+    if not isinstance(fields, dict):
+        return None
+
+    title_entry = fields.get("use_case_title", {})
+    if isinstance(title_entry, dict) and title_entry.get("filled"):
+        return title_entry.get("value") or None
+    return None
+
+
+def _preview_from_first_user_message(data: dict[str, Any]) -> str | None:
+    messages = data.get("messages", [])
+    if not isinstance(messages, list):
+        return None
+    return next(
+        (message.get("text") for message in messages if isinstance(message, dict) and message.get("role") == "user"),
+        None,
+    )
+
+
+def _session_preview(data: dict[str, Any]) -> str | None:
+    # Prefer the project name, then extracted state, then the first user message.
+    return (
+        _preview_from_direct_fields(data)
+        or _preview_from_discovery_state(data)
+        or _preview_from_first_user_message(data)
+    )
+
+
 def list_sessions() -> list[dict[str, Any]]:
     """Return a summary of all sessions ordered by updated_at descending."""
     client = _client()
     results = []
     for doc in client.collection(_COLLECTION).stream():
         data = doc.to_dict() or {}
-
-        # Prefer the project name (use_case_title) as the conversation label.
-        # Fall back to the discovery_state_json fields, then the first user message.
-        preview: str | None = None
-        direct_json = data.get("direct_fields_json")
-        if direct_json:
-            try:
-                direct = json.loads(direct_json)
-                preview = direct.get("use_case_title") or None
-            except (json.JSONDecodeError, AttributeError):
-                pass
-        if not preview:
-            discovery_json = data.get("discovery_state_json")
-            if discovery_json:
-                try:
-                    discovery = json.loads(discovery_json)
-                    fields = discovery.get("fields", {})
-                    title_entry = fields.get("use_case_title", {})
-                    if title_entry.get("filled"):
-                        preview = title_entry.get("value") or None
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-        if not preview:
-            messages = data.get("messages", [])
-            preview = next((m["text"] for m in messages if m.get("role") == "user"), None)
-
         results.append(
             {
                 "session_id": data.get("session_id") or doc.id,
                 "updated_at": data.get("updated_at"),
-                "preview": preview,
+                "preview": _session_preview(data),
             }
         )
     results.sort(key=lambda x: x.get("updated_at") or "", reverse=True)

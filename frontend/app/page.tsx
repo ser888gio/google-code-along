@@ -416,6 +416,301 @@ function mergePartialFields(
   };
 }
 
+// ─── History Sidebar ──────────────────────────────────────────────────────────
+
+function HistorySidebar({
+  sessions,
+  loading,
+  currentSessionId,
+  onClose,
+  onNewConversation,
+  onLoadSession,
+}: {
+  sessions: SessionSummary[];
+  loading: boolean;
+  currentSessionId: string | null;
+  onClose: () => void;
+  onNewConversation: () => void;
+  onLoadSession: (id: string) => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <div className="absolute inset-0 z-40 flex">
+      <div className="flex w-72 flex-col border-r border-gray-200 bg-white shadow-xl">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
+          <span className="text-sm font-bold text-gray-800">{t("sidebar.conversations")}</span>
+          <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+        </div>
+        <div className="shrink-0 border-b border-gray-200 p-3">
+          <button
+            onClick={onNewConversation}
+            className="w-full rounded border border-dashed border-gray-300 py-2 text-xs font-semibold text-gray-500 hover:border-[#4caf50] hover:text-[#4a6659] transition-colors"
+          >
+            {t("btn.new_conversation")}
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <p className="p-4 text-center text-xs text-gray-400">{t("sidebar.loading")}</p>
+          ) : sessions.length === 0 ? (
+            <p className="p-4 text-center text-xs text-gray-400">{t("sidebar.no_conversations")}</p>
+          ) : (
+            sessions.map((s) => (
+              <button
+                key={s.session_id}
+                onClick={() => onLoadSession(s.session_id)}
+                className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${s.session_id === currentSessionId ? "bg-[#f5fdf5]" : ""}`}
+              >
+                <p className="truncate text-xs font-medium text-gray-700">
+                  {s.preview ?? s.session_id}
+                </p>
+                {s.updated_at && (
+                  <p className="mt-0.5 text-[10px] text-gray-400">
+                    {new Date(s.updated_at).toLocaleString()}
+                  </p>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+      <div className="flex-1 bg-black/20" onClick={onClose} />
+    </div>
+  );
+}
+
+// ─── Chat Header ──────────────────────────────────────────────────────────────
+
+function ChatHeader({
+  activeWorkflowField,
+  chatMode,
+  isStreaming,
+  wsConnectionState,
+  isRecording,
+  onOpenHistory,
+  onToggleVoice,
+}: {
+  activeWorkflowField: string | null;
+  chatMode: ChatMode;
+  isStreaming: boolean;
+  wsConnectionState: string;
+  isRecording: boolean;
+  onOpenHistory: () => void;
+  onToggleVoice: () => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-bold text-gray-800">{t("header.title")}</span>
+        {activeWorkflowField && (
+          <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+            {activeWorkflowField.replace(/_/g, " ")}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onOpenHistory}
+          className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {t("btn.history")}
+        </button>
+        <button
+          onClick={onToggleVoice}
+          title={chatMode === "voice" ? t("header.voice_to_text") : t("header.text_to_voice")}
+          className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
+            chatMode === "voice"
+              ? "bg-red-50 text-red-600 hover:bg-red-100"
+              : "text-gray-500 hover:bg-gray-100"
+          }`}
+        >
+          {chatMode === "voice" ? (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="currentColor" />
+                <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              {t("btn.voice_mode")}
+            </>
+          ) : (
+            <>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" />
+                <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              {t("btn.voice")}
+            </>
+          )}
+        </button>
+        <LanguageSwitcher />
+        <div className={`h-3 w-3 rounded-full ${
+          chatMode === "voice"
+            ? wsConnectionState === "connected"
+              ? isRecording
+                ? "animate-pulse bg-red-500"
+                : "bg-blue-500"
+              : wsConnectionState === "connecting"
+                ? "animate-pulse bg-yellow-400"
+                : "bg-gray-400"
+            : isStreaming
+              ? "animate-pulse bg-yellow-400"
+              : "bg-[#4caf50]"
+        }`} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Chat Input Area ──────────────────────────────────────────────────────────
+
+function ChatInput({
+  chatMode,
+  input,
+  isStreaming,
+  sessionEnded,
+  sessionId,
+  wsConnectionState,
+  isRecording,
+  isPlaying,
+  recorderError,
+  textareaRef,
+  onInputChange,
+  onKeyDown,
+  onSend,
+  onOpenUpload,
+  onOpenRating,
+  onMicToggle,
+}: {
+  chatMode: ChatMode;
+  input: string;
+  isStreaming: boolean;
+  sessionEnded: boolean;
+  sessionId: string | null;
+  wsConnectionState: string;
+  isRecording: boolean;
+  isPlaying: boolean;
+  recorderError: string | null;
+  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  onInputChange: (value: string) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onSend: () => void;
+  onOpenUpload: () => void;
+  onOpenRating: () => void;
+  onMicToggle: () => void;
+}) {
+  const { t } = useLocale();
+  const isVoiceConnected = wsConnectionState === "connected";
+
+  return (
+    <div className="shrink-0 border-t border-gray-200 p-3">
+      {chatMode === "voice" ? (
+        <div className="flex flex-col items-center gap-2">
+          {wsConnectionState === "connecting" && (
+            <p className="text-xs text-yellow-600">{t("voice.connecting")}</p>
+          )}
+          {wsConnectionState === "error" && (
+            <p className="text-xs text-red-600">{t("voice.conn_failed")}</p>
+          )}
+          {recorderError && (
+            <p className="text-xs text-red-600">{recorderError}</p>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onMicToggle}
+              disabled={!isVoiceConnected || sessionEnded}
+              title={isRecording ? "Stop speaking" : "Start speaking"}
+              className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
+                isRecording
+                  ? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse"
+                  : isVoiceConnected && !sessionEnded
+                    ? "bg-[#4a6659] text-white hover:opacity-90"
+                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="currentColor" />
+                <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+            <span className="text-xs text-gray-500">
+              {isRecording
+                ? t("voice.listening")
+                : isPlaying
+                  ? t("voice.ai_speaking")
+                  : isVoiceConnected
+                    ? sessionEnded ? t("voice.chat_ended") : t("voice.tap_to_speak")
+                    : t("voice.connecting")}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-end gap-2">
+          <button
+            onClick={onOpenUpload}
+            title="Attach a file"
+            disabled={sessionEnded}
+            className="flex shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 hover:border-[#4caf50] hover:text-[#4caf50] transition-colors"
+            style={{ width: 40, height: 40 }}
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M9 4v10M4 9h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder={t("input.placeholder")}
+            rows={1}
+            disabled={isStreaming || sessionEnded}
+            className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
+            style={{ minHeight: 40, maxHeight: 160 }}
+          />
+          <div className="flex shrink-0 flex-col gap-2">
+            <button
+              onClick={onSend}
+              disabled={!input.trim() || isStreaming || sessionEnded}
+              className="flex items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isStreaming ? (
+                <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
+                </svg>
+              ) : (
+                <>
+                  {t("btn.send")}
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M2 7h10M7 2l5 5-5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </>
+              )}
+            </button>
+            <button
+              onClick={onOpenRating}
+              disabled={!sessionId || isStreaming || sessionEnded}
+              className="flex items-center justify-center gap-1.5 rounded border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-600 transition-colors hover:border-[#4a6659] hover:text-[#1a3a2a] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+              </svg>
+              {sessionEnded ? t("btn.ended") : t("btn.end_chat")}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
@@ -1059,124 +1354,32 @@ export default function ChatPage() {
     }
   }
 
-  const isVoiceConnected = ws.connectionState === "connected";
-
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
       {/* ── Left panel ─────────────────────────────────── */}
       <div className="flex w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
         {/* History sidebar */}
         {historyOpen && (
-          <div className="absolute inset-0 z-40 flex">
-            <div className="flex w-72 flex-col border-r border-gray-200 bg-white shadow-xl">
-              <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
-                <span className="text-sm font-bold text-gray-800">{t("sidebar.conversations")}</span>
-                <button onClick={() => setHistoryOpen(false)} className="text-xs text-gray-400 hover:text-gray-600">✕</button>
-              </div>
-              <div className="shrink-0 border-b border-gray-200 p-3">
-                <button
-                  onClick={newConversation}
-                  className="w-full rounded border border-dashed border-gray-300 py-2 text-xs font-semibold text-gray-500 hover:border-[#4caf50] hover:text-[#4a6659] transition-colors"
-                >
-                  {t("btn.new_conversation")}
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto">
-                {historyLoading ? (
-                  <p className="p-4 text-center text-xs text-gray-400">{t("sidebar.loading")}</p>
-                ) : historySessions.length === 0 ? (
-                  <p className="p-4 text-center text-xs text-gray-400">{t("sidebar.no_conversations")}</p>
-                ) : (
-                  historySessions.map((s) => (
-                    <button
-                      key={s.session_id}
-                      onClick={() => loadSession(s.session_id)}
-                      className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${s.session_id === sessionId ? "bg-[#f5fdf5]" : ""}`}
-                    >
-                      <p className="truncate text-xs font-medium text-gray-700">
-                        {s.preview ?? s.session_id}
-                      </p>
-                      {s.updated_at && (
-                        <p className="mt-0.5 text-[10px] text-gray-400">
-                          {new Date(s.updated_at).toLocaleString()}
-                        </p>
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-            <div className="flex-1 bg-black/20" onClick={() => setHistoryOpen(false)} />
-          </div>
+          <HistorySidebar
+            sessions={historySessions}
+            loading={historyLoading}
+            currentSessionId={sessionId}
+            onClose={() => setHistoryOpen(false)}
+            onNewConversation={newConversation}
+            onLoadSession={loadSession}
+          />
         )}
 
         {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-gray-800">{t("header.title")}</span>
-            {activeWorkflowField && (
-              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                {activeWorkflowField.replace(/_/g, " ")}
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={openHistory}
-              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {t("btn.history")}
-            </button>
-            {/* Voice/Text mode toggle */}
-            <button
-              onClick={handleToggleVoice}
-              title={chatMode === "voice" ? t("header.voice_to_text") : t("header.text_to_voice")}
-              className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
-                chatMode === "voice"
-                  ? "bg-red-50 text-red-600 hover:bg-red-100"
-                  : "text-gray-500 hover:bg-gray-100"
-              }`}
-            >
-              {chatMode === "voice" ? (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="currentColor" />
-                    <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                    <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                  {t("btn.voice_mode")}
-                </>
-              ) : (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" />
-                    <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                    <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                  {t("btn.voice")}
-                </>
-              )}
-            </button>
-            <LanguageSwitcher />
-            <div className={`h-3 w-3 rounded-full ${
-              chatMode === "voice"
-                ? ws.connectionState === "connected"
-                  ? audioRecorder.isRecording
-                    ? "animate-pulse bg-red-500"
-                    : "bg-blue-500"
-                  : ws.connectionState === "connecting"
-                    ? "animate-pulse bg-yellow-400"
-                    : "bg-gray-400"
-                : isStreaming
-                  ? "animate-pulse bg-yellow-400"
-                  : "bg-[#4caf50]"
-            }`} />
-          </div>
-        </div>
+        <ChatHeader
+          activeWorkflowField={activeWorkflowField}
+          chatMode={chatMode}
+          isStreaming={isStreaming}
+          wsConnectionState={ws.connectionState}
+          isRecording={audioRecorder.isRecording}
+          onOpenHistory={openHistory}
+          onToggleVoice={handleToggleVoice}
+        />
 
         {/* Message thread */}
         <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
@@ -1193,111 +1396,24 @@ export default function ChatPage() {
         </div>
 
         {/* Input area */}
-        <div className="shrink-0 border-t border-gray-200 p-3">
-          {chatMode === "voice" ? (
-            /* Voice mode input */
-            <div className="flex flex-col items-center gap-2">
-              {/* Connection status */}
-              {ws.connectionState === "connecting" && (
-                <p className="text-xs text-yellow-600">{t("voice.connecting")}</p>
-              )}
-              {ws.connectionState === "error" && (
-                <p className="text-xs text-red-600">{t("voice.conn_failed")}</p>
-              )}
-              {audioRecorder.error && (
-                <p className="text-xs text-red-600">{audioRecorder.error}</p>
-              )}
-
-              <div className="flex items-center gap-3">
-                {/* Mic button */}
-                <button
-                  onClick={handleMicToggle}
-                  disabled={!isVoiceConnected || sessionEnded}
-                  title={audioRecorder.isRecording ? "Stop speaking" : "Start speaking"}
-                  className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
-                    audioRecorder.isRecording
-                      ? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse"
-                      : isVoiceConnected && !sessionEnded
-                        ? "bg-[#4a6659] text-white hover:opacity-90"
-                        : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                    <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" fill="currentColor" />
-                    <path d="M19 10v2a7 7 0 01-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                    <path d="M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                  </svg>
-                </button>
-
-                <span className="text-xs text-gray-500">
-                  {audioRecorder.isRecording
-                    ? t("voice.listening")
-                    : audioPlayer.isPlaying
-                      ? t("voice.ai_speaking")
-                      : isVoiceConnected
-                        ? sessionEnded ? t("voice.chat_ended") : t("voice.tap_to_speak")
-                        : t("voice.connecting")}
-                </span>
-              </div>
-            </div>
-          ) : (
-            /* Text mode input */
-            <div className="flex items-end gap-2">
-              <button
-                onClick={() => setUploadOpen(true)}
-                title="Attach a file"
-                disabled={sessionEnded}
-                className="flex shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 hover:border-[#4caf50] hover:text-[#4caf50] transition-colors"
-                style={{ width: 40, height: 40 }}
-              >
-                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                  <path d="M9 4v10M4 9h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                </svg>
-              </button>
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={t("input.placeholder")}
-                rows={1}
-                disabled={isStreaming || sessionEnded}
-                className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
-                style={{ minHeight: 40, maxHeight: 160 }}
-              />
-              <div className="flex shrink-0 flex-col gap-2">
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim() || isStreaming || sessionEnded}
-                  className="flex items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isStreaming ? (
-                    <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
-                      <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
-                    </svg>
-                  ) : (
-                    <>
-                      {t("btn.send")}
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <path d="M2 7h10M7 2l5 5-5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={openSessionRating}
-                  disabled={!sessionId || isStreaming || sessionEnded}
-                  className="flex items-center justify-center gap-1.5 rounded border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-600 transition-colors hover:border-[#4a6659] hover:text-[#1a3a2a] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                    <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  </svg>
-                  {sessionEnded ? t("btn.ended") : t("btn.end_chat")}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <ChatInput
+          chatMode={chatMode}
+          input={input}
+          isStreaming={isStreaming}
+          sessionEnded={sessionEnded}
+          sessionId={sessionId}
+          wsConnectionState={ws.connectionState}
+          isRecording={audioRecorder.isRecording}
+          isPlaying={audioPlayer.isPlaying}
+          recorderError={audioRecorder.error}
+          textareaRef={textareaRef}
+          onInputChange={setInput}
+          onKeyDown={handleKeyDown}
+          onSend={handleSend}
+          onOpenUpload={() => setUploadOpen(true)}
+          onOpenRating={openSessionRating}
+          onMicToggle={handleMicToggle}
+        />
 
         {/* File upload modal */}
         {uploadOpen && (

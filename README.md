@@ -73,6 +73,70 @@ cp .env.local.example .env.local   # fill in NEXT_PUBLIC_API_URL and NEXT_PUBLIC
 npm run dev
 ```
 
+## Pre-commit hooks
+
+All code quality checks run automatically before every `git commit` via [pre-commit](https://pre-commit.com).
+
+### Install pre-commit (once per machine)
+
+```bash
+pip install pre-commit
+```
+
+### Install debtmap (once per machine)
+
+debtmap is not on PyPI. Install it via the official script:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/iepathos/debtmap/master/install.sh | bash
+```
+
+Verify it landed on your PATH:
+
+```bash
+debtmap --version
+```
+
+### Activate the hooks (once per clone)
+
+```bash
+pre-commit install
+```
+
+From this point on, every `git commit` runs all hooks automatically.
+
+### What the hooks check
+
+| Hook | What it checks | Blocks commit? |
+| --- | --- | --- |
+| `trailing-whitespace` | Trailing whitespace in files | Yes |
+| `end-of-file-fixer` | Missing newline at end of file | Yes |
+| `check-yaml` / `check-toml` | Syntax of config files | Yes |
+| `check-added-large-files` | Accidentally committed large files | Yes |
+| `shellcheck` | Shell script linting | Yes (warnings+) |
+| `ruff-check` | Python linting (auto-fix enabled) | Yes |
+| `ruff-format` | Python formatting | Yes |
+| `mypy` | Python type checking | Yes |
+| `knip` | Unused TypeScript code and dependencies | Yes |
+| `debtmap` | Technical debt — blocks on Critical tier | Yes |
+
+The debtmap hook prints the full report on every commit and **blocks if any Critical-tier items are found**. High, Medium, and Low items are reported but do not block.
+
+### Useful commands
+
+```bash
+# Run all hooks manually against every file (useful after first install)
+pre-commit run --all-files
+
+# Run only the debtmap check
+pre-commit run debtmap --all-files
+
+# See the current debt report without committing
+debtmap analyze . --format markdown
+```
+
+---
+
 ## Running Tests
 
 **Backend:**

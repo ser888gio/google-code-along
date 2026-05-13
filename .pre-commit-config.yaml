@@ -60,3 +60,10 @@ repos:
         language: system
         pass_filenames: false
         files: ^frontend/
+
+      # DEBT: debtmap — block commit if any Critical-tier items are found
+      - id: debtmap
+        name: debtmap analysis
+        entry: bash scripts/debtmap-check.sh
+        language: system
+        pass_filenames: false

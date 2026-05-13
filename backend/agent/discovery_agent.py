@@ -67,6 +67,112 @@ discovery_agent = Agent(
 )
 
 
+def _empty_discovery_result() -> dict:
+    return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
+
+
+def _build_discovery_prompt(conversation_text: str, solution_type: str | None) -> str:
+    # Use .replace() not .format() because transcripts can contain literal braces.
+    return DISCOVERY_EXTRACTION_PROMPT.replace(
+        "{field_shapes}",
+        get_all_field_shapes(solution_type),
+    ).replace(
+        "{conversation}",
+        format_prompt_data_lines(conversation_text),
+    )
+
+
+def _strip_markdown_json_fence(raw: str) -> str:
+    raw = raw.strip()
+    if not raw.startswith("```"):
+        return raw
+
+    raw = raw.split("```")[1]
+    if raw.startswith("json"):
+        raw = raw[4:]
+    return raw.strip()
+
+
+def _session_id_hash(session_id: str | None) -> str:
+    return hashlib.sha256(session_id.encode()).hexdigest()[:16] if session_id else "batch"
+
+
+def _discovery_usage_counts(usage) -> dict[str, int]:
+    return {
+        "input_tokens": getattr(usage, "prompt_token_count", 0) or 0,
+        "output_tokens": getattr(usage, "candidates_token_count", 0) or 0,
+        "cache_read": getattr(usage, "cached_content_token_count", 0) or 0,
+    }
+
+
+def _record_discovery_usage(usage, session_id: str | None, span) -> None:
+    if not usage:
+        return
+
+    counts = _discovery_usage_counts(usage)
+    span.set_attribute("gen_ai.usage.input_tokens", counts["input_tokens"])
+    span.set_attribute("gen_ai.usage.output_tokens", counts["output_tokens"])
+    span.set_attribute("gen_ai.usage.cache_read.input_tokens", counts["cache_read"])
+    cost_usd = compute_cost(MODEL_DISCOVERY, usage)
+    span.set_attribute("cost_usd", cost_usd)
+    record_tokens(
+        counts["input_tokens"],
+        model=MODEL_DISCOVERY,
+        token_type="input",
+        feature="discovery_extract",
+    )
+    record_tokens(
+        counts["output_tokens"],
+        model=MODEL_DISCOVERY,
+        token_type="output",
+        feature="discovery_extract",
+    )
+    if counts["cache_read"]:
+        record_tokens(
+            counts["cache_read"],
+            model=MODEL_DISCOVERY,
+            token_type="cache_read",
+            feature="discovery_extract",
+        )
+    record_cache_hit_ratio(
+        model=MODEL_DISCOVERY,
+        input_tokens=counts["input_tokens"],
+        cache_read_tokens=counts["cache_read"],
+    )
+    record_cost(
+        cost_usd,
+        model=MODEL_DISCOVERY,
+        feature="discovery_extract",
+        session_id_hash=_session_id_hash(session_id),
+    )
+    record_model_call(
+        model=MODEL_DISCOVERY,
+        feature="discovery_extract",
+        input_tokens=counts["input_tokens"],
+        output_tokens=counts["output_tokens"],
+        cache_read_tokens=counts["cache_read"],
+        cost_usd=cost_usd,
+    )
+    add_session_cost(session_id, cost_usd)
+
+
+def _normalize_discovery_result(parsed: dict) -> dict:
+    fields = parsed.get("fields", {})
+
+    # Ensure all 22 keys are always present and nulls are consistent.
+    for key in FIELD_SCHEMA:
+        if key not in fields:
+            fields[key] = {"filled": False, "value": None}
+        elif not fields[key].get("filled", False):
+            fields[key]["value"] = None
+
+    return {
+        "completeness": max(0, min(100, int(parsed.get("completeness", 0)))),
+        "fields": fields,
+        "missing_priority": parsed.get("missing_priority", [])[:3],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Standalone extraction helper (for use outside ADK context, e.g. REST endpoints)
 # ---------------------------------------------------------------------------
@@ -99,16 +205,14 @@ async def extract_discovery_fields(
     """
 
     if not conversation_text.strip():
-        return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
+        return _empty_discovery_result()
 
     logger.debug("Extracting discovery fields from conversation transcript")
     tracer = trace.get_tracer("rs-generator")
     try:
         # Use .replace() not .format() — user transcript may contain literal braces
         # that would cause a KeyError if str.format() tried to interpret them.
-        prompt = DISCOVERY_EXTRACTION_PROMPT.replace("{field_shapes}", get_all_field_shapes(solution_type)).replace(
-            "{conversation}", format_prompt_data_lines(conversation_text)
-        )
+        prompt = _build_discovery_prompt(conversation_text, solution_type)
         logger.info(f"Model call started: model={MODEL_DISCOVERY} caller=extract_discovery_fields")
         _t0 = time.perf_counter()
         with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
@@ -122,56 +226,7 @@ async def extract_discovery_fields(
                 contents=prompt,
             )
             elapsed = time.perf_counter() - _t0
-            usage = getattr(response, "usage_metadata", None)
-            if usage:
-                input_tokens = getattr(usage, "prompt_token_count", 0) or 0
-                output_tokens = getattr(usage, "candidates_token_count", 0) or 0
-                cache_read = getattr(usage, "cached_content_token_count", 0) or 0
-                span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
-                span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
-                span.set_attribute("gen_ai.usage.cache_read.input_tokens", cache_read)
-                cost_usd = compute_cost(MODEL_DISCOVERY, usage)
-                span.set_attribute("cost_usd", cost_usd)
-                record_tokens(
-                    input_tokens,
-                    model=MODEL_DISCOVERY,
-                    token_type="input",
-                    feature="discovery_extract",
-                )
-                record_tokens(
-                    output_tokens,
-                    model=MODEL_DISCOVERY,
-                    token_type="output",
-                    feature="discovery_extract",
-                )
-                if cache_read:
-                    record_tokens(
-                        cache_read,
-                        model=MODEL_DISCOVERY,
-                        token_type="cache_read",
-                        feature="discovery_extract",
-                    )
-                record_cache_hit_ratio(
-                    model=MODEL_DISCOVERY,
-                    input_tokens=input_tokens,
-                    cache_read_tokens=cache_read,
-                )
-                sid_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16] if session_id else "batch"
-                record_cost(
-                    cost_usd,
-                    model=MODEL_DISCOVERY,
-                    feature="discovery_extract",
-                    session_id_hash=sid_hash,
-                )
-                record_model_call(
-                    model=MODEL_DISCOVERY,
-                    feature="discovery_extract",
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cache_read_tokens=cache_read,
-                    cost_usd=cost_usd,
-                )
-                add_session_cost(session_id, cost_usd)
+            _record_discovery_usage(getattr(response, "usage_metadata", None), session_id, span)
             record_operation_duration(
                 elapsed,
                 model=MODEL_DISCOVERY,
@@ -179,31 +234,7 @@ async def extract_discovery_fields(
                 status="ok",
             )
         logger.info(f"Model call completed: model={MODEL_DISCOVERY} elapsed={elapsed:.2f}s")
-        raw = (response.text or "").strip()
-
-        # Strip markdown fences the model sometimes adds despite instructions
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
-
-        parsed = json.loads(raw)
-        fields = parsed.get("fields", {})
-
-        # Ensure all 22 keys are always present and nulls are consistent
-        for key in FIELD_SCHEMA:
-            if key not in fields:
-                fields[key] = {"filled": False, "value": None}
-            else:
-                if not fields[key].get("filled", False):
-                    fields[key]["value"] = None
-
-        result = {
-            "completeness": max(0, min(100, int(parsed.get("completeness", 0)))),
-            "fields": fields,
-            "missing_priority": parsed.get("missing_priority", [])[:3],
-        }
+        result = _normalize_discovery_result(json.loads(_strip_markdown_json_fence(response.text or "")))
         logger.info(
             "Discovery extraction done: "
             f"completeness={result['completeness']}% "
@@ -215,7 +246,7 @@ async def extract_discovery_fields(
         raise
     except Exception as exc:
         logger.warning(f"extract_discovery_fields failed: {exc}")
-        return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
+        return _empty_discovery_result()
 
 
 WORKFLOW_PHASES = {

@@ -18,6 +18,52 @@ export interface UploadedFile {
 export type FeedbackVote = "up" | "down";
 export type SessionRating = 1 | 2 | 3 | 4 | 5;
 
+interface StreamChatCallbacks {
+  onChunk: (text: string) => void;
+  onSessionId: (id: string) => void;
+  onDone: () => void;
+  onError: (err: string) => void;
+  onFinalizing?: () => void;
+  onFieldUpdate?: (key: string, value: string) => void;
+  onActiveField?: (key: string) => void;
+  onMessageId?: (id: string) => void;
+}
+
+function buildChatRequestBody(
+  message: string,
+  sessionId: string | null,
+  directFields?: Record<string, string>,
+  deferredFields?: string[],
+): string {
+  return JSON.stringify({
+    message,
+    session_id: sessionId,
+    ...(directFields ? { direct_fields: directFields } : {}),
+    ...(deferredFields?.length ? { deferred_fields: deferredFields } : {}),
+  });
+}
+
+/** Dispatch a single parsed SSE event object. Returns true if the stream should stop. */
+function dispatchSseEvent(
+  parsed: Record<string, unknown>,
+  callbacks: StreamChatCallbacks,
+): boolean {
+  if (parsed.session_id) callbacks.onSessionId(parsed.session_id as string);
+  if (parsed.message_id) callbacks.onMessageId?.(parsed.message_id as string);
+  if (parsed.error) {
+    callbacks.onError(parsed.error as string);
+    return true;
+  }
+  if (parsed.text) callbacks.onChunk(parsed.text as string);
+  if (parsed.event === "finalizing") callbacks.onFinalizing?.();
+  if (typeof parsed.active_field === "string") callbacks.onActiveField?.(parsed.active_field);
+  if (parsed.field_update && typeof (parsed.field_update as Record<string, unknown>).key === "string") {
+    const update = parsed.field_update as { key: string; value?: string };
+    callbacks.onFieldUpdate?.(update.key, update.value ?? "");
+  }
+  return false;
+}
+
 /**
  * Send a message and stream the response via SSE.
  *
@@ -49,18 +95,18 @@ export async function streamChat(
   const res = await fetch(`${API_URL}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      message,
-      session_id: sessionId,
-      ...(directFields ? { direct_fields: directFields } : {}),
-      ...(deferredFields?.length ? { deferred_fields: deferredFields } : {}),
-    }),
+    body: buildChatRequestBody(message, sessionId, directFields, deferredFields),
   });
 
   if (!res.ok || !res.body) {
     onError(`Server error: ${res.status}`);
     return;
   }
+
+  const callbacks: StreamChatCallbacks = {
+    onChunk, onSessionId, onDone, onError,
+    onFinalizing, onFieldUpdate, onActiveField, onMessageId,
+  };
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -82,19 +128,8 @@ export async function streamChat(
         return;
       }
       try {
-        const parsed = JSON.parse(payload);
-        if (parsed.session_id) onSessionId(parsed.session_id);
-        if (parsed.message_id) onMessageId?.(parsed.message_id);
-        if (parsed.error) {
-          onError(parsed.error);
-          return;
-        }
-        if (parsed.text) onChunk(parsed.text);
-        if (parsed.event === "finalizing") onFinalizing?.();
-        if (typeof parsed.active_field === "string") onActiveField?.(parsed.active_field);
-        if (parsed.field_update && typeof parsed.field_update.key === "string") {
-          onFieldUpdate?.(parsed.field_update.key, parsed.field_update.value ?? "");
-        }
+        const parsed = JSON.parse(payload) as Record<string, unknown>;
+        if (dispatchSseEvent(parsed, callbacks)) return;
       } catch {
         // ignore malformed lines
       }
