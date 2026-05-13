@@ -1121,6 +1121,16 @@ export default function ChatPage() {
             )}
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={openHistory}
+              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              {t("btn.history")}
+            </button>
             {/* Voice/Text mode toggle */}
             <button
               onClick={handleToggleVoice}
@@ -1150,26 +1160,6 @@ export default function ChatPage() {
                   {t("btn.voice")}
                 </>
               )}
-            </button>
-            <button
-              onClick={openSessionRating}
-              disabled={!sessionId || isStreaming || sessionEnded}
-              className="flex items-center gap-1.5 rounded border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 transition-colors hover:border-[#4a6659] hover:text-[#1a3a2a] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-              </svg>
-              {sessionEnded ? t("btn.ended") : t("btn.end_chat")}
-            </button>
-            <button
-              onClick={openHistory}
-              className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" />
-                <path d="M7 4v3.5l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {t("btn.history")}
             </button>
             <LanguageSwitcher />
             <div className={`h-3 w-3 rounded-full ${
@@ -1275,24 +1265,36 @@ export default function ChatPage() {
                 className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
                 style={{ minHeight: 40, maxHeight: 160 }}
               />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || isStreaming || sessionEnded}
-                className="flex shrink-0 items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {isStreaming ? (
-                  <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
-                    <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
-                  </svg>
-                ) : (
-                  <>
-                    {t("btn.send")}
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M2 7h10M7 2l5 5-5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              <div className="flex shrink-0 flex-col gap-2">
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim() || isStreaming || sessionEnded}
+                  className="flex items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isStreaming ? (
+                    <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="3" strokeDasharray="31.4" strokeDashoffset="10" />
                     </svg>
-                  </>
-                )}
-              </button>
+                  ) : (
+                    <>
+                      {t("btn.send")}
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M2 7h10M7 2l5 5-5 5" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={openSessionRating}
+                  disabled={!sessionId || isStreaming || sessionEnded}
+                  className="flex items-center justify-center gap-1.5 rounded border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-600 transition-colors hover:border-[#4a6659] hover:text-[#1a3a2a] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+                  </svg>
+                  {sessionEnded ? t("btn.ended") : t("btn.end_chat")}
+                </button>
+              </div>
             </div>
           )}
         </div>
