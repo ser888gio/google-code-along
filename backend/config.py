@@ -104,17 +104,17 @@ MODEL_ORCHESTRATOR = "gemini-3.1-pro-preview"
 MODEL_FINALIZER = "gemini-3.1-pro-preview"
 
 # Discovery tracker: fast extraction after every user message
-MODEL_DISCOVERY = "gemini-3.1-pro-preview"
+MODEL_DISCOVERY = "gemini-3.1-flash-lite"
 
 # Research agent: retrieval + summarisation, no deep reasoning needed
-MODEL_RESEARCH = "gemini-3.1-pro-preview"
+MODEL_RESEARCH = "gemini-3.1-flash-lite"
 
 # BPMN / DataFlow diagram generation
-MODEL_BPMN = "gemini-3.1-pro-preview"
-MODEL_DATAFLOW = "gemini-3.1-pro-preview"
+MODEL_BPMN = "gemini-3.1-flash-lite"
+MODEL_DATAFLOW = "gemini-3.1-flash-lite"
 
 # SRS document compiler (legacy Word export pipeline)
-MODEL_SRS_COMPILER = "gemini-3.1-pro-preview"
+MODEL_SRS_COMPILER = "gemini-3.1-flash-lite"
 
 # ADK runner app name — used in InMemorySessionService calls
 APP_NAME = "rs_generator"
