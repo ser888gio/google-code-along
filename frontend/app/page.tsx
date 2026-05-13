@@ -419,7 +419,7 @@ function mergePartialFields(
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ChatPage() {
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const [messages, setMessages] = useState<Message[]>(() => [makeWelcomeMessage(t("welcome_message"))]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -461,6 +461,15 @@ export default function ChatPage() {
   const pendingDirectChatFieldRef = useRef<DirectChatFieldKey | null>(null);
 
   // ─── Audio Player ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length === 1 && prev[0]?.id === "welcome" && prev[0]?.role === "assistant") {
+        return [makeWelcomeMessage(t("welcome_message"))];
+      }
+      return prev;
+    });
+  }, [locale, t]);
+
   const audioPlayer = useAudioPlayer();
 
   // ─── WebSocket ─────────────────────────────────────────────────────────────
