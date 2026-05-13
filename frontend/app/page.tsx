@@ -940,10 +940,18 @@ export default function ChatPage() {
 
   const handleWsMessage = useCallback(
     (msg: WsServerMessage) => {
-      if (msg.type === "user_transcript") {
-        // User voice input transcription — show as user chat bubble
+      if (msg.type === "user_transcript_partial") {
+        // Live delta chunk — append to the streaming user bubble as they speak
         if (voiceUserTranscriptIdRef.current) {
           appendToMessage(voiceUserTranscriptIdRef.current, msg.text);
+        } else {
+          const id = addMessage("user", msg.text, true);
+          voiceUserTranscriptIdRef.current = id;
+        }
+      } else if (msg.type === "user_transcript") {
+        // Authoritative final text — replace the live bubble to heal any chunk drift
+        if (voiceUserTranscriptIdRef.current) {
+          replaceMessageText(voiceUserTranscriptIdRef.current, msg.text);
         } else {
           const id = addMessage("user", msg.text, true);
           voiceUserTranscriptIdRef.current = id;
@@ -1080,6 +1088,12 @@ export default function ChatPage() {
   function appendToMessage(id: string, chunk: string) {
     setMessages((prev) =>
       prev.map((m) => (m.id === id ? { ...m, text: m.text + chunk } : m))
+    );
+  }
+
+  function replaceMessageText(id: string, text: string) {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, text } : m))
     );
   }
 

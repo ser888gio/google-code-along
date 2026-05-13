@@ -128,13 +128,22 @@ async def _send_user_transcription(
     turn: VoiceTurnTranscripts,
     deps: AudioWebsocketDeps,
 ) -> None:
-    if not event.input_transcription or not event.input_transcription.text or event.partial:
+    if not event.input_transcription or not event.input_transcription.text:
         return
-    turn.user = event.input_transcription.text
-    clean = turn.user.strip()
-    if clean:
-        await _send_ws_json(websocket, {"type": "user_transcript", "text": clean})
-    deps.logger.debug(f"[WS] User transcription final ({len(clean)} chars): {clean[:100]}")
+    if event.partial:
+        # Delta chunk — stream as live caption while the user speaks.
+        chunk = event.input_transcription.text
+        if chunk and chunk.strip():
+            await _send_ws_json(websocket, {"type": "user_transcript_partial", "text": chunk})
+    else:
+        # Full accumulated text for the turn. Frontend replaces the live
+        # bubble with this authoritative string, then we keep it for the
+        # session_bridge injection at turn_complete.
+        turn.user = event.input_transcription.text
+        clean = turn.user.strip()
+        if clean:
+            await _send_ws_json(websocket, {"type": "user_transcript", "text": clean})
+        deps.logger.debug(f"[WS] User transcription final ({len(clean)} chars): {clean[:100]}")
 
 
 async def _send_assistant_transcription(

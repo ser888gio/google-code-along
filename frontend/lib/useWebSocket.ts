@@ -16,6 +16,11 @@ interface WsUserTranscriptMessage {
   text: string;
 }
 
+interface WsUserTranscriptPartialMessage {
+  type: "user_transcript_partial";
+  text: string;
+}
+
 interface WsTurnCompleteMessage {
   type: "turn_complete";
   finalizing?: boolean;
@@ -26,7 +31,7 @@ interface WsErrorMessage {
   message: string;
 }
 
-export type WsServerMessage = WsTextMessage | WsUserTranscriptMessage | WsTurnCompleteMessage | WsErrorMessage;
+export type WsServerMessage = WsTextMessage | WsUserTranscriptMessage | WsUserTranscriptPartialMessage | WsTurnCompleteMessage | WsErrorMessage;
 
 interface UseWebSocketReturn {
   /** Current connection state */
