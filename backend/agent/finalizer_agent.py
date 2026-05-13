@@ -140,6 +140,116 @@ def _record_model_usage(span: Any, session_id: str, usage: Any, elapsed: float) 
     record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
 
 
+async def _read_session_uploads_safely(session_id: str) -> dict:
+    """Load uploaded files, falling back to an empty set if GCS is unavailable."""
+    try:
+        uploads = await read_session_uploads(session_id)
+        file_count = len(uploads.get("files", []))
+        logger.debug(f"Session uploads loaded: session_id={session_id} files={file_count}")
+        return uploads
+    except Exception as exc:
+        logger.warning(f"read_session_uploads failed (continuing without): session_id={session_id} error={exc}")
+        return {"files": []}
+
+
+def _build_finalizer_contents(
+    conversation_text: str,
+    discovery_fields: dict,
+    research_context: str | None,
+    uploads: dict,
+) -> list[types.Content]:
+    """Assemble the Gemini request contents for final analysis generation."""
+    prompt_parts = [
+        types.Part.from_text(text=FINALIZER_SYSTEM_PROMPT),
+        types.Part.from_text(text=USER_DATA_GUARDRAIL),
+        types.Part.from_text(text=_format_conversation_transcript(conversation_text)),
+        types.Part.from_text(
+            text=(f"## Extracted Form Fields (22 fields)\n{json.dumps(discovery_fields, ensure_ascii=False, indent=2)}")
+        ),
+    ]
+    if research_context:
+        prompt_parts.append(
+            types.Part.from_text(
+                text=(f"## Research Context (from knowledge base / past analyses)\n{research_context}")
+            )
+        )
+    prompt_parts.extend(_build_uploaded_file_parts(uploads))
+    return [types.Content(role="user", parts=prompt_parts)]
+
+
+async def _generate_finalizer_response(session_id: str, contents: list[types.Content]) -> Any:
+    """Call Gemini and record observability data for the model request."""
+    logger.debug(f"Calling Gemini model={MODEL_FINALIZER} for final analysis: session_id={session_id}")
+    logger.info(f"Model call started: model={MODEL_FINALIZER} caller=run_finalizer session_id={session_id}")
+    tracer = trace.get_tracer("rs-generator")
+    started_at = time.perf_counter()
+    with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
+        span.set_attribute("gen_ai.operation.name", "generate_content")
+        span.set_attribute("gen_ai.system", "gemini")
+        span.set_attribute("gen_ai.request.model", MODEL_FINALIZER)
+        span.set_attribute("session_id", session_id)
+        span.set_attribute("phase", "finalize")
+        response = await asyncio.to_thread(
+            _genai_client.models.generate_content,
+            model=MODEL_FINALIZER,
+            contents=cast(Any, contents),
+        )
+        elapsed = time.perf_counter() - started_at
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            _record_model_usage(span, session_id, usage, elapsed)
+        else:
+            record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
+    logger.info(f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}")
+    return response
+
+
+def _extract_json_payload(raw_text: str) -> str:
+    """Strip an optional fenced code block from a model JSON response."""
+    raw = raw_text.strip()
+    if not raw.startswith("```"):
+        return raw
+
+    _, _, after_opening_fence = raw.partition("```")
+    fenced_content, closing_fence, _ = after_opening_fence.partition("```")
+    raw = fenced_content if closing_fence else after_opening_fence
+    raw = raw.strip()
+    if raw.startswith("json"):
+        raw = raw[4:]
+    return raw.strip()
+
+
+def _parse_finalizer_response(response: Any) -> dict:
+    """Parse the model response text into the final analysis dictionary."""
+    raw = _extract_json_payload(response.text or "")
+    return json.loads(raw)
+
+
+def _add_finalizer_metadata(result: dict, session_id: str, discovery_fields: dict) -> dict:
+    """Attach server-controlled metadata to the model output."""
+    result["_meta"] = {
+        "session_id": session_id,
+        "finalized_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "model": MODEL_FINALIZER,
+        "discovery_completeness": discovery_fields.get("completeness", 0),
+    }
+    return result
+
+
+async def _persist_finalizer_result(session_id: str, result: dict) -> None:
+    """Persist the final analysis to GCS and Firestore."""
+    await save_final_analysis(session_id, result)
+    await asyncio.to_thread(upsert_final_analysis, session_id, result)
+
+
+async def _mark_finalizer_failed(session_id: str) -> None:
+    """Best-effort status update after finalization fails."""
+    try:
+        await asyncio.to_thread(set_finalization_error, session_id)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Main entry point — called from main.py as an asyncio background task
 # ---------------------------------------------------------------------------
@@ -172,93 +282,19 @@ async def run_finalizer(
         f"Finalizer started: session_id={session_id} discovery_completeness={discovery_fields.get('completeness')}%"
     )
     try:
-        # 1. Read user-uploaded files from GCS (text files only; others noted by name)
-        try:
-            uploads = await read_session_uploads(session_id)
-            file_count = len(uploads.get("files", []))
-            logger.debug(f"Session uploads loaded: session_id={session_id} files={file_count}")
-        except Exception as exc:
-            logger.warning(f"read_session_uploads failed (continuing without): session_id={session_id} error={exc}")
-            uploads = {"files": []}
-
-        # 2. Assemble the full input context for the model. User-controlled text is
-        # wrapped as data and uploaded file contents are sent as separate parts.
-        prompt_parts = [
-            types.Part.from_text(text=FINALIZER_SYSTEM_PROMPT),
-            types.Part.from_text(text=USER_DATA_GUARDRAIL),
-            types.Part.from_text(text=_format_conversation_transcript(conversation_text)),
-            types.Part.from_text(
-                text=(
-                    "## Extracted Form Fields (22 fields)\n"
-                    f"{json.dumps(discovery_fields, ensure_ascii=False, indent=2)}"
-                )
-            ),
-        ]
-        if research_context:
-            prompt_parts.append(
-                types.Part.from_text(
-                    text=(f"## Research Context (from knowledge base / past analyses)\n{research_context}")
-                )
-            )
-        prompt_parts.extend(_build_uploaded_file_parts(uploads))
-        contents = [types.Content(role="user", parts=prompt_parts)]
-
-        # 3. Call Gemini Pro directly (not via ADK runner — background task, no ADK session)
-        logger.debug(f"Calling Gemini model={MODEL_FINALIZER} for final analysis: session_id={session_id}")
-        logger.info(f"Model call started: model={MODEL_FINALIZER} caller=run_finalizer session_id={session_id}")
-        tracer = trace.get_tracer("rs-generator")
-        _t0 = time.perf_counter()
-        with tracer.start_as_current_span("call_llm", kind=SpanKind.CLIENT) as span:
-            span.set_attribute("gen_ai.operation.name", "generate_content")
-            span.set_attribute("gen_ai.system", "gemini")
-            span.set_attribute("gen_ai.request.model", MODEL_FINALIZER)
-            span.set_attribute("session_id", session_id)
-            span.set_attribute("phase", "finalize")
-            response = await asyncio.to_thread(
-                _genai_client.models.generate_content,
-                model=MODEL_FINALIZER,
-                contents=cast(Any, contents),
-            )
-            elapsed = time.perf_counter() - _t0
-            usage = getattr(response, "usage_metadata", None)
-            if usage:
-                _record_model_usage(span, session_id, usage, elapsed)
-            else:
-                record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
-        logger.info(f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}")
-
-        # 4. Parse JSON output
-        raw = (response.text or "").strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
-        result = json.loads(raw)
-
-        # 5. Attach server-side metadata
-        result["_meta"] = {
-            "session_id": session_id,
-            "finalized_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "model": MODEL_FINALIZER,
-            "discovery_completeness": discovery_fields.get("completeness", 0),
-        }
-
-        # 6. Save full JSON to GCS — analyses/{session_id}/final_analysis.json
-        await save_final_analysis(session_id, result)
-
-        # 7. Update Firestore — sets finalization_status="complete" + stores JSON
-        await asyncio.to_thread(upsert_final_analysis, session_id, result)
+        uploads = await _read_session_uploads_safely(session_id)
+        contents = _build_finalizer_contents(conversation_text, discovery_fields, research_context, uploads)
+        response = await _generate_finalizer_response(session_id, contents)
+        result = _parse_finalizer_response(response)
+        result = _add_finalizer_metadata(result, session_id, discovery_fields)
+        await _persist_finalizer_result(session_id, result)
 
         logger.info(f"Finalizer complete: session_id={session_id}")
         return result
 
     except Exception as exc:
         logger.error(f"Finalizer failed: session_id={session_id} error={exc}")
-        try:
-            await asyncio.to_thread(set_finalization_error, session_id)
-        except Exception:
-            pass
+        await _mark_finalizer_failed(session_id)
         return None
 
 
