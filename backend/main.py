@@ -380,6 +380,7 @@ async def _prepare_workflow_turn(
         "value": None,
         "confidence": 0.0,
         "proactive_fields": {},
+        "coverage_gaps": [],
     }
 
     tail_text = _build_conversation_tail(session, req.message)
@@ -409,6 +410,12 @@ async def _prepare_workflow_turn(
         statuses = workflow["field_status"]
         miss_counts = workflow.setdefault("miss_counts", {})
         clarification_counts = workflow.setdefault("clarification_counts", {})
+        coverage_gaps_by_field = workflow.setdefault("coverage_gaps", {})
+        latest_gaps = list(classification.get("coverage_gaps") or [])
+        if latest_gaps:
+            coverage_gaps_by_field[previous_active] = latest_gaps
+        else:
+            coverage_gaps_by_field.pop(previous_active, None)
 
         if classification["classification"] == "answered":
             value = classification.get("value")
@@ -521,17 +528,27 @@ async def _prepare_workflow_turn(
     await loop.run_in_executor(None, upsert_workflow_state, session_id, workflow)
 
     answered_values = _answered_field_values(discovery_state, direct_fields)
+    active_field_for_ctx = workflow.get("active_field")
+    coverage_gaps_map = workflow.get("coverage_gaps") or {}
     workflow_context = {
         "phase": workflow.get("phase"),
-        "active_field": workflow.get("active_field"),
+        "active_field": active_field_for_ctx,
         "clarification_requested": classification["classification"]
         == "clarification_requested",
         "miss_count": int(
-            (workflow.get("miss_counts") or {}).get(workflow.get("active_field")) or 0
+            (workflow.get("miss_counts") or {}).get(active_field_for_ctx) or 0
         ),
         "answered_fields": answered_values,
         "deferred_fields": list(deferred_fields.keys()),
         "ready_to_finalize": workflow.get("phase") == "ready_to_finalize",
+        "active_field_coverage_gaps": list(
+            coverage_gaps_map.get(active_field_for_ctx) or []
+        ),
+        "previous_field_coverage_gaps": list(
+            coverage_gaps_map.get(previous_active) or []
+        )
+        if previous_active
+        else [],
     }
 
     return {

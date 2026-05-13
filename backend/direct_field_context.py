@@ -130,6 +130,17 @@ def _render_workflow_context(
             "- The user just asked for clarification. Explain the active field briefly, then ask again."
         )
 
+    active_gaps = context.get("active_field_coverage_gaps") or []
+    if isinstance(active_gaps, list) and active_gaps:
+        gap_phrases = ", ".join(str(g) for g in active_gaps if str(g).strip())
+        if gap_phrases:
+            lines.append(
+                "- The user's last answer did not fully cover this field. "
+                f"Missing aspects: {gap_phrases}. Ask one short, conversational "
+                "follow-up that targets the most important missing aspect. "
+                "Do NOT cite the rubric verbatim or list every missing item."
+            )
+
     miss_count = context.get("miss_count")
     if isinstance(miss_count, int) and miss_count >= 2:
         lines.append(

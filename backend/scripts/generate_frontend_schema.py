@@ -59,6 +59,10 @@ export interface FieldDef {{
   required: boolean;
   directInput?: boolean;
   multiline?: boolean;
+  validationMode?: "strict" | "soft";
+  expectedShape?: string;
+  exampleGood?: string;
+  rubric?: string[];
 }}
 
 export interface Section {{

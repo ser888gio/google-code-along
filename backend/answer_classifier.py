@@ -16,6 +16,7 @@ from field_schema import (
     DIRECT_FIELD_TERMS,
     FIELD_LABELS,
     FIELD_SCHEMA,
+    format_field_rubric_block,
 )
 from logger import get_logger
 from prompts.context import ACTIVE_FIELD_CLASSIFIER_PROMPT
@@ -36,6 +37,7 @@ class ClassifierResult(TypedDict):
     value: str | None
     confidence: float
     proactive_fields: dict[str, dict]
+    coverage_gaps: list[str]
 
 
 def normalize_for_match(value: str) -> str:
@@ -108,6 +110,7 @@ def _empty_result(classification: Classification = "not_answered") -> Classifier
         "value": None,
         "confidence": 0.0,
         "proactive_fields": {},
+        "coverage_gaps": [],
     }
 
 
@@ -131,6 +134,7 @@ async def classify_user_turn(
             "value": None,
             "confidence": 1.0,
             "proactive_fields": {},
+            "coverage_gaps": [],
         }
 
     if (
@@ -143,6 +147,7 @@ async def classify_user_turn(
             "value": clean_direct_answer_value(text),
             "confidence": 0.9,
             "proactive_fields": {},
+            "coverage_gaps": [],
         }
 
     if is_short_clarification_question(text):
@@ -151,6 +156,7 @@ async def classify_user_turn(
             "value": None,
             "confidence": 0.85,
             "proactive_fields": {},
+            "coverage_gaps": [],
         }
 
     return await _classify_with_llm(active_field, text, conversation_tail)
@@ -166,11 +172,13 @@ async def _classify_with_llm(
         from google import genai
 
         client = genai.Client(api_key=GOOGLE_API_KEY)
+        rubric_block = format_field_rubric_block(active_field) or "(no rubric defined)"
         prompt = (
             ACTIVE_FIELD_CLASSIFIER_PROMPT.replace("{active_field}", active_field)
             .replace(
                 "{active_field_label}", FIELD_LABELS.get(active_field, active_field)
             )
+            .replace("{active_field_rubric}", rubric_block)
             .replace(
                 "{field_labels_json}", json.dumps(FIELD_LABELS, ensure_ascii=False)
             )
@@ -227,6 +235,12 @@ async def _classify_with_llm(
             }
 
     value = active.get("value")
+    raw_gaps = active.get("coverage_gaps") or []
+    coverage_gaps: list[str] = [
+        str(gap).strip()
+        for gap in raw_gaps
+        if isinstance(gap, str) and str(gap).strip()
+    ]
     return {
         "classification": classification,
         "value": str(value).strip()
@@ -234,4 +248,5 @@ async def _classify_with_llm(
         else None,
         "confidence": float(active.get("confidence") or 0.0),
         "proactive_fields": proactive,
+        "coverage_gaps": coverage_gaps,
     }
