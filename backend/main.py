@@ -210,7 +210,9 @@ session_bridge = SessionBridge(
 # the ~40s extraction call can finish).
 # WeakValueDictionary so entries are evicted automatically once no request
 # holds a reference to the lock — no unbounded growth across sessions.
-_extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+_extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
 _session_started_at: dict[str, float] = {}
 _session_outcomes_recorded: set[str] = set()
 
@@ -1019,7 +1021,9 @@ async def chat_stream(req: ChatRequest):
                             _now = time.perf_counter()
                             if not _ttft_recorded:
                                 ttft = _now - _stream_t0
-                                record_ttft(ttft, model=MODEL_ORCHESTRATOR, phase="chat")
+                                record_ttft(
+                                    ttft, model=MODEL_ORCHESTRATOR, phase="chat"
+                                )
                                 set_stream_timings(ttft_ms=int(ttft * 1000))
                                 _ttft_recorded = True
                             _chunk_times.append(_now)

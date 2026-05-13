@@ -17,9 +17,9 @@ from field_schema import (
     FIELD_LABELS,
     FIELD_SCHEMA,
 )
-from solution_configs import get_field_rubric_block
 from logger import get_logger
 from prompts.context import ACTIVE_FIELD_CLASSIFIER_PROMPT
+from solution_configs import get_field_rubric_block
 from utils import format_prompt_data_lines
 
 logger = get_logger(__name__)
@@ -160,7 +160,9 @@ async def classify_user_turn(
             "coverage_gaps": [],
         }
 
-    return await _classify_with_llm(active_field, text, conversation_tail, solution_type)
+    return await _classify_with_llm(
+        active_field, text, conversation_tail, solution_type
+    )
 
 
 async def _classify_with_llm(
@@ -174,7 +176,9 @@ async def _classify_with_llm(
         from google import genai
 
         client = genai.Client(api_key=GOOGLE_API_KEY)
-        rubric_block = get_field_rubric_block(active_field, solution_type) or "(no rubric defined)"
+        rubric_block = (
+            get_field_rubric_block(active_field, solution_type) or "(no rubric defined)"
+        )
         prompt = (
             ACTIVE_FIELD_CLASSIFIER_PROMPT.replace("{active_field}", active_field)
             .replace(

@@ -30,7 +30,6 @@ from field_schema import (
     OPTIONAL_FIELDS,
     REQUIRED_FIELDS,
 )
-from solution_configs import get_all_field_shapes
 from google import genai
 from google.adk.agents import Agent
 from logger import get_logger
@@ -47,6 +46,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from prompts.agent import DISCOVERY_SYSTEM_PROMPT
 from prompts.context import DISCOVERY_EXTRACTION_PROMPT
+from solution_configs import get_all_field_shapes
 from utils import format_prompt_data_lines
 
 _genai_client = genai.Client(api_key=GOOGLE_API_KEY)
@@ -108,9 +108,7 @@ async def extract_discovery_fields(
         # that would cause a KeyError if str.format() tried to interpret them.
         prompt = DISCOVERY_EXTRACTION_PROMPT.replace(
             "{field_shapes}", get_all_field_shapes(solution_type)
-        ).replace(
-            "{conversation}", format_prompt_data_lines(conversation_text)
-        )
+        ).replace("{conversation}", format_prompt_data_lines(conversation_text))
         logger.info(
             "Model call started: "
             f"model={MODEL_DISCOVERY} caller=extract_discovery_fields"

@@ -514,7 +514,6 @@ def build_sections() -> list[dict[str, Any]]:
     return sections
 
 
-
 RS_TEMPLATE_SECTIONS = [
     (
         section["number"],

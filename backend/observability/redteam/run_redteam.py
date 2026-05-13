@@ -151,8 +151,8 @@ async def _probe(
 
 async def run() -> int:
     import httpx
-
     from logger import setup_logging
+
     from observability.tracing import setup_telemetry
 
     setup_logging()

@@ -46,9 +46,7 @@ def setup_telemetry(app=None) -> None:  # noqa: ANN001
     try:
         from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
 
-        tracer_provider.add_span_processor(
-            BatchSpanProcessor(CloudTraceSpanExporter())
-        )
+        tracer_provider.add_span_processor(BatchSpanProcessor(CloudTraceSpanExporter()))
     except Exception:
         # Credentials not available (local dev) — traces are still collected
         # in memory; they just won't be exported.

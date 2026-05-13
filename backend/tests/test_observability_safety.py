@@ -1,5 +1,4 @@
 import pytest
-
 from observability import safety
 from observability.redteam.run_redteam import build_prompt_suite
 from observability.safety_anomalies import anomaly_reason

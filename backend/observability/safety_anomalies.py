@@ -9,9 +9,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-_TABLE_ID_RE = re.compile(
-    r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$"
-)
+_TABLE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
 
 def _hash_id(value: str) -> str:
@@ -60,8 +58,8 @@ def _lookback_hours() -> int:
 
 def run() -> int:
     from google.cloud import bigquery
-
     from logger import setup_logging
+
     from observability.tracing import setup_telemetry
 
     setup_logging()

@@ -32,9 +32,7 @@ BIGQUERY_FEEDBACK_VIEW: str = os.getenv(
     "BIGQUERY_FEEDBACK_VIEW",
     f"{GCP_PROJECT}.{BIGQUERY_DATASET}.feedback" if GCP_PROJECT else "",
 )
-COST_CIRCUIT_BREAKER_USD: float = float(
-    os.getenv("COST_CIRCUIT_BREAKER_USD", "5.0")
-)
+COST_CIRCUIT_BREAKER_USD: float = float(os.getenv("COST_CIRCUIT_BREAKER_USD", "5.0"))
 
 APP_ENV: str = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
 _PRODUCTION_ENVS = {"production", "prod", "staging"}

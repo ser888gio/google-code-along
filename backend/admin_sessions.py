@@ -232,8 +232,7 @@ def get_admin_session(session_id: str) -> dict[str, Any] | None:
         [bigquery.ScalarQueryParameter("session_id", "STRING", session_id)]
     )
     rows = [
-        _row_dict(row)
-        for row in client.query(query, job_config=job_config).result()
+        _row_dict(row) for row in client.query(query, job_config=job_config).result()
     ]
     if not rows:
         return None

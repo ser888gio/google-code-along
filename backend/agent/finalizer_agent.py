@@ -155,7 +155,9 @@ async def run_finalizer(
         prompt_parts = [
             types.Part.from_text(text=FINALIZER_SYSTEM_PROMPT),
             types.Part.from_text(text=USER_DATA_GUARDRAIL),
-            types.Part.from_text(text=_format_conversation_transcript(conversation_text)),
+            types.Part.from_text(
+                text=_format_conversation_transcript(conversation_text)
+            ),
             types.Part.from_text(
                 text=(
                     "## Extracted Form Fields (22 fields)\n"
@@ -207,16 +209,36 @@ async def run_finalizer(
                 cost_usd = compute_cost(MODEL_FINALIZER, usage)
                 span.set_attribute("cost_usd", cost_usd)
                 sid_hash = hashlib.sha256(session_id.encode()).hexdigest()[:16]
-                record_tokens(input_tokens, model=MODEL_FINALIZER, token_type="input", feature="finalize")
-                record_tokens(output_tokens, model=MODEL_FINALIZER, token_type="output", feature="finalize")
+                record_tokens(
+                    input_tokens,
+                    model=MODEL_FINALIZER,
+                    token_type="input",
+                    feature="finalize",
+                )
+                record_tokens(
+                    output_tokens,
+                    model=MODEL_FINALIZER,
+                    token_type="output",
+                    feature="finalize",
+                )
                 if cache_read:
-                    record_tokens(cache_read, model=MODEL_FINALIZER, token_type="cache_read", feature="finalize")
+                    record_tokens(
+                        cache_read,
+                        model=MODEL_FINALIZER,
+                        token_type="cache_read",
+                        feature="finalize",
+                    )
                 record_cache_hit_ratio(
                     model=MODEL_FINALIZER,
                     input_tokens=input_tokens,
                     cache_read_tokens=cache_read,
                 )
-                record_cost(cost_usd, model=MODEL_FINALIZER, feature="finalize", session_id_hash=sid_hash)
+                record_cost(
+                    cost_usd,
+                    model=MODEL_FINALIZER,
+                    feature="finalize",
+                    session_id_hash=sid_hash,
+                )
                 record_model_call(
                     model=MODEL_FINALIZER,
                     feature="finalize",
@@ -226,7 +248,12 @@ async def run_finalizer(
                     cost_usd=cost_usd,
                 )
                 add_session_cost(session_id, cost_usd)
-            record_operation_duration(elapsed, model=MODEL_FINALIZER, operation="generate_content", status="ok")
+            record_operation_duration(
+                elapsed,
+                model=MODEL_FINALIZER,
+                operation="generate_content",
+                status="ok",
+            )
         logger.info(
             f"Model call completed: model={MODEL_FINALIZER} elapsed={elapsed:.2f}s session_id={session_id}"
         )
