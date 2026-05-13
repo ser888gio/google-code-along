@@ -713,6 +713,169 @@ function ChatInput({
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
+function FileUploadModal({
+  open,
+  sessionId,
+  onClose,
+  onUploaded,
+}: {
+  open: boolean;
+  sessionId: string | null;
+  onClose: () => void;
+  onUploaded: (file: UploadedFile) => void;
+}) {
+  const { t } = useLocale();
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={onClose}
+    >
+      <div
+        className="w-80 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-sm font-semibold text-gray-800">{t("modal.attach_file")}</span>
+          <button
+            onClick={onClose}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            x
+          </button>
+        </div>
+        <FileUpload sessionId={sessionId} onUploaded={onUploaded} />
+      </div>
+    </div>
+  );
+}
+
+function SessionRatingModal({
+  open,
+  rating,
+  comment,
+  submitting,
+  onClose,
+  onRatingChange,
+  onCommentChange,
+  onSubmit,
+}: {
+  open: boolean;
+  rating: SessionRating | null;
+  comment: string;
+  submitting: boolean;
+  onClose: () => void;
+  onRatingChange: (rating: SessionRating) => void;
+  onCommentChange: (comment: string) => void;
+  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+}) {
+  const { t } = useLocale();
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={() => !submitting && onClose()}
+    >
+      <form
+        onSubmit={onSubmit}
+        className="w-90 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-800">{t("modal.rate_session")}</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              {t("modal.rate_desc")}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={onClose}
+            className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
+          >
+            x
+          </button>
+        </div>
+
+        <div className="grid grid-cols-5 gap-2">
+          {SESSION_RATINGS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onRatingChange(option)}
+              className={`h-10 rounded border text-sm font-semibold transition-colors ${
+                rating === option
+                  ? "border-[#4a6659] bg-[#edf5ef] text-[#1a3a2a]"
+                  : "border-gray-200 text-gray-500 hover:border-gray-300"
+              }`}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+
+        <textarea
+          value={comment}
+          onChange={(e) => onCommentChange(e.target.value)}
+          placeholder={t("feedback.optional_comment")}
+          rows={3}
+          className="mt-3 min-h-24 w-full resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
+        />
+
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={onClose}
+            className="rounded border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {t("btn.cancel")}
+          </button>
+          <button
+            type="submit"
+            disabled={!rating || submitting}
+            className="rounded bg-[#4a6659] px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? t("modal.saving") : t("modal.end_chat")}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ChatTranscript({
+  messages,
+  sessionId,
+  bottomRef,
+  onFeedback,
+  onFeedbackComment,
+}: {
+  messages: Message[];
+  sessionId: string | null;
+  bottomRef: React.RefObject<HTMLDivElement | null>;
+  onFeedback: (localId: string, vote: FeedbackVote) => Promise<void>;
+  onFeedbackComment: (localId: string, comment: string) => Promise<void>;
+}) {
+  return (
+    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      {messages.map((msg) => (
+        <MessageBubble
+          key={msg.id}
+          msg={msg}
+          sessionId={sessionId}
+          onFeedback={onFeedback}
+          onFeedbackComment={onFeedbackComment}
+        />
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  );
+}
+
 export default function ChatPage() {
   const { locale, t } = useLocale();
   const [messages, setMessages] = useState<Message[]>(() => [makeWelcomeMessage(t("welcome_message"))]);
@@ -1381,19 +1544,13 @@ export default function ChatPage() {
           onToggleVoice={handleToggleVoice}
         />
 
-        {/* Message thread */}
-        <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-          {messages.map((msg) => (
-            <MessageBubble
-              key={msg.id}
-              msg={msg}
-              sessionId={sessionId}
-              onFeedback={handleFeedback}
-              onFeedbackComment={handleFeedbackComment}
-            />
-          ))}
-          <div ref={bottomRef} />
-        </div>
+        <ChatTranscript
+          messages={messages}
+          sessionId={sessionId}
+          bottomRef={bottomRef}
+          onFeedback={handleFeedback}
+          onFeedbackComment={handleFeedbackComment}
+        />
 
         {/* Input area */}
         <ChatInput
@@ -1439,79 +1596,16 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* End chat rating modal */}
-        {ratingOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-            onClick={() => !isSubmittingSessionRating && setRatingOpen(false)}
-          >
-            <form
-              onSubmit={handleSessionRatingSubmit}
-              className="w-90 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-sm font-semibold text-gray-800">{t("modal.rate_session")}</h2>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {t("modal.rate_desc")}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  disabled={isSubmittingSessionRating}
-                  onClick={() => setRatingOpen(false)}
-                  className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
-                >
-                  x
-                </button>
-              </div>
-
-              <div className="grid grid-cols-5 gap-2">
-                {SESSION_RATINGS.map((rating) => (
-                  <button
-                    key={rating}
-                    type="button"
-                    onClick={() => setSessionRating(rating)}
-                    className={`h-10 rounded border text-sm font-semibold transition-colors ${
-                      sessionRating === rating
-                        ? "border-[#4a6659] bg-[#edf5ef] text-[#1a3a2a]"
-                        : "border-gray-200 text-gray-500 hover:border-gray-300"
-                    }`}
-                  >
-                    {rating}
-                  </button>
-                ))}
-              </div>
-
-              <textarea
-                value={sessionRatingComment}
-                onChange={(e) => setSessionRatingComment(e.target.value)}
-                placeholder={t("feedback.optional_comment")}
-                rows={3}
-                className="mt-3 min-h-24 w-full resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
-              />
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  disabled={isSubmittingSessionRating}
-                  onClick={() => setRatingOpen(false)}
-                  className="rounded border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  {t("btn.cancel")}
-                </button>
-                <button
-                  type="submit"
-                  disabled={!sessionRating || isSubmittingSessionRating}
-                  className="rounded bg-[#4a6659] px-3 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {isSubmittingSessionRating ? t("modal.saving") : t("modal.end_chat")}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
+        <SessionRatingModal
+          open={ratingOpen}
+          rating={sessionRating}
+          comment={sessionRatingComment}
+          submitting={isSubmittingSessionRating}
+          onClose={() => setRatingOpen(false)}
+          onRatingChange={setSessionRating}
+          onCommentChange={setSessionRatingComment}
+          onSubmit={handleSessionRatingSubmit}
+        />
 
         {/* Disclaimer */}
         <div className="shrink-0 px-4 py-1.5 text-center">
