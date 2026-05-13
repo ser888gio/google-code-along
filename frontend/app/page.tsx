@@ -597,7 +597,7 @@ function ChatInput({
   isRecording: boolean;
   isPlaying: boolean;
   recorderError: string | null;
-  textareaRef: React.RefObject<HTMLTextAreaElement>;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   onInputChange: (value: string) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void;
