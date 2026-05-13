@@ -6,6 +6,7 @@ import os
 import time
 import uuid
 import weakref
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import partial
@@ -797,6 +798,38 @@ async def _agent_stream_events(
         yield _sse_event({"error": "An internal error occurred. Please try again."})
 
 
+async def _keepalive_merged(
+    agent_gen: AsyncIterator[str],
+    interval: float = 20.0,
+) -> AsyncIterator[str]:
+    """Interleave SSE keepalive comments with agent events to prevent Cloud Run idle-stream timeouts."""
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def drain_agent() -> None:
+        async for event in agent_gen:
+            await queue.put(event)
+        await queue.put(None)
+
+    async def keepalive_ticker() -> None:
+        while True:
+            await asyncio.sleep(interval)
+            await queue.put(": keepalive\n\n")
+
+    agent_task = asyncio.create_task(drain_agent())
+    ticker_task = asyncio.create_task(keepalive_ticker())
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
+    finally:
+        ticker_task.cancel()
+        agent_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await agent_task
+
+
 async def _chat_stream_event_generator(
     *,
     req: ChatRequest,
@@ -831,11 +864,13 @@ async def _chat_stream_event_generator(
         return
 
     stream_state = StreamReplyState()
-    async for stream_event in _agent_stream_events(
-        req=req,
-        user_content=user_content,
-        session_id=session_id,
-        state=stream_state,
+    async for stream_event in _keepalive_merged(
+        _agent_stream_events(
+            req=req,
+            user_content=user_content,
+            session_id=session_id,
+            state=stream_state,
+        )
     ):
         yield stream_event
 
