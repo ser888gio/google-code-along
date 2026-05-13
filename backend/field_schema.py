@@ -7,23 +7,23 @@ same source.
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, Required, TypedDict
 
 
-class FieldDef(TypedDict, total=False):
-    label: str
-    required: bool
-    section: int
-    direct_input: bool
-    ai_extractable: bool
-    multiline: bool
-    direct_chat: bool
-    match_terms: list[str]
-    direct_chat_patterns: list[str]
-    validation_mode: str
-    expected_shape: str
-    example_good: str
-    rubric: list[str]
+class FieldDef(TypedDict):
+    label: Required[str]
+    required: Required[bool]
+    section: Required[int]
+    direct_input: NotRequired[bool]
+    ai_extractable: NotRequired[bool]
+    multiline: NotRequired[bool]
+    direct_chat: NotRequired[bool]
+    match_terms: NotRequired[list[str]]
+    direct_chat_patterns: NotRequired[list[str]]
+    validation_mode: NotRequired[str]
+    expected_shape: NotRequired[str]
+    example_good: NotRequired[str]
+    rubric: NotRequired[list[str]]
 
 
 SECTION_TITLES: dict[int, str] = {
