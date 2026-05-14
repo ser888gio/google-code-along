@@ -2,494 +2,517 @@
 
 ## Overview
 
-The backend is a **Python 3.12 FastAPI** application that orchestrates the AI agents, manages session state, handles document generation, and exposes REST and WebSocket endpoints consumed by the frontend. It is built on top of **Google Agent Development Kit (ADK)** and talks to Gemini models directly via the `GOOGLE_API_KEY`.
+The backend is a Python 3.12 FastAPI service that runs the conversational RS assistant, manages session state, stores uploaded artifacts, extracts RS template fields, generates diagrams and documents, and exposes admin/observability endpoints for the frontend.
 
----
+The service uses Google ADK for the main chat and audio agents. Some specialized jobs call Gemini directly through `google.genai.Client(api_key=GOOGLE_API_KEY)`, including discovery extraction, finalization, BPMN generation, and dataflow generation. Vertex AI inference is explicitly disabled through `GOOGLE_GENAI_USE_VERTEXAI=0`.
 
 ## Technology Stack
 
 | Technology | Version | Purpose |
-|---|---|---|
-| Python | 3.12 | Runtime |
-| FastAPI | 0.136.1+ | HTTP framework and WebSocket server |
-| uvicorn | 0.46.0+ | ASGI server |
-| google-adk | 1.31.1+ | Agent orchestration framework (mandatory) |
-| google-generativeai | 0.8.6+ | Gemini API client |
-| google-cloud-firestore | 2.27.0+ | Session persistence |
-| google-cloud-storage | 3.4.1+ | File storage and knowledge base |
-| reportlab | 4.4.10+ | PDF document generation |
-| python-docx | 1.2.0+ | Word document generation |
-| opentelemetry-* | 0.59b0+ | Distributed tracing and metrics |
-| python-dotenv | 1.2.2+ | Environment variable loading |
-| ruff | 0.9.0+ | Linting and formatting (dev) |
+|---|---:|---|
+| Python | >=3.12 | Runtime |
+| FastAPI | 0.136.1 | HTTP API and WebSocket server |
+| uvicorn | 0.46.0 | ASGI server |
+| google-adk | 1.31.1 | ADK agent runtime and sessions |
+| google-genai | 1.73.1 | Direct Gemini API calls |
+| google-generativeai | 0.8.6 | Gemini dependency/client package |
+| google-cloud-firestore | 2.27.0 | Session, discovery, feedback, and analysis persistence |
+| google-cloud-storage | 3.4.1 | Uploads, generated artifacts, and knowledge base files |
+| google-cloud-bigquery | 3.41.0 | Admin metrics/session queries |
+| python-multipart | 0.0.27 | Multipart upload handling |
+| reportlab | 4.4.10 | PDF generation |
+| python-docx | 1.2.0 | DOCX generation |
+| opentelemetry-instrumentation-fastapi | 0.59b0 | FastAPI instrumentation |
+| opentelemetry-exporter-gcp-trace | 1.11.0 | Cloud Trace export |
+| python-dotenv | 1.2.2 | Local `.env` loading |
+| ruff | >=0.9.0 | Development linting/formatting |
 
-**Package manager:** `uv` (lock file: `uv.lock`)
-**Virtual environment:** `backend/.venv`
-
----
+Dependencies are managed with `uv` at the repository root. `backend/requirements.txt` is generated from `uv.lock` for the Docker build.
 
 ## Directory Structure
 
-```
+```text
 backend/
-├── agent/
-│   ├── agent.py              # ADK agent instances (orchestrator + audio)
-│   ├── discovery_agent.py    # Per-turn field extraction agent
-│   ├── finalizer_agent.py    # RS compilation agent
-│   ├── research_agent.py     # GCS knowledge base retrieval tools
-│   ├── prompt.py             # System prompt for the orchestrator
-│   └── __init__.py
-├── generation/
-│   ├── compiler.py           # Chat history → structured RS JSON
-│   ├── pdf_export.py         # RS JSON → PDF (reportlab)
-│   ├── word_export.py        # RS JSON → DOCX (python-docx)
-│   ├── srs_compiler.py       # Legacy SRS format support
-│   └── __init__.py
-├── bpmn/
-│   ├── generator.py          # Gemini prompt → BPMN Mermaid syntax
-│   ├── prompts.py
-│   └── __init__.py
-├── dataflow/
-│   ├── generator.py          # Gemini prompt → Dataflow Mermaid syntax
-│   ├── prompts.py
-│   └── __init__.py
-├── context/
-│   ├── extractor.py          # Uploaded file → extracted context (Gemini vision)
-│   ├── prompts.py
-│   └── __init__.py
-├── firestore/
-│   ├── writer.py             # Firestore read/write for all session data
-│   └── __init__.py
-├── gcs/
-│   ├── connector.py          # GCS bucket I/O and knowledge base keyword search
-│   └── __init__.py
-├── observability/
-│   ├── callbacks.py          # ADK before/after hooks for logging
-│   ├── cost.py               # Per-turn token and USD cost tracking
-│   ├── metrics.py            # OpenTelemetry metric definitions
-│   ├── safety.py             # Jailbreak and adversarial input detection
-│   ├── safety_anomalies.py   # BigQuery-backed anomaly detection
-│   ├── tracing.py            # Distributed tracing setup
-│   ├── turns.py              # Turn-level metrics aggregation
-│   ├── redteam/
-│   │   └── run_redteam.py    # Adversarial testing harness
-│   └── __init__.py
-├── privacy/
-│   ├── redactor.py           # PII redaction rules applied to stored data
-│   └── __init__.py
-├── prompts/
-│   ├── agent.py              # Orchestrator persona system prompt
-│   ├── bpmn.py               # BPMN generation prompt
-│   ├── dataflow.py           # Dataflow generation prompt
-│   ├── context.py            # File context extraction prompt
-│   ├── srs.py                # RS compilation prompt
-│   └── __init__.py
-├── scripts/
-│   └── generate_frontend_schema.py   # Codegen: field_schema.py → rsSchema.ts
-├── tests/
-│   ├── conftest.py
-│   ├── test_agent_prompts.py
-│   ├── test_api_integration.py
-│   ├── test_compiler.py
-│   ├── test_diagram_prompts.py
-│   ├── test_e2e_smoke.py
-│   ├── test_finalizer_agent.py
-│   ├── test_observability_*.py
-│   ├── test_pdf_export.py
-│   ├── test_one_field_workflow.py
-│   └── __init__.py
-├── main.py                   # FastAPI application entry point
-├── field_schema.py           # CANONICAL RS field definitions (single source of truth)
-├── config.py                 # All environment config loaded once at startup
-├── admin_sessions.py         # Admin API: list/get sessions and metrics
-├── answer_classifier.py      # Detects when user directly answers a field question
-├── answer_quality.py         # Scores quality of extracted field answers
-├── audio_websocket.py        # Gemini Live API WebSocket handler (voice mode)
-├── direct_field_context.py   # Augments user messages with direct-input field context
-├── session_bridge.py         # Session state management helpers
-├── solution_configs.py       # Preset solution architecture configurations
-├── logger.py                 # Centralized logging setup
-├── utils.py                  # Miscellaneous utilities
-├── requirements.txt          # Pinned dependencies (generated from uv.lock)
-├── .env.example              # Environment variable template
-└── Dockerfile                # Python 3.12-slim container
+|-- agent/
+|   |-- agent.py              # ADK orchestrator and audio agent definitions
+|   |-- discovery_agent.py    # Field extraction and one-field workflow helpers
+|   |-- finalizer_agent.py    # Final analysis synthesis
+|   |-- prompt.py             # Orchestrator system prompt
+|   `-- research_agent.py     # Knowledge base / past analysis tools
+|-- admin_sessions.py         # Admin metrics and session detail queries
+|-- answer_classifier.py      # Detects whether a user answered the active field
+|-- answer_quality.py         # Scores field-answer quality
+|-- audio_websocket.py        # Gemini Live API WebSocket bridge
+|-- bigquery/                 # BigQuery support package
+|-- bpmn/
+|   |-- generator.py          # Gemini -> Mermaid BPMN/flowchart text
+|   `-- prompts.py
+|-- config.py                 # Environment, model names, and runtime constants
+|-- context/
+|   |-- extractor.py          # Legacy upload-context extraction helpers
+|   `-- prompts.py
+|-- dataflow/
+|   |-- generator.py          # Gemini -> Mermaid dataflow text
+|   `-- prompts.py
+|-- direct_field_context.py   # Injects direct/deferred field context into turns
+|-- field_schema.py           # Canonical RS field schema
+|-- firestore/
+|   `-- writer.py             # Firestore read/write helpers
+|-- gcs/
+|   `-- connector.py          # Bucket I/O and knowledge-base listing/search
+|-- generation/
+|   |-- compiler.py           # Legacy chat history -> structured SRS JSON
+|   |-- pdf_export.py         # Markdown -> PDF export
+|   |-- srs_compiler.py       # Legacy four-block SRS compiler
+|   `-- word_export.py        # RS template and legacy SRS DOCX export
+|-- logger.py                 # Central logging setup
+|-- main.py                   # FastAPI app entry point
+|-- observability/
+|   |-- callbacks.py          # ADK callback instrumentation
+|   |-- cost.py               # Token/cost estimation helpers
+|   |-- metrics.py            # OpenTelemetry metric definitions
+|   |-- safety.py             # Prompt-risk and cost circuit breaker checks
+|   |-- safety_anomalies.py   # BigQuery-backed anomaly helper queries
+|   |-- tracing.py            # Trace setup helpers
+|   |-- turns.py              # Turn-level metric aggregation
+|   `-- redteam/run_redteam.py
+|-- privacy/
+|   `-- redactor.py           # PII redaction before persistence
+|-- prompts/                  # Legacy/shared prompt modules
+|-- scripts/
+|   `-- generate_frontend_schema.py
+|-- session_bridge.py         # Session helper utilities
+|-- solution_configs.py       # Preset solution architecture configs
+|-- tests/
+|-- Dockerfile
+|-- requirements.txt
+`-- .env.example
 ```
 
----
+## Runtime Configuration
 
-## Environment Variables
+`config.py` loads `.env` on import. The checked-in `backend/.env.example` currently lists only the core local variables, so deployment environments must also provide the optional production/admin variables below when needed.
 
-Copy `backend/.env.example` to `backend/.env`.
+| Variable | Required | Default | Used for |
+|---|---|---|---|
+| `GOOGLE_API_KEY` | Yes | None | Gemini API and ADK model access |
+| `GOOGLE_CLOUD_PROJECT` | Production/staging | None | Firestore, BigQuery, Cloud Trace links |
+| `GCS_BUCKET_NAME` | Production/staging | None | Uploads, generated docs, knowledge base |
+| `FIRESTORE_COLLECTION` | Production/staging | None | Main session collection |
+| `FIRESTORE_DATABASE` | Production/staging | None | Firestore database ID |
+| `ALLOWED_ORIGINS` | No | `http://localhost:3000` | CORS allow-list, comma-separated |
+| `APP_ENV` / `ENVIRONMENT` | No | `development` | Startup validation and admin auth behavior |
+| `ADMIN_BEARER_TOKEN` | Production/staging admin access | None | Static bearer token fallback for admin API |
+| `BIGQUERY_DATASET` | No | `observability` | Admin BigQuery dataset |
+| `BIGQUERY_MESSAGES_VIEW` | No | `{project}.{dataset}.messages` | Admin session/message view |
+| `BIGQUERY_FEEDBACK_VIEW` | No | `{project}.{dataset}.feedback` | Admin feedback view |
+| `COST_CIRCUIT_BREAKER_USD` | No | `5.0` | Per-session in-memory cost limit |
+| `GOOGLE_CLOUD_AUDIO_REGION` | No | `europe-west1` | Audio-region constant |
+| `GOOGLE_CLOUD_REGION` | In `.env.example` | None | Present in example; not read directly by `config.py` |
 
-| Variable | Required | Description |
+Startup validation is environment-dependent:
+
+- In `development`, only `GOOGLE_API_KEY` is mandatory. Missing GCP, GCS, or Firestore variables produce warnings and fail only when those integrations are used.
+- In `staging` or `production`, `GOOGLE_API_KEY`, `GOOGLE_CLOUD_PROJECT`, `GCS_BUCKET_NAME`, `FIRESTORE_COLLECTION`, and `FIRESTORE_DATABASE` are required.
+- Admin endpoints allow access without `ADMIN_BEARER_TOKEN` only in non-production environments. Production/staging requires either a valid IAP header or `Authorization: Bearer <ADMIN_BEARER_TOKEN>`.
+
+## Model Configuration
+
+All model names live in `config.py`.
+
+| Constant | Current value | Used by |
 |---|---|---|
-| `GOOGLE_API_KEY` | Yes | Gemini API key (direct, not Vertex AI) |
-| `GOOGLE_CLOUD_PROJECT` | Yes | GCP project ID |
-| `GOOGLE_CLOUD_REGION` | Yes | GCP region (e.g., `europe-west4`) |
-| `GCS_BUCKET_NAME` | Yes | Cloud Storage bucket for sessions and knowledge base |
-| `FIRESTORE_COLLECTION` | Yes | Firestore collection name (e.g., `srs_sessions`) |
-| `FIRESTORE_DATABASE` | Yes | Firestore database ID |
-| `ADMIN_BEARER_TOKEN` | Yes | Static bearer token for the admin API |
-| `APP_ENV` | No | `development` / `staging` / `production` (default: `development`) |
-| `BIGQUERY_DATASET` | No | BigQuery dataset for observability (default: `observability`) |
-| `GOOGLE_APPLICATION_CREDENTIALS` | In containers | Path to GCP service account JSON |
+| `MODEL_AUDIO` | `gemini-3.1-flash-live-preview` | Gemini Live/audio agent |
+| `MODEL_ORCHESTRATOR` | `gemini-3.1-pro-preview` | Main ADK chat agent |
+| `MODEL_FINALIZER` | `gemini-3.1-pro-preview` | Final analysis synthesis |
+| `MODEL_DISCOVERY` | `gemini-3.1-flash-lite` | Field extraction |
+| `MODEL_RESEARCH` | `gemini-3.1-flash-lite` | Reserved/configured for research features |
+| `MODEL_BPMN` | `gemini-3.1-flash-lite` | BPMN diagram generation |
+| `MODEL_DATAFLOW` | `gemini-3.1-flash-lite` | Dataflow diagram generation |
+| `MODEL_SRS_COMPILER` | `gemini-3.1-flash-lite` | Legacy SRS compiler |
 
----
+## Canonical Field Schema
 
-## Models
+`field_schema.py` is the single source of truth for RS template fields and drives both backend behavior and frontend generated TypeScript schema.
 
-All models are configured in `config.py`:
+Current schema shape:
 
-| Agent | Model | Reason |
-|---|---|---|
-| Orchestrator | `gemini-2.5-pro-preview` | Large context window; holds full conversation history |
-| Finalizer | `gemini-2.5-pro-preview` | Complex synthesis from long input |
-| Discovery | `gemini-2.0-flash-lite` | Fast, cheap; runs after every turn |
-| Research | `gemini-2.0-flash-lite` | Fast retrieval from GCS knowledge base |
-| Audio | `gemini-2.0-flash-live-001` | Bidirectional streaming for voice mode |
-| BPMN / Dataflow | `gemini-2.0-flash-lite` | Diagram syntax generation |
+- 28 total fields.
+- 20 required fields.
+- 8 optional fields.
+- 9 direct-input fields.
+- 5 strict direct-input fields.
+- 4 suggestable direct-chat fields.
+- 6 sections: identity/current state, target state, value/ROI, priority/risk, technical context, and additional information.
 
----
-
-## Field Schema (`field_schema.py`)
-
-This is the **single source of truth** for every RS field. All other systems (backend logic, frontend UI) derive from it.
-
-### Sections (6 total)
-
-| # | Section Name |
-|---|---|
-| 1 | Identity & Current State |
-| 2 | Target State |
-| 3 | Value & ROI |
-| 4 | Priority & Risk |
-| 5 | Technical Context |
-| 6 | Additional |
-
-### Fields (22+ total)
-
-Each field is defined with:
-
-| Attribute | Type | Description |
-|---|---|---|
-| `label` | str | Human-readable display name |
-| `required` | bool | Whether field is mandatory for a complete RS |
-| `section` | int | Section number (1–6) |
-| `direct_input` | bool | User can fill this directly (not AI-extracted) |
-| `ai_extractable` | bool | AI can infer value from conversation |
-| `multiline` | bool | Textarea vs single-line input |
-| `match_terms` | list[str] | Keywords that trigger field detection |
-| `validation_mode` | str | `"soft"` (advisory) or `"strict"` (blocking) |
-| `expected_shape` | str | Description of what a valid answer looks like |
-| `example_good` | str | Positive example for the LLM rubric |
-| `rubric` | str | Scoring criteria for answer quality |
-
-### Key Utility Exports
+Important exports include:
 
 ```python
-SECTION_TITLES: dict[int, str]
-FIELD_SCHEMA: dict[str, FieldDefinition]
-EMPTY_FIELDS: dict[str, None]     # Initialized empty state
-FIELD_LABELS: dict[str, str]      # key → display label
-DIRECT_FIELD_KEYS: list[str]      # Fields user fills directly
-
-def build_sections() -> list[Section]: ...  # Ordered section metadata with nested fields
+SECTION_TITLES
+FIELD_SCHEMA
+EMPTY_FIELDS
+FIELD_LABELS
+REQUIRED_FIELDS
+DIRECT_FIELD_KEYS
+STRICT_DIRECT_INPUT_KEYS
+SUGGESTABLE_DIRECT_CHAT_FIELD_KEYS
+build_sections()
+is_required_complete()
+calculate_completeness()
+normalize_discovery_state()
 ```
 
-**Deferred answer patterns** (Czech + English): phrases like `"nevím"`, `"don't know"`, `"N/A"`, `"later"` — when detected, the field is marked deferred and skipped in the current turn.
+`scripts/generate_frontend_schema.py` converts this Python schema into `frontend/app/generated/rsSchema.ts`. Regenerate the frontend schema after any field changes.
 
----
-
-## Agent Architecture
-
-The backend uses **Google ADK** as the mandatory orchestration layer. Three specialized agents cooperate:
-
-### 1. Orchestrator Agent (`agent/agent.py`)
-
-```python
-rs_agent = Agent(
-    name="business_analyst_orchestrator",
-    model="gemini-2.5-pro-preview",
-    instruction=ORCHESTRATOR_SYSTEM_PROMPT,
-    tools=[search_past_analyses, list_knowledge_base_docs],
-    before_model_callback=before_model_cb,
-    after_model_callback=after_model_cb,
-)
+```powershell
+cd backend
+..\.venv\Scripts\python.exe scripts\generate_frontend_schema.py
 ```
 
-- Drives the conversational interview across Phase 1, 2, and 3
-- Holds the full chat history in context
-- Calls research tools to ground responses in historical RS examples
-- Emits `[FINALIZING]` and `[GENERATE_RS]` markers to trigger downstream processing
+Adjust the Python path to match the active virtual environment.
 
-### 2. Discovery Agent (`agent/discovery_agent.py`)
+## Session and Agent Architecture
 
-Runs **after every turn** (asynchronously, fire-and-forget):
+`main.py` creates one shared ADK `InMemorySessionService`, one `Runner` for the text orchestrator, and one `Runner` for the audio agent. ADK session state is therefore process-local and is lost on backend restart. Firestore persists chat messages, discovery state, direct/deferred fields, workflow state, feedback, and final analysis results, but it does not fully restore an in-flight ADK runner session.
 
-- Receives the latest user message and conversation excerpt
-- Extracts values for any newly answered RS fields
-- Returns a partial `discovery_state` dict (field key → extracted value)
-- Results are merged into Firestore and broadcast to the frontend sidebar
+### Main Orchestrator
 
-### 3. Finalizer Agent (`agent/finalizer_agent.py`)
+`agent/agent.py` defines `rs_agent`:
 
-Triggered when the orchestrator emits `[GENERATE_RS]`:
+- ADK `Agent` named `business_analyst_orchestrator`.
+- Uses `MODEL_ORCHESTRATOR`.
+- Uses `ORCHESTRATOR_SYSTEM_PROMPT`.
+- Registers research tools from `RESEARCH_TOOLS`.
+- Uses observability callbacks before/after model and tool calls.
 
-- Reads the full `discovery_state` from Firestore
-- Retrieves grounding examples from the GCS knowledge base
-- Compiles a complete, structured RS JSON document
-- Returns the document for PDF/DOCX export and diagram generation
+The orchestrator streams natural-language interview responses. It may emit internal markers:
 
-### Audio Agent (`agent/agent.py`)
+- `[FINALIZING]` starts the asynchronous final analysis pipeline.
+- `[GENERATE_RS]` is a legacy document-generation marker used by `/document`, `/document/pdf`, and `/document/docx`.
 
-A separate ADK agent using `gemini-2.0-flash-live-001`. Handles bidirectional audio streaming over WebSocket via `audio_websocket.py`. Voice input is transcribed and injected into the same session as a regular text message.
+### Audio Agent
 
----
+`audio_agent` is a separate ADK agent using `MODEL_AUDIO` through a custom `_ApiKeyGemini` wrapper so the Live API uses `GOOGLE_API_KEY`. `audio_websocket.py` handles bidirectional audio transport at `WS /ws/{user_id}/{session_id}` and shares the same ADK session service as text chat.
 
-## API Endpoints (`main.py`)
+### Discovery and One-Field Workflow
 
-### Chat
+`agent/discovery_agent.py` performs two related jobs:
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/chat/{session_id}` | Send a message; returns an SSE stream of agent response chunks |
-| `WS` | `/ws/audio/{session_id}` | WebSocket for bidirectional voice streaming (Gemini Live) |
+- Extracts field values from conversation text through direct Gemini API calls using `MODEL_DISCOVERY`.
+- Maintains workflow helpers for the active field, deferred fields, answer classification, and quality scoring.
 
-### Session State
+The backend does not broadcast discovery state over a WebSocket. Instead:
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/session/{session_id}` | Full session state (conversation, discovery state, workflow phase) |
-| `PATCH` | `/session/{session_id}/direct-fields` | Update user-entered direct fields |
+- `/chat/stream` may emit a pre-stream `field_update` SSE event when the active field can be updated immediately from the user's latest answer.
+- The frontend calls `/context/extract` to run/refresh extraction for a session.
+- Firestore stores the latest merged discovery state.
 
-### Document Export
+### Research Tools
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/session/{session_id}/export/pdf` | Generate and download RS as PDF |
-| `GET` | `/session/{session_id}/export/docx` | Generate and download RS as DOCX |
+`agent/research_agent.py` exposes:
 
-### Diagrams
+- `search_past_analyses(query, session_id=None, max_results=3)`: keyword-ranks stored GCS analyses under `analyses/*/final_analysis.json`.
+- `list_knowledge_base_docs(category="templates")`: lists GCS files under `knowledge_base/templates/`, `knowledge_base/guidelines/`, or `knowledge_base/examples/`.
+- `search_vertex_ai(...)`: currently a compatibility stub that reports Vertex AI Search is unavailable and points callers to `search_past_analyses`.
+
+Research is therefore GCS-backed today, not Vertex AI Search-backed.
+
+## API Endpoints
+
+### Health and Chat
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/session/{session_id}/bpmn` | Return Mermaid BPMN diagram string |
-| `GET` | `/session/{session_id}/dataflow` | Return Mermaid dataflow diagram string |
+| `GET` | `/health` | Returns service status, timestamp, configured project, and bucket |
+| `POST` | `/chat` | Non-streaming chat; returns `reply`, `session_id`, and `message_id` |
+| `POST` | `/chat/stream` | SSE chat stream with chunks, workflow events, finalization event, and `[DONE]` |
+| `WS` | `/ws/{user_id}/{session_id}` | Bidirectional audio WebSocket |
 
-### File Upload
+`POST /chat` and `POST /chat/stream` accept `message`, optional `session_id`, optional `user_id` defaulting to `default_user`, and optional `direct_fields` / `deferred_fields`.
+
+`/chat/stream` emits SSE `data:` frames. Known payloads include:
+
+- Initial metadata: `{"session_id": "...", "message_id": "..."}`
+- Active field update: `{"event": "active_field", "field_key": "..."}`
+- Field update: `{"event": "field_update", "fields": {...}, "completeness": 42}`
+- Text chunk: `{"text": "..."}`
+- Finalization start: `{"event": "finalizing"}`
+- Error: `{"error": "..."}`
+- End marker: `data: [DONE]`
+
+### Uploads and Session Data
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/session/{session_id}/upload-url` | Return a signed GCS URL for direct browser upload |
+| `POST` | `/upload` | Multipart upload with `file` and `session_id`; 10 MB limit; writes to GCS |
+| `GET` | `/uploads/{session_id}` | Lists uploaded files for a session |
+| `GET` | `/sessions` | Lists Firestore sessions |
+| `GET` | `/history/{session_id}` | Returns persisted chat history |
+| `GET` | `/firestore/data/{session_id}` | Debug-style Firestore snapshot endpoint |
 
-### Admin (bearer token required)
+Uploaded filenames are sanitized and stored under `sessions/{session_id}/{filename}`.
+
+### Discovery and Analysis
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/admin/sessions` | List all sessions with metadata |
-| `GET` | `/admin/sessions/{session_id}` | Full session detail |
-| `GET` | `/admin/metrics` | Aggregated cost, token, safety, and fill-rate metrics |
+| `POST` | `/context/extract` | Runs or returns discovery extraction for a session |
+| `GET` | `/discovery/{session_id}` | Returns persisted discovery/direct/deferred/workflow state |
+| `PATCH` | `/discovery/{session_id}/fields` | Merges direct/deferred field updates |
+| `GET` | `/analyses/{session_id}` | Returns final analysis status and completed analysis JSON |
 
----
+`/context/extract` uses a per-session lock to avoid duplicate concurrent Gemini extraction. If the ADK session has been lost, it falls back to Firestore discovery state when available.
 
-## Data Flow
+`/analyses/{session_id}` returns one of these states:
 
-```
+- `not_found`
+- `pending`
+- `error`
+- `complete`
+
+### Documents and Diagrams
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/document` | Legacy markdown RS generation from ADK session history after `[GENERATE_RS]` |
+| `POST` | `/document/pdf` | Legacy markdown-to-PDF export |
+| `POST` | `/document/docx` | Legacy four-block SRS JSON-to-DOCX export |
+| `POST` | `/document/rs-template/docx` | DOCX export from current RS template fields |
+| `POST` | `/bpmn/generate` | Generates Mermaid BPMN/flowchart text; ready threshold 90 |
+| `POST` | `/dataflow/generate` | Generates Mermaid dataflow text; ready threshold 70 |
+
+`/document/rs-template/docx` saves `sessions/{session_id}/rs_template.docx` in GCS and returns the file with `X-GCS-Path`.
+
+### Feedback and Admin
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/feedback` | Creates message-level feedback |
+| `PATCH` | `/feedback/{message_id}` | Updates message-level feedback |
+| `POST` | `/feedback/session` | Stores session-level rating/comment and closes the session |
+| `GET` | `/admin/metrics` | BigQuery-backed aggregate metrics |
+| `GET` | `/admin/sessions` | BigQuery-backed admin session list; supports `limit` and `filter=thumbs_down` |
+| `GET` | `/admin/sessions/{session_id}` | BigQuery-backed admin session detail |
+
+Admin endpoints are protected by IAP headers or bearer token in production/staging.
+
+## Main Chat Flow
+
+```text
 User message
-    │
-    ▼
-POST /chat/{session_id}
-    │
-    ├─► Orchestrator Agent (ADK + Gemini 2.5 Pro)
-    │       ├── Research tools (GCS knowledge base search)
-    │       └── Streams response chunks → SSE to frontend
-    │
-    └─► [async, fire-and-forget]
-            ├── Discovery Agent → extract field values → Firestore
-            ├── Answer Classifier → detect direct answers
-            └── Safety callbacks → jailbreak check, cost circuit breaker
+  |
+  v
+POST /chat or /chat/stream
+  |
+  |-- validate input against safety rules and cost circuit breaker
+  |-- ensure ADK session exists
+  |-- merge direct/deferred field state
+  |-- classify/rate active-field answer for one-field workflow
+  |-- optionally emit field_update before the LLM response
+  |
+  v
+ADK orchestrator runner
+  |
+  |-- may call research tools
+  |-- streams text chunks to the client
+  |-- stores redacted user/assistant messages in Firestore
+  |
+  v
+If [FINALIZING] appears:
+  |-- emit finalizing SSE event
+  |-- mark Firestore finalization_status=pending
+  |-- extract latest discovery fields
+  `-- schedule run_finalizer(...)
 ```
 
-When `[GENERATE_RS]` is emitted:
+## Finalization Flow
 
-```
-Finalizer Agent
-    ├── Read discovery_state from Firestore
-    ├── Retrieve knowledge base examples from GCS
-    ├── Compile RS JSON (compiler.py)
-    ├── Generate BPMN syntax (bpmn/generator.py)
-    ├── Generate Dataflow syntax (dataflow/generator.py)
-    ├── Write final_analysis.json to GCS
-    └── Update Firestore with compiled RS
-```
+`run_finalizer()` in `main.py` performs the final analysis pipeline:
 
----
+1. Reads uploaded artifacts from `sessions/{session_id}/`.
+2. Includes text content for `.txt`, `.md`, `.json`, and `.csv` files.
+3. Lists binary files such as PDFs or Office docs as attachments but does not parse their content in this path.
+4. Calls `agent.finalizer_agent.run_finalizer_agent(...)` using `MODEL_FINALIZER`.
+5. Writes JSON to GCS at `analyses/{session_id}/final_analysis.json`.
+6. Stores `final_analysis_json`, `finalization_status`, and `finalized_at` in Firestore.
+
+The frontend polls `GET /analyses/{session_id}` for completion.
 
 ## Firestore Data Model
 
-Collection: `{FIRESTORE_COLLECTION}` (e.g., `srs_sessions`)
-Document ID: `{session_id}` (UUID)
+Main collection: `{FIRESTORE_COLLECTION}`
 
-| Field | Type | Description |
+Document ID: `{session_id}`
+
+Important fields:
+
+| Field | Type | Notes |
 |---|---|---|
-| `conversation` | array | Ordered list of `{role, content, timestamp}` messages |
-| `discovery_state` | map | Current extracted RS field values (key → value or null) |
-| `direct_fields` | map | User-entered direct field values |
-| `deferred_fields` | list | Field keys the user deferred ("answer later") |
-| `workflow_state` | string | `discovery` / `generating` / `finalized` |
-| `final_analysis` | map | Compiled RS JSON (populated after finalization) |
-| `metadata` | map | `session_id`, `created_at`, `user_email`, `cost_usd` |
+| `session_id` | string | Session UUID |
+| `updated_at` | timestamp | Last write time |
+| `messages` | array | Redacted user/assistant messages appended with `ArrayUnion` |
+| `discovery_state_json` | string | AI-extracted field state as serialized JSON |
+| `direct_fields_json` | string | User-entered direct fields as serialized JSON |
+| `deferred_fields_json` | string | Deferred field keys/values as serialized JSON |
+| `workflow_state_json` | string | One-field workflow state as serialized JSON |
+| `finalization_status` | string | `pending`, `complete`, or `error` |
+| `finalized_at` | timestamp | Completion/error timestamp |
+| `final_analysis_json` | string | Final analysis JSON string |
+| `session_status` | string | Set to `ended` after session feedback |
+| `ended_at` | timestamp | Session feedback timestamp |
 
----
+For compatibility/reporting, `persist_srs_fields()` also writes flattened SRS summary fields:
 
-## GCS Structure
+- `s1_context`
+- `s1_business_problem`
+- `s2_target_state`
+- `s2_success`
+- `s3_scope_in_out`
+- `s3_boundaries`
+- `s4_data_systems`
+- `s4_integrations_access`
+
+Stored message entries include redacted text, text hash, trace/span IDs, model, token and cost metrics, timings, tool calls, phase, finish reason, and timestamps. `get_discovery_state()` merges direct fields over AI-extracted fields and recomputes completeness over required fields.
+
+Feedback is stored in a separate top-level `feedback` collection:
+
+- Message feedback documents are keyed by `message_id`.
+- Session feedback documents are keyed as `session:{session_id}`.
+- Feedback comments are redacted before storage.
+
+## GCS Layout
 
 Bucket: `{GCS_BUCKET_NAME}`
 
-```
-sessions/{session_id}/           # Session artifacts
-    uploaded_file.pdf            # User-uploaded files
-    final_analysis.json          # Compiled RS
-analyses/{session_id}/
-    final_analysis.json          # Synonym path for retrieval
-knowledge_base/
-    templates/                   # Blank RS templates
-    examples/                    # Historical RS examples (few-shot grounding)
+```text
+sessions/{session_id}/{filename}          # User uploads
+sessions/{session_id}/rs_template.docx    # Current RS template DOCX export
+analyses/{session_id}/final_analysis.json # Finalizer output
+knowledge_base/templates/                 # Template documents
+knowledge_base/guidelines/                # Guideline documents
+knowledge_base/examples/                  # Example documents
 ```
 
----
+There is no current code path that writes final analysis JSON to `sessions/{session_id}/final_analysis.json`; the finalizer writes it under `analyses/{session_id}/`.
 
-## Observability
+## Observability, Safety, and Privacy
 
-### Cost Tracking (`observability/cost.py`)
+### Safety
 
-Counts input and output tokens per turn and converts to USD. A circuit breaker halts the session if the cumulative cost exceeds **$5 USD** (configurable in `config.py`).
+`observability/safety.py` applies deterministic prompt-risk checks before model execution. It looks for prompt injection, prompt extraction, data exfiltration, role injection, jailbreak patterns, obfuscated exfiltration, and PII-extraction attempts.
 
-### Safety (`observability/safety.py`)
+Blocked requests return:
 
-Checks every user message for:
+- HTTP 400 for non-streaming endpoints.
+- An SSE `{"error": "..."}` payload for streaming chat.
 
-- Jailbreak attempts (prompt injection, role-play overrides)
-- Off-topic adversarial inputs
-- Personal data leakage attempts
+The same module keeps an in-memory per-session cost accumulator and blocks requests with HTTP 429 after `COST_CIRCUIT_BREAKER_USD`.
 
-Flagged messages are logged and may trigger a warning response from the agent.
+### Cost, Metrics, and Tracing
 
-### Tracing (`observability/tracing.py`)
+- `observability/cost.py` estimates model cost from token metadata.
+- `observability/metrics.py` defines counters/histograms for turns, feedback, tokens, costs, safety blocks, and generation events.
+- `observability/tracing.py` configures tracing.
+- `observability/callbacks.py` wires ADK callbacks into logging/metrics.
+- `admin_sessions.py` queries BigQuery views for admin dashboard metrics and session detail.
 
-OpenTelemetry traces are emitted for:
+### Privacy
 
-- Each ADK agent invocation
-- Tool calls (GCS, Firestore)
-- Document generation pipeline
+`privacy/redactor.py` redacts PII before persisting chat and feedback text. Firestore stores redacted text plus original-text hashes for traceability, not raw message bodies.
 
-Traces can be exported to Cloud Trace or any OTLP-compatible backend.
+## CORS and Error Handling
 
-### Anomaly Detection (`observability/safety_anomalies.py`)
+`ALLOWED_ORIGINS` defaults to `http://localhost:3000` and is parsed as a comma-separated list. CORS allows credentials, methods `GET`, `POST`, `PATCH`, and `OPTIONS`, and headers `Content-Type` and `Authorization`.
 
-BigQuery is queried periodically for sessions with anomalous patterns (unusual token ratios, repeated safety flags, cost spikes). Results are surfaced in the admin dashboard.
-
-### Red-Teaming (`observability/redteam/run_redteam.py`)
-
-A scripted adversarial harness that sends a suite of known attack prompts to the agent and verifies that each one is deflected correctly. Run manually before releases.
-
----
-
-## Privacy (`privacy/redactor.py`)
-
-PII redaction rules are applied before storing conversation messages in Firestore. Patterns include email addresses, phone numbers, and national ID formats (Czech + international).
-
----
+`main.py` registers a global exception handler that logs unexpected errors and returns a JSON 500 response, allowing FastAPI/CORS middleware to still attach CORS headers.
 
 ## Document Generation
 
-### PDF (`generation/pdf_export.py`)
+There are two document-generation paths:
 
-Uses `reportlab`. Renders:
+| Path | Source | Output |
+|---|---|---|
+| Current RS template export | Live RS template fields from request body | DOCX via `rs_template_to_docx()` |
+| Legacy generated SRS export | ADK session history after `[GENERATE_RS]` | Markdown, PDF, or DOCX |
 
-- Title page with project metadata
-- All 6 RS sections with their fields
-- Formatted tables for structured fields
-- Footer with generation timestamp and session ID
+`generation/word_export.py` contains both `rs_template_to_docx(fields)` for the 28-field template and `srs_json_to_docx(srs)` for the legacy four-block SRS format.
 
-### DOCX (`generation/word_export.py`)
-
-Uses `python-docx`. Mirrors the PDF structure with native Word formatting (styles, tables, headings).
-
-### BPMN (`bpmn/generator.py`)
-
-Calls Gemini with the To-Be process description and returns a Mermaid-compatible flowchart/BPMN string. The string is served to the frontend and rendered client-side by Mermaid.js.
-
-### Dataflow (`dataflow/generator.py`)
-
-Same pattern as BPMN but generates a data flow diagram showing systems, data stores, and integrations.
-
----
-
-## Schema Code Generation
-
-`scripts/generate_frontend_schema.py` reads `field_schema.py` and writes `frontend/app/generated/rsSchema.ts`.
-
-Run after any change to `field_schema.py`:
-
-```bash
-cd backend
-.venv/Scripts/python scripts/generate_frontend_schema.py   # Windows
-.venv/bin/python scripts/generate_frontend_schema.py       # Mac/Linux
-```
-
-The generated TypeScript file exports typed constants consumed by `RsLiveTemplate.tsx`.
-
----
+`generation/pdf_export.py` converts generated markdown into a styled PDF using ReportLab. It supports headings, lists, requirement IDs, and a generation timestamp.
 
 ## Running Locally
 
-```bash
-cd backend
-cp .env.example .env            # fill in all required variables
-.venv/Scripts/python -m pip install -r requirements.txt   # Windows
-.venv/Scripts/python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+From the repository root, install dependencies with `uv`:
+
+```powershell
+uv sync
 ```
 
-> **Important:** Always use `.venv/Scripts/python` (Windows) or `.venv/bin/python` (Mac/Linux). The global Python interpreter on this machine is a different version and will install packages to the wrong location.
+Create `backend/.env` from `backend/.env.example` and fill in at least `GOOGLE_API_KEY`. GCP, GCS, and Firestore variables are needed for persistence, uploads, finalization storage, admin queries, and most full-stack flows.
 
----
+Run the backend with the active virtual environment:
 
-## Testing
-
-```bash
+```powershell
 cd backend
-.venv/Scripts/python -m pytest tests/ -v
+..\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
-| Test File | Coverage Area |
+If the virtual environment is located at `backend/.venv`, use:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+```
+
+## Docker
+
+`backend/Dockerfile`:
+
+- Uses `python:3.12-slim`.
+- Installs `backend/requirements.txt` with `pip install --require-hashes`.
+- Copies backend source into `/app`.
+- Exposes port `8080`.
+- Runs `uvicorn main:app --host 0.0.0.0 --port 8080`.
+
+Regenerate `backend/requirements.txt` from the lock file after dependency changes:
+
+```powershell
+uv export --frozen --no-dev --no-emit-project --output-file backend/requirements.txt
+```
+
+## Testing and Code Quality
+
+Run backend tests from the backend directory with the active virtual environment:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m pytest tests -v
+```
+
+Notable test files:
+
+| Test file | Coverage area |
 |---|---|
-| `test_agent_prompts.py` | System prompt content and guardrails |
-| `test_api_integration.py` | FastAPI endpoint contracts |
-| `test_compiler.py` | RS JSON compilation from mock history |
-| `test_diagram_prompts.py` | BPMN and dataflow prompt structure |
-| `test_e2e_smoke.py` | Full pipeline from greeting to PDF |
-| `test_finalizer_agent.py` | Finalizer agent output structure |
-| `test_pdf_export.py` | Non-empty PDF with expected headings |
-| `test_one_field_workflow.py` | Single-field extraction end-to-end |
-| `test_observability_*.py` | Cost tracking, safety flags, tracing |
+| `test_agent_prompts.py` | Orchestrator prompt behavior |
+| `test_api_integration.py` | FastAPI contracts |
+| `test_compiler.py` | Legacy SRS compiler behavior |
+| `test_diagram_prompts.py` | BPMN/dataflow prompts |
+| `test_direct_field_context.py` | Direct/deferred field context injection |
+| `test_e2e_smoke.py` | Full smoke path |
+| `test_finalizer_agent.py` | Finalizer output structure |
+| `test_observability_metrics.py` | Metrics behavior |
+| `test_observability_safety.py` | Safety and cost circuit behavior |
+| `test_one_field_workflow.py` | Active-field workflow |
+| `test_pdf_export.py` | PDF export |
 
----
+`pyproject.toml` currently configures Ruff. No mypy or pre-commit configuration is present in the repository.
 
-## Code Quality
+## Known Constraints and Drift Risks
 
-| Tool | Config | What it checks |
-|---|---|---|
-| `ruff` | `pyproject.toml` | Style (E), errors (F), import order (I), line length 120 |
-| `mypy` | `pyproject.toml` | Static type checking |
-| Pre-commit | `.pre-commit-config.yaml` | Runs ruff + mypy on every commit |
-
----
-
-## Key Constraints
-
-- **ADK is mandatory.** All agent routing must go through ADK. Do not call Gemini directly from `main.py`.
-- **`field_schema.py` is the single source of truth.** Never duplicate field definitions in other files.
-- **Always use the venv Python.** The global interpreter is a different version.
-- **The agent never makes architecture decisions.** If a user asks the agent to choose a database or tech stack, the agent redirects to business requirements.
-- **Model is accessed via `GOOGLE_API_KEY`.** Vertex AI is not used for inference.
+- Several code docstrings still mention 22 fields, but the canonical schema currently has 28 fields.
+- Some module comments still refer to Vertex AI. Current inference uses `GOOGLE_API_KEY`; the research Vertex AI function is only a stub.
+- ADK sessions are in-memory. Firestore keeps durable history and discovery state, but a backend restart can lose live ADK session context and in-flight finalizer triggers.
+- `/context/extract` can return persisted Firestore discovery when ADK session state is missing.
+- Upload finalization includes plain text-like files directly, but PDFs and Office files are currently listed rather than parsed by `run_finalizer()`.
+- `GOOGLE_CLOUD_REGION` is present in `.env.example`, while `config.py` defines `GOOGLE_CLOUD_AUDIO_REGION` for the audio-region constant.
+- `ADMIN_BEARER_TOKEN`, `BIGQUERY_*`, `COST_CIRCUIT_BREAKER_USD`, `APP_ENV`, `ENVIRONMENT`, and `GOOGLE_CLOUD_AUDIO_REGION` are used by code but are not currently included in `.env.example`.
+- `MODEL_RESEARCH` is configured, but current research tools are deterministic GCS helper functions rather than model calls.
