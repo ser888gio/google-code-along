@@ -3,6 +3,10 @@
   "ignoreDependencies": [
     "postcss"
   ],
+  "ignore": [
+    "public/pcm-player-processor.js",
+    "public/pcm-recorder-processor.js"
+  ],
   "tags": [
     "-lintignore"
   ]
