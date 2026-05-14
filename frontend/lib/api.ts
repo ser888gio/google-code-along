@@ -1,9 +1,4 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-const ADMIN_API_TOKEN = process.env.NEXT_PUBLIC_ADMIN_API_TOKEN ?? "";
-
-function adminHeaders(): HeadersInit {
-  return ADMIN_API_TOKEN ? { Authorization: `Bearer ${ADMIN_API_TOKEN}` } : {};
-}
 
 interface DocumentResponse {
   markdown: string | null;
@@ -717,9 +712,7 @@ export interface AdminMetricsResponse {
 
 export async function getAdminMetrics(days = 7): Promise<AdminMetricsResponse> {
   const params = new URLSearchParams({ days: String(days) });
-  const res = await fetch(`${API_URL}/admin/metrics?${params.toString()}`, {
-    headers: adminHeaders(),
-  });
+  const res = await fetch(`/api/admin/metrics?${params.toString()}`);
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail?.detail ?? `Error ${res.status}`);
@@ -733,9 +726,7 @@ export async function getAdminSessions(
 ): Promise<AdminSessionSummary[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (filter) params.set("filter", filter);
-  const res = await fetch(`${API_URL}/admin/sessions?${params.toString()}`, {
-    headers: adminHeaders(),
-  });
+  const res = await fetch(`/api/admin/sessions?${params.toString()}`);
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail?.detail ?? `Error ${res.status}`);
@@ -744,9 +735,7 @@ export async function getAdminSessions(
 }
 
 export async function getAdminSession(sessionId: string): Promise<AdminSessionDetail> {
-  const res = await fetch(`${API_URL}/admin/sessions/${encodeURIComponent(sessionId)}`, {
-    headers: adminHeaders(),
-  });
+  const res = await fetch(`/api/admin/sessions/${encodeURIComponent(sessionId)}`);
   if (!res.ok) {
     const detail = await res.json().catch(() => ({}));
     throw new Error(detail?.detail ?? `Error ${res.status}`);
