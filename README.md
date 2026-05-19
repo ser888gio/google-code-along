@@ -2,7 +2,7 @@
 
 Monorepo for the AI-Assisted Requirement Specification Generator.
 
-An interactive AI persona that guides business users through defining their needs and automatically generates coherent, standardized Requirement Specification (RS) documents, complete with auto-generated system diagrams.
+An interactive AI persona that guides business users through defining their needs and automatically generates coherent, standardized Requirement Specification (RS) documents, complete with auto-generated system diagrams. </br>
 
 ## Features
 
