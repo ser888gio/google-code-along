@@ -117,7 +117,9 @@ export function useDirectFields(
     debounceRef.current = setTimeout(async () => {
       if (!sessionId) return;
       const merged = await patchDirectFields(sessionId, { [key]: value });
-      if (merged) setRsPartial(merged);
+      if (merged) {
+        setRsPartial((prev) => mergePartialFields(prev, merged, next));
+      }
     }, 600);
   }
 
