@@ -18,6 +18,7 @@ def sanitize_gcs_segment(value: str, *, field_name: str = "path segment") -> str
 def sanitize_gcs_filename(filename: str) -> str:
     """Return a safe basename for a user-supplied upload filename."""
     normalized = filename.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    normalized = normalized.replace(" ", "_")
     return sanitize_gcs_segment(normalized, field_name="filename")
 
 
