@@ -1190,7 +1190,7 @@ export default function ChatPage() {
   }
 
   function formatUploadAttachments(files: UploadedFile[]): string {
-    return files.map((file) => file.gcs_path).join("\n");
+    return files.map((file) => file.filename).join("\n");
   }
 
   async function refreshSessionUploads(sid: string, fallbackFiles: UploadedFile[] = []) {
