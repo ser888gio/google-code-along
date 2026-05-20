@@ -349,6 +349,120 @@ def _recompute_discovery_completeness(state: dict) -> None:
     state["completeness"] = round((filled / len(REQUIRED_FIELDS)) * 100)
 
 
+def _empty_discovery_state() -> dict:
+    return {"completeness": 0, "fields": {}, "missing_priority": []}
+
+
+async def _classify_and_update_active_field(
+    *,
+    session_id: str,
+    field_key: str,
+    message: str,
+    tail_text: str,
+    solution_type: str | None,
+    workflow: dict,
+    discovery_state: dict | None,
+    direct_fields: dict[str, str],
+    deferred_fields: dict,
+) -> tuple[ClassifierResult, dict | None]:
+    """Run the classifier for the active field and persist the resulting status changes."""
+    loop = asyncio.get_running_loop()
+
+    classification: ClassifierResult = await classify_user_turn(
+        field_key, message, tail_text, solution_type=solution_type
+    )
+    await rate_answer(
+        field_key,
+        str((workflow.get("last_question_by_field") or {}).get(field_key, "")),
+        message,
+        classification["classification"],
+    )
+
+    statuses = workflow["field_status"]
+    miss_counts = workflow.setdefault("miss_counts", {})
+    clarification_counts = workflow.setdefault("clarification_counts", {})
+    coverage_gaps_by_field = workflow.setdefault("coverage_gaps", {})
+
+    latest_gaps = list(classification.get("coverage_gaps") or [])
+    if latest_gaps:
+        coverage_gaps_by_field[field_key] = latest_gaps
+    else:
+        coverage_gaps_by_field.pop(field_key, None)
+
+    clf = classification["classification"]
+    if clf == "answered":
+        value = classification.get("value")
+        if value:
+            statuses[field_key] = "answered"
+            miss_counts[field_key] = 0
+            if discovery_state is None:
+                discovery_state = _empty_discovery_state()
+            discovery_state.setdefault("fields", {})[field_key] = _field_entry(value)
+            _recompute_discovery_completeness(discovery_state)
+            await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
+            if field_key in DIRECT_FIELD_KEYS:
+                direct_fields[field_key] = value
+                await loop.run_in_executor(None, upsert_direct_fields, session_id, {field_key: value})
+            if field_key in deferred_fields:
+                deferred_fields.pop(field_key, None)
+                await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
+        else:
+            statuses[field_key] = "missing"
+    elif clf == "deferred":
+        statuses[field_key] = "deferred"
+        miss_counts[field_key] = 0
+        deferred_fields[field_key] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
+        await loop.run_in_executor(None, upsert_deferred_fields, session_id, {field_key: deferred_fields[field_key]})
+    elif clf == "clarification_requested":
+        statuses[field_key] = "clarification_requested"
+        clarification_counts[field_key] = int(clarification_counts.get(field_key) or 0) + 1
+    else:
+        if is_deferred_answer(message):
+            statuses[field_key] = "deferred"
+            deferred_fields[field_key] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
+            await loop.run_in_executor(
+                None, upsert_deferred_fields, session_id, {field_key: deferred_fields[field_key]}
+            )
+        else:
+            statuses[field_key] = "missing"
+            miss_counts[field_key] = int(miss_counts.get(field_key) or 0) + 1
+
+    return classification, discovery_state
+
+
+async def _apply_proactive_updates(
+    *,
+    session_id: str,
+    classification: ClassifierResult,
+    active_field: str,
+    workflow: dict,
+    discovery_state: dict | None,
+) -> dict | None:
+    """Persist any side-channel field values the classifier extracted proactively."""
+    loop = asyncio.get_running_loop()
+
+    proactive_updates: dict[str, str] = {}
+    for key, entry in (classification.get("proactive_fields") or {}).items():
+        if key not in FIELD_SCHEMA or key == active_field:
+            continue
+        value = str(entry.get("value") or "").strip()
+        if value:
+            workflow["field_status"][key] = "answered"
+            proactive_updates[key] = value
+
+    if not proactive_updates:
+        return discovery_state
+
+    if discovery_state is None:
+        discovery_state = _empty_discovery_state()
+    fields = discovery_state.setdefault("fields", {})
+    for key, value in proactive_updates.items():
+        fields[key] = _field_entry(value)
+    _recompute_discovery_completeness(discovery_state)
+    await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
+    return discovery_state
+
+
 async def _prepare_workflow_turn(
     *,
     session_id: str,
@@ -403,95 +517,24 @@ async def _prepare_workflow_turn(
                 deferred_fields=deferred_fields,
             )
     elif previous_active:
-        classification = await classify_user_turn(
-            previous_active, req.message, tail_text, solution_type=solution_type_value
+        classification, discovery_state = await _classify_and_update_active_field(
+            session_id=session_id,
+            field_key=previous_active,
+            message=req.message,
+            tail_text=tail_text,
+            solution_type=solution_type_value,
+            workflow=workflow,
+            discovery_state=discovery_state,
+            direct_fields=direct_fields,
+            deferred_fields=deferred_fields,
         )
-        await rate_answer(
-            previous_active,
-            str((workflow.get("last_question_by_field") or {}).get(previous_active, "")),
-            req.message,
-            classification["classification"],
+        discovery_state = await _apply_proactive_updates(
+            session_id=session_id,
+            classification=classification,
+            active_field=previous_active,
+            workflow=workflow,
+            discovery_state=discovery_state,
         )
-
-        statuses = workflow["field_status"]
-        miss_counts = workflow.setdefault("miss_counts", {})
-        clarification_counts = workflow.setdefault("clarification_counts", {})
-        coverage_gaps_by_field = workflow.setdefault("coverage_gaps", {})
-        latest_gaps = list(classification.get("coverage_gaps") or [])
-        if latest_gaps:
-            coverage_gaps_by_field[previous_active] = latest_gaps
-        else:
-            coverage_gaps_by_field.pop(previous_active, None)
-
-        if classification["classification"] == "answered":
-            value = classification.get("value")
-            if value:
-                statuses[previous_active] = "answered"
-                miss_counts[previous_active] = 0
-                if discovery_state is None:
-                    discovery_state = {
-                        "completeness": 0,
-                        "fields": {},
-                        "missing_priority": [],
-                    }
-                discovery_state.setdefault("fields", {})[previous_active] = _field_entry(value)
-                _recompute_discovery_completeness(discovery_state)
-                await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
-                if previous_active in DIRECT_FIELD_KEYS:
-                    direct_fields[previous_active] = value
-                    await loop.run_in_executor(None, upsert_direct_fields, session_id, {previous_active: value})
-                if previous_active in deferred_fields:
-                    deferred_fields.pop(previous_active, None)
-                    await loop.run_in_executor(None, remove_deferred_fields, session_id, [previous_active])
-            else:
-                statuses[previous_active] = "missing"
-        elif classification["classification"] == "deferred":
-            statuses[previous_active] = "deferred"
-            miss_counts[previous_active] = 0
-            deferred_fields[previous_active] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
-            await loop.run_in_executor(
-                None,
-                upsert_deferred_fields,
-                session_id,
-                {previous_active: deferred_fields[previous_active]},
-            )
-        elif classification["classification"] == "clarification_requested":
-            statuses[previous_active] = "clarification_requested"
-            clarification_counts[previous_active] = int(clarification_counts.get(previous_active) or 0) + 1
-        else:
-            if is_deferred_answer(req.message):
-                statuses[previous_active] = "deferred"
-                deferred_fields[previous_active] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
-                await loop.run_in_executor(
-                    None,
-                    upsert_deferred_fields,
-                    session_id,
-                    {previous_active: deferred_fields[previous_active]},
-                )
-            else:
-                statuses[previous_active] = "missing"
-                miss_counts[previous_active] = int(miss_counts.get(previous_active) or 0) + 1
-
-        proactive_updates: dict[str, str] = {}
-        for key, entry in (classification.get("proactive_fields") or {}).items():
-            if key not in FIELD_SCHEMA or key == previous_active:
-                continue
-            value = str(entry.get("value") or "").strip()
-            if value:
-                workflow["field_status"][key] = "answered"
-                proactive_updates[key] = value
-        if proactive_updates:
-            if discovery_state is None:
-                discovery_state = {
-                    "completeness": 0,
-                    "fields": {},
-                    "missing_priority": [],
-                }
-            fields = discovery_state.setdefault("fields", {})
-            for key, value in proactive_updates.items():
-                fields[key] = _field_entry(value)
-            _recompute_discovery_completeness(discovery_state)
-            await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
 
     if workflow.get("phase") == "ready_to_finalize":
         active_field = None
