@@ -396,22 +396,29 @@ function mergePartialFields(
   incoming: RsPartialData,
   directFields: Record<string, string>,
 ): RsPartialData {
+  // Only fall back to prev for fields that incoming did NOT fill — this
+  // ensures that agent-confirmed updates (e.g. "change target users to X")
+  // are never silently overwritten by the stale prev value.
+  const prevFilled = Object.fromEntries(
+    Object.entries(prev?.fields ?? {}).filter(
+      ([k, v]) => v.filled && !incoming.fields[k]?.filled,
+    )
+  );
+  // Preserve direct-input and user-typed suggestable fields only when
+  // incoming does not carry a filled value for those keys.
+  const prevDirect = Object.fromEntries(
+    Object.entries(prev?.fields ?? {}).filter(
+      ([k]) =>
+        (DIRECT_INPUT_KEYS.has(k) || (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== "")) &&
+        !incoming.fields[k]?.filled,
+    )
+  );
   return {
     completeness: incoming.completeness,
     fields: {
       ...incoming.fields,
-      // Keep any field already marked filled (including SSE pre-fills)
-      ...Object.fromEntries(
-        Object.entries(prev?.fields ?? {}).filter(([, v]) => v.filled)
-      ),
-      // Preserve direct-input and user-typed suggestable fields
-      ...Object.fromEntries(
-        Object.entries(prev?.fields ?? {}).filter(
-          ([k]) =>
-            DIRECT_INPUT_KEYS.has(k) ||
-            (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== ""),
-        )
-      ),
+      ...prevFilled,
+      ...prevDirect,
     },
   };
 }
