@@ -421,8 +421,9 @@ describe("ChatPage — RS live template", () => {
 
   it("shows placeholder text when rsPartial is null", () => {
     renderPage();
-    const placeholders = screen.getAllByText(/Gathering/i);
-    expect(placeholders.length).toBe(13);
+    // All 28 fields render with "Gathering…" placeholder when empty
+    const placeholders = screen.getAllByPlaceholderText(/Gathering/i);
+    expect(placeholders.length).toBe(28);
   });
 
   it("updates field content after a turn when extractContext returns data", async () => {
@@ -515,8 +516,10 @@ describe("ChatPage — direct chat field answers", () => {
       fireEvent.click(screen.getByRole("button", { name: /Send/i }));
     });
 
-    const productOwnerInput = screen.getByPlaceholderText(/Enter product owner/i) as HTMLInputElement;
-    expect(productOwnerInput.value).toBe("Ales Priklad");
+    // After the turn, product_owner should appear as field value in the RS panel
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Ales Priklad")).toBeInTheDocument();
+    });
     expect(mockPatchDirectFields).toHaveBeenCalledWith("test-session", {
       product_owner: "Ales Priklad",
     });
@@ -546,8 +549,8 @@ describe("ChatPage — direct chat field answers", () => {
       fireEvent.click(screen.getByRole("button", { name: /Send/i }));
     });
 
-    const productOwnerInput = screen.getByPlaceholderText(/Enter product owner/i) as HTMLInputElement;
-    expect(productOwnerInput.value).toBe("");
+    // No value should be filled in the product_owner field
+    expect(screen.queryByDisplayValue("Nevim, doplnim pozdeji.")).not.toBeInTheDocument();
     expect(mockPatchDirectFields).not.toHaveBeenCalled();
 
     const secondCallDirectFields = mockStreamChat.mock.calls[1][8];

@@ -270,9 +270,27 @@ export async function downloadPdf(sessionId: string): Promise<void> {
 
 // ─── Live RS context extraction ───────────────────────────────────────────────
 
+export type FieldSource = "user" | "ai" | "upload";
+
+export interface RsField {
+  value: string;
+  filled: boolean;
+  source: FieldSource | null;
+  updatedAt: number;
+  pendingSuggestion?: { value: string; receivedAt: number };
+  dismissedSuggestions?: string[];
+}
+
+export interface RsState {
+  fields: Record<string, RsField>;
+  completeness: number;
+}
+
+// Legacy shape returned directly from the backend (before client-side RsField enrichment).
 interface RsSectionData {
   filled: boolean;
   value: string | null;
+  source?: FieldSource | null;
 }
 
 export interface RsPartialData {
@@ -430,19 +448,6 @@ export async function uploadFile(
   });
 }
 
-/**
- * List files stored in GCS for a session.
- */
-export async function getSessionUploads(sessionId: string): Promise<UploadedFile[]> {
-  try {
-    const res = await fetch(`${API_URL}/uploads/${encodeURIComponent(sessionId)}`);
-    if (!res.ok) return [];
-    const body: { session_id: string; files: UploadedFile[] } = await res.json();
-    return body.files ?? [];
-  } catch {
-    return [];
-  }
-}
 
 /**
  * Check whether the RS document is ready for a given session.

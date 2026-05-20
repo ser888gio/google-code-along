@@ -4,11 +4,8 @@ import { useCallback, useRef, useState } from "react";
 import { useAudioRecorder } from "../../lib/useAudioRecorder";
 import { useAudioPlayer } from "../../lib/useAudioPlayer";
 import { useWebSocket, WsServerMessage } from "../../lib/useWebSocket";
-import { extractContext, getFirestoreData, RsPartialData } from "../../lib/api";
-import {
-  SUGGESTABLE_DIRECT_KEYS,
-  mergePartialFields,
-} from "./useDirectFields";
+import { extractContext, getFirestoreData, RsPartialData, SrsData } from "../../lib/api";
+import { FinalizingStatus } from "./useChatSession";
 
 export type ChatMode = "text" | "voice";
 
@@ -17,16 +14,14 @@ interface VoiceModeHandlers {
   appendToMessage: (id: string, chunk: string) => void;
   replaceMessageText: (id: string, text: string) => void;
   finalizeMessage: (id: string) => void;
-  setRsPartial: React.Dispatch<React.SetStateAction<RsPartialData | null>>;
-  setDirectFields: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  setSrsData: React.Dispatch<React.SetStateAction<import("../../lib/api").SrsData | null>>;
-  setFinalizingStatus: React.Dispatch<React.SetStateAction<import("./useChatSession").FinalizingStatus>>;
+  applyExtraction: (partial: RsPartialData) => void;
+  setSrsData: React.Dispatch<React.SetStateAction<SrsData | null>>;
+  setFinalizingStatus: React.Dispatch<React.SetStateAction<FinalizingStatus>>;
   setActiveTab: (tab: string) => void;
   setIsExtracting: React.Dispatch<React.SetStateAction<boolean>>;
   extractNonceRef: React.RefObject<number>;
   setError: (msg: string) => void;
   sessionId: string | null;
-  directFields: Record<string, string>;
 }
 
 export function useVoiceMode(handlers: VoiceModeHandlers) {
@@ -51,8 +46,7 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
         appendToMessage,
         replaceMessageText,
         finalizeMessage,
-        setRsPartial,
-        setDirectFields,
+        applyExtraction,
         setSrsData,
         setFinalizingStatus,
         setActiveTab,
@@ -60,7 +54,6 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
         extractNonceRef,
         setError,
         sessionId,
-        directFields,
       } = handlers;
 
       if (msg.type === "user_transcript_partial") {
@@ -104,22 +97,7 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
             getFirestoreData(sessionId),
           ]).then(([partial, fsData]) => {
             if (nonce !== extractNonceRef.current) return;
-            if (partial) {
-              setRsPartial((prev) => mergePartialFields(prev, partial, directFields));
-              setDirectFields((prevDirect) => {
-                const updates: Record<string, string> = {};
-                for (const k of SUGGESTABLE_DIRECT_KEYS) {
-                  if (
-                    !(prevDirect[k] ?? "").trim() &&
-                    partial.fields[k]?.filled &&
-                    partial.fields[k]?.value
-                  ) {
-                    updates[k] = partial.fields[k].value as string;
-                  }
-                }
-                return Object.keys(updates).length ? { ...prevDirect, ...updates } : prevDirect;
-              });
-            }
+            if (partial) applyExtraction(partial);
             if (fsData) setSrsData(fsData);
             setIsExtracting(false);
           }).catch((err) => {

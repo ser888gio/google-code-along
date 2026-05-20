@@ -15,21 +15,15 @@ import {
   RsPartialData,
   FinalAnalysis,
 } from "../../lib/api";
+
 import { Role } from "./useMessages";
 
 export type FinalizingStatus = "idle" | "finalizing" | "complete";
-
-const SESSION_RESTORE_KEYS = [
-  "use_case_title", "department", "requestor", "product_owner",
-  "saved_time_hours_per_year", "cost_saving", "revenue_increase",
-  "comments", "attachments",
-] as const;
 
 interface LoadedSession {
   messages: Array<{ role: Role; text: string; message_id?: string }>;
   sessionId: string;
   rsPartial: RsPartialData | null;
-  directFields: Record<string, string>;
   srsData: SrsData | null;
   finalAnalysis: FinalAnalysis | null;
   finalizingStatus: FinalizingStatus;
@@ -75,19 +69,10 @@ export function useChatSession(setError: (msg: string) => void) {
       getFirestoreData(sid),
     ]);
 
-    const restoredDirectFields: Record<string, string> = {};
-    if (savedDiscovery) {
-      for (const key of SESSION_RESTORE_KEYS) {
-        const entry = savedDiscovery.fields[key];
-        if (entry?.filled && entry.value) restoredDirectFields[key] = entry.value;
-      }
-    }
-
     return {
       messages: msgs.map((m) => ({ role: m.role as Role, text: m.text, message_id: m.message_id })),
       sessionId: sid,
       rsPartial: savedDiscovery ?? null,
-      directFields: restoredDirectFields,
       srsData: fsData ?? null,
       finalAnalysis:
         analysisResult.status === "complete" ? (analysisResult.analysis ?? null) : null,

@@ -13,6 +13,7 @@ import {
   FinalAnalysis,
   SessionSummary,
   UploadedFile,
+  RsState,
 } from "../lib/api";
 import AnalysisPanel, { FinalizingOverlay } from "./components/AnalysisPanel";
 import FileUpload from "./components/FileUpload";
@@ -22,16 +23,11 @@ import RsLiveTemplate from "./components/RsLiveTemplate";
 import FirestoreSrsPanel from "./components/FirestoreSrsPanel";
 import LanguageSwitcher from "./i18n/LanguageSwitcher";
 import { useLocale } from "./i18n/LocaleContext";
-import { DirectChatFieldKey } from "./generated/rsSchema";
 import { useMessages, Message } from "./hooks/useMessages";
 import { useChatSession, FinalizingStatus } from "./hooks/useChatSession";
 import { useRsExtraction } from "./hooks/useRsExtraction";
-import {
-  useDirectFields,
-  DIRECT_INPUT_KEYS,
-  SUGGESTABLE_DIRECT_KEYS,
-  inferDirectChatFieldFromAssistant,
-} from "./hooks/useDirectFields";
+import { useRsState } from "./hooks/useRsState";
+import { inferDirectChatFieldFromAssistant, DirectChatFieldKey } from "./lib/directChatAnswer";
 import { useVoiceMode, ChatMode } from "./hooks/useVoiceMode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -217,9 +213,11 @@ function ErrorToast({ message, onDismiss }: { message: string; onDismiss: () => 
 function RsDocumentPanel({
   activeTab,
   onTabChange,
-  rsPartial,
-  directFields,
-  onDirectFieldChange,
+  rsState,
+  rsCompleteness,
+  onFieldChange,
+  onAcceptSuggestion,
+  onDismissSuggestion,
   sessionId,
   onGenerateFull,
   srsData,
@@ -229,9 +227,11 @@ function RsDocumentPanel({
 }: {
   activeTab: RsTab;
   onTabChange: (t: RsTab) => void;
-  rsPartial: RsPartialData | null;
-  directFields: Record<string, string>;
-  onDirectFieldChange: (key: string, value: string) => void;
+  rsState: RsState;
+  rsCompleteness: number;
+  onFieldChange: (key: string, value: string) => void;
+  onAcceptSuggestion: (key: string) => void;
+  onDismissSuggestion: (key: string) => void;
   sessionId: string | null;
   onGenerateFull: () => void;
   srsData: SrsData | null;
@@ -278,9 +278,11 @@ function RsDocumentPanel({
       <div className="flex-1 overflow-hidden bg-gray-50">
         {activeTab === "Preview" ? (
           <RsLiveTemplate
-            rsPartial={rsPartial}
-            directFields={directFields}
-            onDirectFieldChange={onDirectFieldChange}
+            state={rsState}
+            completeness={rsCompleteness}
+            onFieldChange={onFieldChange}
+            onAcceptSuggestion={onAcceptSuggestion}
+            onDismissSuggestion={onDismissSuggestion}
             isExtracting={isExtracting}
           />
         ) : activeTab === "BPMN" ? (
@@ -301,16 +303,16 @@ function RsDocumentPanel({
           )
         ) : activeTab === "Summary" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3">
-            {(rsPartial?.completeness ?? 0) < 80 && (
+            {rsCompleteness < 80 && (
               <p className="text-xs text-gray-400">
-                {rsPartial?.completeness ?? 0}% — {t("rs.reach_80")} 80%)
+                {rsCompleteness}% — {t("rs.reach_80")} 80%)
               </p>
             )}
             <button
               onClick={onGenerateFull}
-              disabled={(rsPartial?.completeness ?? 0) < 80}
+              disabled={rsCompleteness < 80}
               className={`flex items-center gap-2 rounded px-5 py-2.5 text-sm font-semibold transition-opacity ${
-                (rsPartial?.completeness ?? 0) >= 80
+                rsCompleteness >= 80
                   ? "bg-[#4a6659] text-white hover:opacity-90"
                   : "cursor-not-allowed bg-gray-200 text-gray-400"
               }`}
@@ -768,15 +770,14 @@ export default function ChatPage() {
 
   const msgs = useMessages(t("welcome_message"));
   const session = useChatSession(setError);
-  const rs = useRsExtraction();
-  const fields = useDirectFields(rs.setRsPartial);
+  const rsState = useRsState(session.sessionId);
+  const rs = useRsExtraction(rsState.applyExtraction);
   const voice = useVoiceMode({
     addMessage: msgs.addMessage,
     appendToMessage: msgs.appendToMessage,
     replaceMessageText: msgs.replaceMessageText,
     finalizeMessage: msgs.finalizeMessage,
-    setRsPartial: rs.setRsPartial,
-    setDirectFields: fields.setDirectFields,
+    applyExtraction: rsState.applyExtraction,
     setSrsData: rs.setSrsData,
     setFinalizingStatus: rs.setFinalizingStatus,
     setActiveTab: (tab) => setActiveTab(tab as RsTab),
@@ -784,7 +785,6 @@ export default function ChatPage() {
     extractNonceRef: rs.extractNonceRef,
     setError,
     sessionId: session.sessionId,
-    directFields: fields.directFields,
   });
 
   // Re-initialize welcome message when locale changes
@@ -806,12 +806,7 @@ export default function ChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [input]);
 
-  // Refresh uploads when session is established
-  useEffect(() => {
-    if (!session.sessionId) return;
-    fields.refreshSessionUploads(session.sessionId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.sessionId]);
+  // (Upload state is restored via hydrateFromSession when loading a saved session)
 
   // Start analysis polling when finalizing
   useEffect(() => {
@@ -826,10 +821,15 @@ export default function ChatPage() {
 
     setInput("");
     setError(null);
-    const { directFieldsForRequest, deferredFieldsForRequest } = fields.applyDirectChatAnswer(
+    const currentValues = Object.fromEntries(
+      Object.entries(rsState.state.fields)
+        .filter(([, f]) => f.filled && f.source === "user")
+        .map(([k, f]) => [k, f.value])
+    );
+    const { valuesForRequest, deferredForRequest } = rsState.applyDirectChatAnswer(
       text,
       pendingDirectChatFieldRef,
-      session.sessionId
+      currentValues
     );
 
     msgs.addMessage("user", text);
@@ -857,7 +857,7 @@ export default function ChatPage() {
         if (capturedSessionId) {
           rs.setIsExtracting(true);
           const nonce = rs.beginExtraction();
-          await rs.runPostTurnExtraction(capturedSessionId, directFieldsForRequest, nonce, fields.setDirectFields);
+          await rs.runPostTurnExtraction(capturedSessionId, nonce);
         } else {
           rs.setIsExtracting(false);
         }
@@ -873,18 +873,10 @@ export default function ChatPage() {
         setActiveTab("Analysis");
       },
       (key, value) => {
-        if (DIRECT_INPUT_KEYS.has(key)) return;
-        rs.setRsPartial((prev) => ({
-          completeness: prev?.completeness ?? 0,
-          fields: { ...(prev?.fields ?? {}), [key]: { filled: true, value } },
-        }));
-        if (SUGGESTABLE_DIRECT_KEYS.has(key) && !(directFieldsForRequest[key] ?? "").trim()) {
-          fields.setDirectFields((prev) => ({ ...prev, [key]: value }));
-          fields.setDeferredDirectFields((prev) => prev.filter((f) => f !== key));
-        }
+        rsState.applyExtraction({ completeness: 0, fields: { [key]: { filled: true, value } } });
       },
-      directFieldsForRequest,
-      deferredFieldsForRequest,
+      valuesForRequest,
+      deferredForRequest,
       (key) => setActiveWorkflowField(key),
       (messageId) => msgs.setMessageBackendId(assistantId, messageId),
     );
@@ -909,12 +901,10 @@ export default function ChatPage() {
   async function handleLoadSession(sid: string) {
     const loaded = await session.loadSession(sid);
     msgs.loadMessages(loaded.messages);
-    rs.setRsPartial(loaded.rsPartial);
-    fields.setDirectFields(loaded.directFields);
+    if (loaded.rsPartial) rsState.hydrateFromSession(loaded.rsPartial);
     rs.setSrsData(loaded.srsData);
     rs.setFinalAnalysis(loaded.finalAnalysis);
     rs.setFinalizingStatus(loaded.finalizingStatus);
-    fields.setDeferredDirectFields([]);
     setActiveWorkflowField(null);
     if (loaded.finalizingStatus === "complete") setActiveTab("Analysis");
   }
@@ -923,7 +913,7 @@ export default function ChatPage() {
     msgs.resetMessages(t("welcome_message"));
     session.resetSession(t("welcome_message"));
     rs.resetExtraction();
-    fields.resetDirectFields();
+    rsState.reset();
     setActiveWorkflowField(null);
     if (voice.chatMode === "voice") voice.stopVoice();
   }
@@ -938,7 +928,8 @@ export default function ChatPage() {
     const sid = file.sessionId ?? session.sessionId;
     if (sid) {
       if (!session.sessionId) session.setSessionId(sid);
-      await fields.refreshSessionUploads(sid, [file]);
+      const filenames = [file].map((f) => f.filename).join("\n");
+      rsState.applyUploadAttachments(filenames);
     }
     setUploadOpen(false);
   }
@@ -1045,11 +1036,11 @@ export default function ChatPage() {
         <RsDocumentPanel
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          rsPartial={rs.rsPartial}
-          directFields={fields.directFields}
-          onDirectFieldChange={(key, value) =>
-            fields.handleDirectFieldChange(key, value, session.sessionId)
-          }
+          rsState={rsState.state}
+          rsCompleteness={rsState.completeness}
+          onFieldChange={rsState.setUserField}
+          onAcceptSuggestion={rsState.acceptSuggestion}
+          onDismissSuggestion={rsState.dismissSuggestion}
           sessionId={session.sessionId}
           onGenerateFull={handleGenerateFull}
           srsData={rs.srsData}

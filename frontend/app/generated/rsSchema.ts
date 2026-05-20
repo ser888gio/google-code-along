@@ -476,36 +476,7 @@ export const REQUIRED_FIELD_KEYS = [
   "data_security_classification",
   "solution_type"
 ] as const;
-const OPTIONAL_FIELD_KEYS = [
-  "report_frequency",
-  "saved_time_hours_per_year",
-  "cost_saving",
-  "revenue_increase",
-  "risk_avoidance",
-  "dimensions_and_cuts",
-  "comments",
-  "attachments"
-] as const;
-export const STRICT_DIRECT_FIELD_KEYS = [
-  "saved_time_hours_per_year",
-  "cost_saving",
-  "revenue_increase",
-  "comments",
-  "attachments"
-] as const;
-export const SUGGESTABLE_DIRECT_FIELD_KEYS = [
-  "use_case_title",
-  "department",
-  "requestor",
-  "product_owner"
-] as const;
-const DIRECT_CHAT_FIELD_KEYS = [
-  "use_case_title",
-  "department",
-  "requestor",
-  "product_owner"
-] as const;
-export type DirectChatFieldKey = (typeof DIRECT_CHAT_FIELD_KEYS)[number];
+export type DirectChatFieldKey = "use_case_title" | "department" | "requestor" | "product_owner";
 
 export const DIRECT_CHAT_FIELD_PATTERNS: Array<{
   key: DirectChatFieldKey;

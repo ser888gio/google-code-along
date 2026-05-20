@@ -1,8 +1,9 @@
 "use client";
 
-import { RsPartialData } from "../../lib/api";
+import { RsState } from "../../lib/api";
 import { RS_SECTIONS, Section } from "../generated/rsSchema";
 import { useLocale } from "../i18n/LocaleContext";
+import FieldCard from "./FieldCard";
 
 const SECTION_TITLE_KEYS: Record<string, string> = {
   "Identity & Current State": "rs.section.identity_current_state",
@@ -48,110 +49,25 @@ function translateFieldLabel(label: string, t: (key: string) => string) {
   return key ? t(key) : label;
 }
 
-// ─── Cards ────────────────────────────────────────────────────────────────────
-
-function PlaceholderCard({ label, pulsing = false }: { label: string; pulsing?: boolean }) {
-  const { t } = useLocale();
-  return (
-    <div
-      className={`rounded border-2 border-dashed border-gray-200 px-3 py-2.5 ${
-        pulsing ? "animate-shimmer" : "bg-gray-50"
-      }`}
-    >
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
-          {label}
-        </span>
-        <span className="ml-auto text-[10px] italic text-gray-300">{t("rs.gathering")}</span>
-      </div>
-    </div>
-  );
-}
-
-function FilledCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="animate-fadeIn rounded border border-gray-200 bg-white px-3 py-2.5 shadow-sm">
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-[#1a3a2a]">
-          {label}
-        </span>
-        <span className="ml-auto shrink-0 rounded bg-[#e8f5e9] px-1.5 py-0.5 text-[10px] font-bold text-[#2e7d32]">
-          AI
-        </span>
-      </div>
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-gray-700">{value}</p>
-    </div>
-  );
-}
-
-function EditableCard({
-  label,
-  fieldKey,
-  value,
-  onChange,
-  multiline = false,
-}: {
-  label: string;
-  fieldKey: string;
-  value: string;
-  onChange: (key: string, value: string) => void;
-  multiline?: boolean;
-}) {
-  const { t } = useLocale();
-  return (
-    <div className="rounded border border-blue-200 bg-white px-3 py-2.5 shadow-sm">
-      <div className="mb-1.5 flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-[#1a3a2a]">
-          {label}
-        </span>
-        <span className="ml-auto shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
-          {t("rs.badge.direct")}
-        </span>
-      </div>
-      {multiline ? (
-        <textarea
-          value={value}
-          onChange={(e) => onChange(fieldKey, e.target.value)}
-          placeholder={`${t("rs.badge.direct")} ${label.toLowerCase()}…`}
-          rows={2}
-          className="w-full resize-none text-sm leading-relaxed text-gray-700 outline-none placeholder-gray-300"
-        />
-      ) : (
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(fieldKey, e.target.value)}
-          placeholder={`${t("rs.badge.direct")} ${label.toLowerCase()}…`}
-          className="w-full text-sm text-gray-700 outline-none placeholder-gray-300"
-        />
-      )}
-    </div>
-  );
-}
-
 // ─── Section group ────────────────────────────────────────────────────────────
 
 function SectionGroup({
   section,
-  fields,
-  directFields,
-  onDirectFieldChange,
-  isExtracting = false,
+  state,
+  isExtracting,
+  onFieldChange,
+  onAcceptSuggestion,
+  onDismissSuggestion,
 }: {
   section: Section;
-  fields: RsPartialData["fields"] | undefined;
-  directFields: Record<string, string>;
-  onDirectFieldChange: (key: string, value: string) => void;
-  isExtracting?: boolean;
+  state: RsState;
+  isExtracting: boolean;
+  onFieldChange: (key: string, value: string) => void;
+  onAcceptSuggestion: (key: string) => void;
+  onDismissSuggestion: (key: string) => void;
 }) {
   const { t } = useLocale();
-  const filledCount = section.fields.filter((f) => {
-    if (f.directInput) {
-      return (directFields[f.key] ?? "").trim() !== "";
-    }
-    const entry = fields?.[f.key];
-    return entry?.filled === true && entry.value != null && entry.value.trim() !== "";
-  }).length;
+  const filledCount = section.fields.filter((f) => state.fields[f.key]?.filled).length;
   const total = section.fields.length;
 
   return (
@@ -169,32 +85,19 @@ function SectionGroup({
       </div>
 
       <div className="space-y-1.5 pl-2">
-        {section.fields.map((f) => {
-          if (f.directInput) {
-            return (
-              <EditableCard
-                key={f.key}
-                label={translateFieldLabel(f.label, t)}
-                fieldKey={f.key}
-                value={directFields[f.key] ?? ""}
-                onChange={onDirectFieldChange}
-                multiline={f.multiline}
-              />
-            );
-          }
-
-          const entry = fields?.[f.key];
-          const isFilled =
-            entry?.filled === true &&
-            entry.value != null &&
-            entry.value.trim() !== "";
-
-          return isFilled ? (
-            <FilledCard key={f.key} label={translateFieldLabel(f.label, t)} value={entry!.value!} />
-          ) : (
-            <PlaceholderCard key={f.key} label={translateFieldLabel(f.label, t)} pulsing={isExtracting} />
-          );
-        })}
+        {section.fields.map((f) => (
+          <FieldCard
+            key={f.key}
+            label={translateFieldLabel(f.label, t)}
+            fieldKey={f.key}
+            field={state.fields[f.key]}
+            multiline={f.multiline}
+            isExtracting={isExtracting}
+            onChange={onFieldChange}
+            onAcceptSuggestion={onAcceptSuggestion}
+            onDismissSuggestion={onDismissSuggestion}
+          />
+        ))}
       </div>
     </div>
   );
@@ -202,11 +105,7 @@ function SectionGroup({
 
 // ─── Completeness header ──────────────────────────────────────────────────────
 
-function CompletenessHeader({
-  completeness,
-}: {
-  completeness: number;
-}) {
+function CompletenessHeader({ completeness }: { completeness: number }) {
   const { t } = useLocale();
 
   const barColor =
@@ -230,7 +129,6 @@ function CompletenessHeader({
         <p className="text-sm font-bold text-gray-800">{t("rs.title")}</p>
         <p className="text-xs text-gray-400">{t("rs.subtitle")}</p>
       </div>
-
       <div>
         <div className="mb-1 flex justify-between text-[10px]">
           <span className={`font-semibold ${textColor}`}>
@@ -252,18 +150,21 @@ function CompletenessHeader({
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function RsLiveTemplate({
-  rsPartial,
-  directFields,
-  onDirectFieldChange,
+  state,
+  completeness,
+  onFieldChange,
+  onAcceptSuggestion,
+  onDismissSuggestion,
   isExtracting = false,
 }: {
-  rsPartial: RsPartialData | null;
-  directFields: Record<string, string>;
-  onDirectFieldChange: (key: string, value: string) => void;
+  state: RsState;
+  completeness: number;
+  onFieldChange: (key: string, value: string) => void;
+  onAcceptSuggestion: (key: string) => void;
+  onDismissSuggestion: (key: string) => void;
   isExtracting?: boolean;
 }) {
   const { t } = useLocale();
-  const completeness = rsPartial?.completeness ?? 0;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -273,16 +174,16 @@ export default function RsLiveTemplate({
           {t("rs.processing")}
         </div>
       )}
-
       <div className="flex-1 space-y-5 overflow-y-auto p-4">
         {RS_SECTIONS.map((section) => (
           <SectionGroup
             key={section.number}
             section={section}
-            fields={rsPartial?.fields}
-            directFields={directFields}
-            onDirectFieldChange={onDirectFieldChange}
+            state={state}
             isExtracting={isExtracting}
+            onFieldChange={onFieldChange}
+            onAcceptSuggestion={onAcceptSuggestion}
+            onDismissSuggestion={onDismissSuggestion}
           />
         ))}
       </div>
