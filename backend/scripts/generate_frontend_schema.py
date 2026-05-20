@@ -73,7 +73,7 @@ export interface Section {{
 
 export const RS_SECTIONS: Section[] = {sections_json};
 
-const REQUIRED_FIELD_KEYS = {required_json} as const;
+export const REQUIRED_FIELD_KEYS = {required_json} as const;
 const OPTIONAL_FIELD_KEYS = {optional_json} as const;
 export const STRICT_DIRECT_FIELD_KEYS = {strict_direct_json} as const;
 export const SUGGESTABLE_DIRECT_FIELD_KEYS = {suggestable_direct_json} as const;

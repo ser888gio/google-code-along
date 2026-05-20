@@ -20,6 +20,7 @@ import {
   DEFERRED_DIRECT_ANSWER_PATTERNS,
   DIRECT_CHAT_FIELD_PATTERNS,
   DirectChatFieldKey,
+  REQUIRED_FIELD_KEYS,
   STRICT_DIRECT_FIELD_KEYS,
   SUGGESTABLE_DIRECT_FIELD_KEYS,
 } from "./generated/rsSchema";
@@ -358,6 +359,28 @@ const DIRECT_INPUT_KEYS = new Set<string>(STRICT_DIRECT_FIELD_KEYS);
 // Fields the AI can suggest but only if the user hasn't typed a value yet.
 const SUGGESTABLE_DIRECT_KEYS = new Set<string>(SUGGESTABLE_DIRECT_FIELD_KEYS);
 
+// All required field keys as a set for O(1) lookup.
+const REQUIRED_KEYS = new Set<string>(REQUIRED_FIELD_KEYS);
+
+/**
+ * Compute completeness % locally without a backend round-trip.
+ * For suggestable direct-input fields (use_case_title, department, requestor,
+ * product_owner) we check directFields because they may not yet be in rsPartial.
+ * For all other required fields we check rsPartial.fields[k].filled.
+ */
+function computeOptimisticCompleteness(
+  rsPartial: RsPartialData | null,
+  directFields: Record<string, string>,
+): number {
+  const filled = REQUIRED_FIELD_KEYS.filter((k) => {
+    if (SUGGESTABLE_DIRECT_KEYS.has(k)) {
+      return (directFields[k] ?? "").trim() !== "";
+    }
+    return rsPartial?.fields[k]?.filled === true;
+  }).length;
+  return Math.round((filled / REQUIRED_KEYS.size) * 100);
+}
+
 function normalizeForMatch(value: string): string {
   return value
     .toLowerCase()
@@ -423,14 +446,17 @@ function mergePartialFields(
         !incoming.fields[k]?.filled,
     )
   );
-  return {
-    completeness: incoming.completeness,
-    fields: {
-      ...incoming.fields,
-      ...prevFilled,
-      ...prevDirect,
-    },
+  const mergedFields = {
+    ...incoming.fields,
+    ...prevFilled,
+    ...prevDirect,
   };
+  // Recompute completeness from the merged fields so that:
+  // 1. Previously-extracted fields preserved in prevFilled are counted.
+  // 2. Direct-input required fields typed by the user are counted.
+  const mergedPartial: RsPartialData = { completeness: 0, fields: mergedFields };
+  const completeness = computeOptimisticCompleteness(mergedPartial, directFields);
+  return { completeness, fields: mergedFields };
 }
 
 // ─── History Sidebar ──────────────────────────────────────────────────────────
@@ -1234,12 +1260,18 @@ export default function ChatPage() {
   }
 
   function handleDirectFieldChange(key: string, value: string) {
-    setDirectFields((prev) => ({ ...prev, [key]: value }));
+    const nextDirectFields = { ...directFields, [key]: value };
+    setDirectFields(nextDirectFields);
     if (value.trim()) {
       setDeferredDirectFields((prev) => prev.filter((field) => field !== key));
     }
 
-    // Update completeness optimistically: re-read from backend after debounce
+    // Update completeness optimistically on every keystroke for direct fields.
+    setRsPartial((prev) => {
+      if (!prev) return prev;
+      return { ...prev, completeness: computeOptimisticCompleteness(prev, nextDirectFields) };
+    });
+
     if (directFieldDebounceRef.current) clearTimeout(directFieldDebounceRef.current);
     directFieldDebounceRef.current = setTimeout(async () => {
       if (!sessionId) return;

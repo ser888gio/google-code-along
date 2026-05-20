@@ -454,7 +454,7 @@ export const RS_SECTIONS: Section[] = [
   }
 ];
 
-const REQUIRED_FIELD_KEYS = [
+export const REQUIRED_FIELD_KEYS = [
   "use_case_title",
   "department",
   "requestor",
