@@ -1,13 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { streamChat, extractContext, getDiscoveryState, downloadRsTemplateDocx, getFirestoreData, getSessions, getHistory, getAnalysis, getSessionUploads, patchDirectFields, submitFeedback, updateFeedbackComment, submitSessionFeedback, FeedbackVote, SessionRating, RsPartialData, SrsData, SessionSummary, FinalAnalysis, UploadedFile } from "../lib/api";
-import { useAudioRecorder } from "../lib/useAudioRecorder";
-import { useAudioPlayer } from "../lib/useAudioPlayer";
-import { useWebSocket, WsServerMessage } from "../lib/useWebSocket";
+import {
+  streamChat,
+  downloadRsTemplateDocx,
+  FeedbackVote,
+  SessionRating,
+  RsPartialData,
+  SrsData,
+  FinalAnalysis,
+  SessionSummary,
+  UploadedFile,
+} from "../lib/api";
 import AnalysisPanel, { FinalizingOverlay } from "./components/AnalysisPanel";
 import FileUpload from "./components/FileUpload";
 import BpmnPanel from "./components/BpmnPanel";
@@ -16,43 +22,26 @@ import RsLiveTemplate from "./components/RsLiveTemplate";
 import FirestoreSrsPanel from "./components/FirestoreSrsPanel";
 import LanguageSwitcher from "./i18n/LanguageSwitcher";
 import { useLocale } from "./i18n/LocaleContext";
+import { DirectChatFieldKey } from "./generated/rsSchema";
+import { useMessages, makeWelcomeMessage, Message } from "./hooks/useMessages";
+import { useChatSession, FinalizingStatus } from "./hooks/useChatSession";
+import { useRsExtraction } from "./hooks/useRsExtraction";
 import {
-  DEFERRED_DIRECT_ANSWER_PATTERNS,
-  DIRECT_CHAT_FIELD_PATTERNS,
-  DirectChatFieldKey,
-  REQUIRED_FIELD_KEYS,
-  STRICT_DIRECT_FIELD_KEYS,
-  SUGGESTABLE_DIRECT_FIELD_KEYS,
-} from "./generated/rsSchema";
+  useDirectFields,
+  DIRECT_INPUT_KEYS,
+  SUGGESTABLE_DIRECT_KEYS,
+  inferDirectChatFieldFromAssistant,
+} from "./hooks/useDirectFields";
+import { useVoiceMode, ChatMode } from "./hooks/useVoiceMode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Role = "user" | "assistant";
 
-interface Message {
-  id: string;
-  role: Role;
-  text: string;
-  streaming?: boolean;
-  messageId?: string;
-  feedback?: {
-    vote: FeedbackVote;
-    comment?: string;
-    pending?: boolean;
-  };
-}
-
 const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Analysis", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
 
-type ChatMode = "text" | "voice";
 const SESSION_RATINGS = [1, 2, 3, 4, 5] as const satisfies readonly SessionRating[];
-
-// Finalization can be in one of three states:
-//   idle       — not yet triggered
-//   finalizing — backend is running the finalizer pipeline; frontend is polling
-//   complete   — final analysis is ready and stored in state
-type FinalizingStatus = "idle" | "finalizing" | "complete";
 
 // ─── Message Bubble ───────────────────────────────────────────────────────────
 
@@ -98,7 +87,7 @@ function MessageBubble({
     await onFeedback(msg.id, vote);
   }
 
-  async function handleCommentSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleCommentSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!canSendFeedback || !activeVote || feedbackPending) return;
     await onFeedbackComment(msg.id, comment);
@@ -261,7 +250,6 @@ function RsDocumentPanel({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Tab bar */}
       <div className="flex shrink-0 items-center border-b border-gray-200 bg-white px-4">
         <span className="mr-4 border-r border-gray-200 py-3 pr-4 text-sm font-semibold text-gray-800">
           {t("header.rs")}
@@ -289,7 +277,6 @@ function RsDocumentPanel({
         </div>
       </div>
 
-      {/* Content area */}
       <div className="flex-1 overflow-hidden bg-gray-50">
         {activeTab === "Preview" ? (
           <RsLiveTemplate
@@ -345,118 +332,6 @@ function RsDocumentPanel({
       </div>
     </div>
   );
-}
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-function makeWelcomeMessage(text: string): Message {
-  return { id: "welcome", role: "assistant", text, streaming: false };
-}
-
-// Fields that must never be AI-extracted (numeric/financial or file-backed).
-const DIRECT_INPUT_KEYS = new Set<string>(STRICT_DIRECT_FIELD_KEYS);
-
-// Fields the AI can suggest but only if the user hasn't typed a value yet.
-const SUGGESTABLE_DIRECT_KEYS = new Set<string>(SUGGESTABLE_DIRECT_FIELD_KEYS);
-
-// All required field keys as a set for O(1) lookup.
-const REQUIRED_KEYS = new Set<string>(REQUIRED_FIELD_KEYS);
-
-/**
- * Compute completeness % locally without a backend round-trip.
- * For suggestable direct-input fields (use_case_title, department, requestor,
- * product_owner) we check directFields because they may not yet be in rsPartial.
- * For all other required fields we check rsPartial.fields[k].filled.
- */
-function computeOptimisticCompleteness(
-  rsPartial: RsPartialData | null,
-  directFields: Record<string, string>,
-): number {
-  const filled = REQUIRED_FIELD_KEYS.filter((k) => {
-    if (SUGGESTABLE_DIRECT_KEYS.has(k)) {
-      return (directFields[k] ?? "").trim() !== "";
-    }
-    return rsPartial?.fields[k]?.filled === true;
-  }).length;
-  return Math.round((filled / REQUIRED_KEYS.size) * 100);
-}
-
-function normalizeForMatch(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function inferDirectChatFieldFromAssistant(text: string): DirectChatFieldKey | null {
-  const normalized = normalizeForMatch(text);
-  for (const field of DIRECT_CHAT_FIELD_PATTERNS) {
-    if (field.patterns.some((pattern) => new RegExp(pattern).test(normalized))) {
-      return field.key;
-    }
-  }
-  return null;
-}
-
-function isDeferredDirectAnswer(text: string): boolean {
-  const normalized = normalizeForMatch(text);
-  return DEFERRED_DIRECT_ANSWER_PATTERNS.some((pattern) =>
-    new RegExp(pattern).test(normalized)
-  );
-}
-
-function cleanDirectAnswerValue(text: string): string {
-  return text
-    .trim()
-    .replace(/^(je to|it's|it is|jmenuje se|bude to)\s+/i, "")
-    .replace(/[.。]+$/, "")
-    .trim();
-}
-
-function isPlausibleDirectAnswer(text: string): boolean {
-  const value = cleanDirectAnswerValue(text);
-  return value.length > 0 && value.length <= 80 && !value.includes("\n") && !value.includes("?");
-}
-
-/**
- * Merge an AI-extracted partial state into the previous state, preserving
- * user-typed direct-input fields and suggestable fields that have been set.
- */
-function mergePartialFields(
-  prev: RsPartialData | null,
-  incoming: RsPartialData,
-  directFields: Record<string, string>,
-): RsPartialData {
-  // Only fall back to prev for fields that incoming did NOT fill — this
-  // ensures that agent-confirmed updates (e.g. "change target users to X")
-  // are never silently overwritten by the stale prev value.
-  const prevFilled = Object.fromEntries(
-    Object.entries(prev?.fields ?? {}).filter(
-      ([k, v]) => v.filled && !incoming.fields[k]?.filled,
-    )
-  );
-  // Preserve direct-input and user-typed suggestable fields only when
-  // incoming does not carry a filled value for those keys.
-  const prevDirect = Object.fromEntries(
-    Object.entries(prev?.fields ?? {}).filter(
-      ([k]) =>
-        (DIRECT_INPUT_KEYS.has(k) || (SUGGESTABLE_DIRECT_KEYS.has(k) && (directFields[k] ?? "").trim() !== "")) &&
-        !incoming.fields[k]?.filled,
-    )
-  );
-  const mergedFields = {
-    ...incoming.fields,
-    ...prevFilled,
-    ...prevDirect,
-  };
-  // Recompute completeness from the merged fields so that:
-  // 1. Previously-extracted fields preserved in prevFilled are counted.
-  // 2. Direct-input required fields typed by the user are counted.
-  const mergedPartial: RsPartialData = { completeness: 0, fields: mergedFields };
-  const completeness = computeOptimisticCompleteness(mergedPartial, directFields);
-  return { completeness, fields: mergedFields };
 }
 
 // ─── History Sidebar ──────────────────────────────────────────────────────────
@@ -754,45 +629,7 @@ function ChatInput({
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-
-function FileUploadModal({
-  open,
-  sessionId,
-  onClose,
-  onUploaded,
-}: {
-  open: boolean;
-  sessionId: string | null;
-  onClose: () => void;
-  onUploaded: (file: UploadedFile) => void;
-}) {
-  const { t } = useLocale();
-  if (!open) return null;
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onClick={onClose}
-    >
-      <div
-        className="w-80 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-800">{t("modal.attach_file")}</span>
-          <button
-            onClick={onClose}
-            className="text-xs text-gray-400 hover:text-gray-600"
-          >
-            x
-          </button>
-        </div>
-        <FileUpload sessionId={sessionId} onUploaded={onUploaded} />
-      </div>
-    </div>
-  );
-}
+// ─── Session Rating Modal ─────────────────────────────────────────────────────
 
 function SessionRatingModal({
   open,
@@ -811,7 +648,7 @@ function SessionRatingModal({
   onClose: () => void;
   onRatingChange: (rating: SessionRating) => void;
   onCommentChange: (comment: string) => void;
-  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
 }) {
   const { t } = useLocale();
   if (!open) return null;
@@ -829,9 +666,7 @@ function SessionRatingModal({
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold text-gray-800">{t("modal.rate_session")}</h2>
-            <p className="mt-1 text-xs text-gray-500">
-              {t("modal.rate_desc")}
-            </p>
+            <p className="mt-1 text-xs text-gray-500">{t("modal.rate_desc")}</p>
           </div>
           <button
             type="button"
@@ -842,7 +677,6 @@ function SessionRatingModal({
             x
           </button>
         </div>
-
         <div className="grid grid-cols-5 gap-2">
           {SESSION_RATINGS.map((option) => (
             <button
@@ -859,7 +693,6 @@ function SessionRatingModal({
             </button>
           ))}
         </div>
-
         <textarea
           value={comment}
           onChange={(e) => onCommentChange(e.target.value)}
@@ -867,7 +700,6 @@ function SessionRatingModal({
           rows={3}
           className="mt-3 min-h-24 w-full resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
         />
-
         <div className="mt-4 flex justify-end gap-2">
           <button
             type="button"
@@ -889,6 +721,8 @@ function SessionRatingModal({
     </div>
   );
 }
+
+// ─── Chat Transcript ──────────────────────────────────────────────────────────
 
 function ChatTranscript({
   messages,
@@ -919,196 +753,54 @@ function ChatTranscript({
   );
 }
 
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function ChatPage() {
   const { locale, t } = useLocale();
-  const [messages, setMessages] = useState<Message[]>(() => [makeWelcomeMessage(t("welcome_message"))]);
-  const [input, setInput] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RsTab>("Preview");
-  const [rsPartial, setRsPartial] = useState<RsPartialData | null>(null);
-  const [srsData, setSrsData] = useState<SrsData | null>(null);
+  const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [ratingOpen, setRatingOpen] = useState(false);
-  const [sessionEnded, setSessionEnded] = useState(false);
-  const [sessionRating, setSessionRating] = useState<SessionRating | null>(null);
-  const [sessionRatingComment, setSessionRatingComment] = useState("");
-  const [isSubmittingSessionRating, setIsSubmittingSessionRating] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [historySessions, setHistorySessions] = useState<SessionSummary[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [finalizingStatus, setFinalizingStatus] = useState<FinalizingStatus>("idle");
-  const [finalAnalysis, setFinalAnalysis] = useState<FinalAnalysis | null>(null);
-  const [isExtracting, setIsExtracting] = useState(false);
-  const [chatMode, setChatMode] = useState<ChatMode>("text");
-  const [directFields, setDirectFields] = useState<Record<string, string>>({});
-  const [deferredDirectFields, setDeferredDirectFields] = useState<DirectChatFieldKey[]>([]);
   const [activeWorkflowField, setActiveWorkflowField] = useState<string | null>(null);
-  // Debounce timer ref for persisting direct fields to the backend
-  const directFieldDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Stale-response guard: discard extraction results from earlier turns
-  const extractNonceRef = useRef(0);
-  // Polling interval ref — cleared when finalization completes or component unmounts
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Track the current voice transcription message id so we can append to it
-  const voiceTranscriptIdRef = useRef<string | null>(null);
-  // Track the current user voice transcription message id
-  const voiceUserTranscriptIdRef = useRef<string | null>(null);
-  // Track simple form fields the assistant just asked for so answers can fill instantly.
   const pendingDirectChatFieldRef = useRef<DirectChatFieldKey | null>(null);
 
-  // ─── Audio Player ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    setMessages((prev) => {
-      if (prev.length === 1 && prev[0]?.id === "welcome" && prev[0]?.role === "assistant") {
-        return [makeWelcomeMessage(t("welcome_message"))];
-      }
-      return prev;
-    });
-  }, [locale, t]);
-
-  const audioPlayer = useAudioPlayer();
-
-  // ─── WebSocket ─────────────────────────────────────────────────────────────
-  const handleWsAudio = useCallback(
-    (pcmData: ArrayBuffer) => {
-      audioPlayer.enqueue(pcmData);
-    },
-    [audioPlayer]
-  );
-
-  const handleWsMessage = useCallback(
-    (msg: WsServerMessage) => {
-      if (msg.type === "user_transcript_partial") {
-        // Live delta chunk — append to the streaming user bubble as they speak
-        if (voiceUserTranscriptIdRef.current) {
-          appendToMessage(voiceUserTranscriptIdRef.current, msg.text);
-        } else {
-          const id = addMessage("user", msg.text, true);
-          voiceUserTranscriptIdRef.current = id;
-        }
-      } else if (msg.type === "user_transcript") {
-        // Authoritative final text — replace the live bubble to heal any chunk drift
-        if (voiceUserTranscriptIdRef.current) {
-          replaceMessageText(voiceUserTranscriptIdRef.current, msg.text);
-        } else {
-          const id = addMessage("user", msg.text, true);
-          voiceUserTranscriptIdRef.current = id;
-        }
-      } else if (msg.type === "text") {
-        // Finalize the user transcript bubble when assistant starts responding
-        if (voiceUserTranscriptIdRef.current) {
-          finalizeMessage(voiceUserTranscriptIdRef.current);
-          voiceUserTranscriptIdRef.current = null;
-        }
-        // Append transcription/text to the current assistant message or create one
-        if (voiceTranscriptIdRef.current) {
-          appendToMessage(voiceTranscriptIdRef.current, msg.text);
-        } else {
-          const id = addMessage("assistant", msg.text, true);
-          voiceTranscriptIdRef.current = id;
-        }
-      } else if (msg.type === "turn_complete") {
-        // Finalize any open user transcript bubble
-        if (voiceUserTranscriptIdRef.current) {
-          finalizeMessage(voiceUserTranscriptIdRef.current);
-          voiceUserTranscriptIdRef.current = null;
-        }
-        // Finalize the assistant voice message
-        if (voiceTranscriptIdRef.current) {
-          finalizeMessage(voiceTranscriptIdRef.current);
-          voiceTranscriptIdRef.current = null;
-        }
-        audioPlayer.drain();
-
-        // Run the same post-processing as text chat: extract context + fetch Firestore data
-        if (sessionId) {
-          const nonce = ++extractNonceRef.current;
-          setIsExtracting(true);
-          Promise.all([
-            extractContext(sessionId),
-            getFirestoreData(sessionId),
-          ]).then(([partial, fsData]) => {
-            if (nonce === extractNonceRef.current) {
-              if (partial) {
-                setRsPartial((prev) => mergePartialFields(prev, partial, directFields));
-                setDirectFields((prevDirect) => {
-                  const updates: Record<string, string> = {};
-                  for (const k of SUGGESTABLE_DIRECT_KEYS) {
-                    if (!(prevDirect[k] ?? "").trim() && partial.fields[k]?.filled && partial.fields[k]?.value) {
-                      updates[k] = partial.fields[k].value as string;
-                    }
-                  }
-                  return Object.keys(updates).length ? { ...prevDirect, ...updates } : prevDirect;
-                });
-              }
-              if (fsData) setSrsData(fsData);
-              setIsExtracting(false);
-            }
-          }).catch((err) => {
-            console.error("[Voice] Post-turn extraction failed:", err);
-            if (nonce === extractNonceRef.current) {
-              setIsExtracting(false);
-            }
-          });
-        }
-
-        // Handle finalization trigger from voice mode
-        if (msg.finalizing) {
-          setFinalizingStatus("finalizing");
-          setActiveTab("Analysis");
-        }
-      } else if (msg.type === "error") {
-        setError(msg.message);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [audioPlayer, sessionId]
-  );
-
-  const ws = useWebSocket({
-    onAudioData: handleWsAudio,
-    onMessage: handleWsMessage,
+  const msgs = useMessages(t("welcome_message"));
+  const session = useChatSession(setError);
+  const rs = useRsExtraction();
+  const fields = useDirectFields(rs.setRsPartial);
+  const voice = useVoiceMode({
+    addMessage: msgs.addMessage,
+    appendToMessage: msgs.appendToMessage,
+    replaceMessageText: msgs.replaceMessageText,
+    finalizeMessage: msgs.finalizeMessage,
+    setRsPartial: rs.setRsPartial,
+    setDirectFields: fields.setDirectFields,
+    setSrsData: rs.setSrsData,
+    setFinalizingStatus: rs.setFinalizingStatus,
+    setActiveTab: (tab) => setActiveTab(tab as RsTab),
+    setIsExtracting: rs.setIsExtracting,
+    extractNonceRef: rs.extractNonceRef,
+    setError,
+    sessionId: session.sessionId,
+    directFields: fields.directFields,
   });
 
-  // ─── Audio Recorder ────────────────────────────────────────────────────────
-  const handleAudioChunk = useCallback(
-    (pcmData: ArrayBuffer) => {
-      ws.sendAudio(pcmData);
-    },
-    [ws]
-  );
-
-  const audioRecorder = useAudioRecorder(handleAudioChunk);
-
-  // Poll GET /analyses/{sessionId} every 5 s while the finalizer is running
+  // Re-initialize welcome message when locale changes
   useEffect(() => {
-    if (finalizingStatus !== "finalizing" || !sessionId) return;
+    msgs.resetMessages(t("welcome_message"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locale]);
 
-    pollingRef.current = setInterval(async () => {
-      const result = await getAnalysis(sessionId);
-      if (result.status === "complete" && result.analysis) {
-        clearInterval(pollingRef.current!);
-        pollingRef.current = null;
-        setFinalAnalysis(result.analysis);
-        setFinalizingStatus("complete");
-        setActiveTab("Analysis");
-      }
-    }, 5000);
-
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
-  }, [finalizingStatus, sessionId]);
-
+  // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [msgs.messages]);
 
+  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -1116,535 +808,197 @@ export default function ChatPage() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, [input]);
 
+  // Refresh uploads when session is established
   useEffect(() => {
-    if (!sessionId) return;
-    refreshSessionUploads(sessionId);
+    if (!session.sessionId) return;
+    fields.refreshSessionUploads(session.sessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId]);
+  }, [session.sessionId]);
 
-  function addMessage(role: Role, text: string, streaming = false): string {
-    const id = crypto.randomUUID();
-    setMessages((prev) => [...prev, { id, role, text, streaming }]);
-    return id;
-  }
-
-  function appendToMessage(id: string, chunk: string) {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, text: m.text + chunk } : m))
-    );
-  }
-
-  function replaceMessageText(id: string, text: string) {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, text } : m))
-    );
-  }
-
-  function finalizeMessage(id: string) {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, streaming: false } : m))
-    );
-  }
-
-  function setMessageBackendId(id: string, messageId: string) {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, messageId } : m))
-    );
-  }
-
-  async function handleFeedback(localId: string, vote: FeedbackVote) {
-    const target = messages.find((m) => m.id === localId);
-    if (!sessionId || !target?.messageId) return;
-
-    const previousFeedback = target.feedback;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === localId
-          ? { ...m, feedback: { ...(m.feedback ?? {}), vote, pending: true } }
-          : m
-      )
-    );
-
-    try {
-      await submitFeedback(sessionId, target.messageId, vote);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === localId && m.feedback
-            ? { ...m, feedback: { ...m.feedback, pending: false } }
-            : m
-        )
-      );
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === localId ? { ...m, feedback: previousFeedback } : m
-        )
-      );
-      setError(err instanceof Error ? err.message : "Could not save feedback");
-    }
-  }
-
-  async function handleFeedbackComment(localId: string, comment: string) {
-    const target = messages.find((m) => m.id === localId);
-    if (!sessionId || !target?.messageId || !target.feedback?.vote) return;
-
-    const previousComment = target.feedback.comment;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === localId && m.feedback
-          ? { ...m, feedback: { ...m.feedback, comment, pending: true } }
-          : m
-      )
-    );
-
-    try {
-      await updateFeedbackComment(sessionId, target.messageId, comment);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === localId && m.feedback
-            ? { ...m, feedback: { ...m.feedback, pending: false } }
-            : m
-        )
-      );
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === localId && m.feedback
-            ? {
-                ...m,
-                feedback: {
-                  ...m.feedback,
-                  comment: previousComment,
-                  pending: false,
-                },
-              }
-            : m
-        )
-      );
-      setError(err instanceof Error ? err.message : "Could not save feedback comment");
-    }
-  }
-
-  function formatUploadAttachments(files: UploadedFile[]): string {
-    return files.map((file) => file.filename).join("\n");
-  }
-
-  async function refreshSessionUploads(sid: string, fallbackFiles: UploadedFile[] = []) {
-    const files = await getSessionUploads(sid);
-    const visibleFiles = files.length > 0 ? files : fallbackFiles;
-    if (visibleFiles.length === 0) return;
-
-    const attachments = formatUploadAttachments(visibleFiles);
-    setDirectFields((prev) =>
-      prev.attachments === attachments ? prev : { ...prev, attachments }
-    );
-
-    const merged = await patchDirectFields(sid, { attachments });
-    if (merged) setRsPartial(merged);
-  }
-
-  function ensureSession(): string {
-    if (sessionId) return sessionId;
-    const newId = crypto.randomUUID();
-    setSessionId(newId);
-    return newId;
-  }
-
-  async function handleFileUploaded(file: UploadedFile) {
-    const sid = file.sessionId ?? sessionId;
-    if (sid) {
-      if (!sessionId) setSessionId(sid);
-      await refreshSessionUploads(sid, [file]);
-    }
-    setUploadOpen(false);
-  }
-
-  function handleDirectFieldChange(key: string, value: string) {
-    const nextDirectFields = { ...directFields, [key]: value };
-    setDirectFields(nextDirectFields);
-    if (value.trim()) {
-      setDeferredDirectFields((prev) => prev.filter((field) => field !== key));
-    }
-
-    // Update completeness optimistically on every keystroke for direct fields.
-    setRsPartial((prev) => {
-      if (!prev) return prev;
-      return { ...prev, completeness: computeOptimisticCompleteness(prev, nextDirectFields) };
-    });
-
-    if (directFieldDebounceRef.current) clearTimeout(directFieldDebounceRef.current);
-    directFieldDebounceRef.current = setTimeout(async () => {
-      if (!sessionId) return;
-      const merged = await patchDirectFields(sessionId, { [key]: value });
-      if (merged) {
-        setRsPartial(merged);
-      }
-    }, 600);
-  }
-
-  function applyDirectChatAnswer(text: string): {
-    directFieldsForRequest: Record<string, string>;
-    deferredFieldsForRequest: DirectChatFieldKey[];
-  } {
-    const pendingKey = pendingDirectChatFieldRef.current;
-    if (!pendingKey || (directFields[pendingKey] ?? "").trim()) {
-      return {
-        directFieldsForRequest: directFields,
-        deferredFieldsForRequest: deferredDirectFields,
-      };
-    }
-
-    pendingDirectChatFieldRef.current = null;
-    if (isDeferredDirectAnswer(text) || !isPlausibleDirectAnswer(text)) {
-      const nextDeferredFields = Array.from(new Set([...deferredDirectFields, pendingKey]));
-      setDeferredDirectFields(nextDeferredFields);
-      return {
-        directFieldsForRequest: directFields,
-        deferredFieldsForRequest: nextDeferredFields,
-      };
-    }
-
-    const value = cleanDirectAnswerValue(text);
-    const nextDirectFields = { ...directFields, [pendingKey]: value };
-    const nextDeferredFields = deferredDirectFields.filter((field) => field !== pendingKey);
-    setDirectFields(nextDirectFields);
-    setDeferredDirectFields(nextDeferredFields);
-    setRsPartial((prev) => ({
-      completeness: prev?.completeness ?? 0,
-      fields: {
-        ...(prev?.fields ?? {}),
-        [pendingKey]: { filled: true, value },
-      },
-    }));
-
-    if (sessionId) {
-      void patchDirectFields(sessionId, { [pendingKey]: value }).then((merged) => {
-        if (merged) setRsPartial(merged);
-      });
-    }
-
-    return {
-      directFieldsForRequest: nextDirectFields,
-      deferredFieldsForRequest: nextDeferredFields,
-    };
-  }
+  // Start analysis polling when finalizing
+  useEffect(() => {
+    if (rs.finalizingStatus !== "finalizing" || !session.sessionId) return;
+    return rs.startPolling(session.sessionId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rs.finalizingStatus, session.sessionId]);
 
   async function handleSend() {
     const text = input.trim();
-    if (!text || isStreaming || sessionEnded) return;
+    if (!text || isStreaming || session.sessionEnded) return;
 
     setInput("");
     setError(null);
-    const { directFieldsForRequest, deferredFieldsForRequest } = applyDirectChatAnswer(text);
+    const { directFieldsForRequest, deferredFieldsForRequest } = fields.applyDirectChatAnswer(
+      text,
+      pendingDirectChatFieldRef,
+      session.sessionId
+    );
 
-    addMessage("user", text);
+    msgs.addMessage("user", text);
     setIsStreaming(true);
-    const assistantId = addMessage("assistant", "", true);
+    const assistantId = msgs.addMessage("assistant", "", true);
     let assistantText = "";
-
-    // Capture the session ID synchronously from the SSE stream.
-    // React's sessionId state may still be null on the first turn when onDone fires.
-    let capturedSessionId = sessionId;
+    let capturedSessionId = session.sessionId;
 
     await streamChat(
       text,
-      sessionId,
+      session.sessionId,
       (chunk) => {
         assistantText += chunk;
-        appendToMessage(assistantId, chunk);
+        msgs.appendToMessage(assistantId, chunk);
       },
       (id) => {
         capturedSessionId = id;
-        setSessionId(id);
+        session.setSessionId(id);
       },
       async () => {
-        finalizeMessage(assistantId);
+        msgs.finalizeMessage(assistantId);
         setIsStreaming(false);
         pendingDirectChatFieldRef.current = inferDirectChatFieldFromAssistant(assistantText);
 
-        // Progressive RS fill — fire and forget; chat never blocks on this
         if (capturedSessionId) {
-          setIsExtracting(true);
-          const nonce = ++extractNonceRef.current;
-          const [partial, fsData] = await Promise.all([
-            extractContext(capturedSessionId),
-            getFirestoreData(capturedSessionId),
-          ]);
-          // Only apply if a newer turn hasn't already superseded this one
-          if (nonce === extractNonceRef.current) {
-            if (partial) {
-              setRsPartial((prev) => mergePartialFields(prev, partial, directFieldsForRequest));
-              setDirectFields((prevDirect) => {
-                const updates: Record<string, string> = {};
-                for (const k of SUGGESTABLE_DIRECT_KEYS) {
-                  if (!(prevDirect[k] ?? "").trim() && partial.fields[k]?.filled && partial.fields[k]?.value) {
-                    updates[k] = partial.fields[k].value as string;
-                  }
-                }
-                return Object.keys(updates).length ? { ...prevDirect, ...updates } : prevDirect;
-              });
-            }
-            if (fsData) setSrsData(fsData);
-            setIsExtracting(false);
-          }
+          rs.setIsExtracting(true);
+          const nonce = rs.beginExtraction();
+          await rs.runPostTurnExtraction(capturedSessionId, directFieldsForRequest, nonce, fields.setDirectFields);
         } else {
-          setIsExtracting(false);
+          rs.setIsExtracting(false);
         }
       },
       (err) => {
-        finalizeMessage(assistantId);
+        msgs.finalizeMessage(assistantId);
         setError(err);
         setIsStreaming(false);
-        setIsExtracting(false);
+        rs.setIsExtracting(false);
       },
-      // onFinalizing — backend has detected ≥ 90% completeness and started the pipeline
       () => {
-        setFinalizingStatus("finalizing");
+        rs.setFinalizingStatus("finalizing");
         setActiveTab("Analysis");
       },
-      // onFieldUpdate — mid-stream field fill from the pre-stream quick extract
-      // Skip financial direct-input fields. Suggestable fields pre-fill only if user hasn't typed.
       (key, value) => {
         if (DIRECT_INPUT_KEYS.has(key)) return;
-        setRsPartial((prev) => ({
+        rs.setRsPartial((prev) => ({
           completeness: prev?.completeness ?? 0,
-          fields: {
-            ...(prev?.fields ?? {}),
-            [key]: { filled: true, value },
-          },
+          fields: { ...(prev?.fields ?? {}), [key]: { filled: true, value } },
         }));
         if (SUGGESTABLE_DIRECT_KEYS.has(key) && !(directFieldsForRequest[key] ?? "").trim()) {
-          setDirectFields((prev) => ({ ...prev, [key]: value }));
-          setDeferredDirectFields((prev) => prev.filter((field) => field !== key));
+          fields.setDirectFields((prev) => ({ ...prev, [key]: value }));
+          fields.setDeferredDirectFields((prev) => prev.filter((f) => f !== key));
         }
       },
       directFieldsForRequest,
       deferredFieldsForRequest,
       (key) => setActiveWorkflowField(key),
-      (messageId) => setMessageBackendId(assistantId, messageId),
+      (messageId) => msgs.setMessageBackendId(assistantId, messageId),
     );
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void handleSend();
     }
   }
 
   async function handleGenerateFull() {
-    if (!sessionId) return;
+    if (!session.sessionId) return;
     try {
-      await downloadRsTemplateDocx(sessionId);
+      await downloadRsTemplateDocx(session.sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate document");
     }
   }
 
-  function openSessionRating() {
-    if (!sessionId || isStreaming) return;
-    if (chatMode === "voice") {
-      audioRecorder.stopRecording();
-      audioPlayer.stop();
-      ws.disconnect();
-      setChatMode("text");
-    }
-    setRatingOpen(true);
-  }
-
-  async function handleSessionRatingSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!sessionId || !sessionRating || isSubmittingSessionRating) return;
-
-    setIsSubmittingSessionRating(true);
-    try {
-      await submitSessionFeedback(
-        sessionId,
-        sessionRating,
-        sessionRatingComment,
-      );
-      setSessionEnded(true);
-      setRatingOpen(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save session rating");
-    } finally {
-      setIsSubmittingSessionRating(false);
-    }
-  }
-
-  async function openHistory() {
-    setHistoryOpen(true);
-    setHistoryLoading(true);
-    const sessions = await getSessions();
-    setHistorySessions(sessions);
-    setHistoryLoading(false);
-  }
-
-  async function loadSession(sid: string) {
-    const msgs = await getHistory(sid);
-    setMessages(
-      msgs.map((m) => ({
-        id: crypto.randomUUID(),
-        role: m.role,
-        text: m.text,
-        messageId: m.message_id,
-      }))
-    );
-    setSessionId(sid);
-    setRsPartial(null);
-    setSrsData(null);
-    setFinalizingStatus("idle");
-    setFinalAnalysis(null);
-    setSessionEnded(false);
-    setSessionRating(null);
-    setSessionRatingComment("");
-    setDirectFields({});
-    setDeferredDirectFields([]);
+  async function handleLoadSession(sid: string) {
+    const loaded = await session.loadSession(sid);
+    msgs.loadMessages(loaded.messages);
+    rs.setRsPartial(loaded.rsPartial);
+    fields.setDirectFields(loaded.directFields);
+    rs.setSrsData(loaded.srsData);
+    rs.setFinalAnalysis(loaded.finalAnalysis);
+    rs.setFinalizingStatus(loaded.finalizingStatus);
+    fields.setDeferredDirectFields([]);
     setActiveWorkflowField(null);
-    setHistoryOpen(false);
-
-    // Restore Preview panel and check for completed analysis in parallel
-    const [savedDiscovery, analysisResult, fsData] = await Promise.all([
-      getDiscoveryState(sid),
-      getAnalysis(sid),
-      getFirestoreData(sid),
-    ]);
-    if (savedDiscovery) {
-      setRsPartial(savedDiscovery);
-      // Restore direct fields from saved state
-      const restored: Record<string, string> = {};
-      for (const key of ["use_case_title", "department", "requestor", "product_owner",
-        "saved_time_hours_per_year", "cost_saving", "revenue_increase", "comments", "attachments"]) {
-        const entry = savedDiscovery.fields[key];
-        if (entry?.filled && entry.value) restored[key] = entry.value;
-      }
-      setDirectFields(restored);
-    }
-    if (fsData) setSrsData(fsData);
-    if (analysisResult.status === "complete" && analysisResult.analysis) {
-      setFinalAnalysis(analysisResult.analysis);
-      setFinalizingStatus("complete");
-      setActiveTab("Analysis");
-    }
+    if (loaded.finalizingStatus === "complete") setActiveTab("Analysis");
   }
 
   function newConversation() {
-    setMessages([makeWelcomeMessage(t("welcome_message"))]);
-    setSessionId(null);
-    setRsPartial(null);
-    setSrsData(null);
-    setDirectFields({});
-    setDeferredDirectFields([]);
+    msgs.resetMessages(t("welcome_message"));
+    session.resetSession(t("welcome_message"));
+    rs.resetExtraction();
+    fields.resetDirectFields();
     setActiveWorkflowField(null);
-    setFinalizingStatus("idle");
-    setFinalAnalysis(null);
-    setSessionEnded(false);
-    setSessionRating(null);
-    setSessionRatingComment("");
-    setRatingOpen(false);
-    setHistoryOpen(false);
-    // Clean up voice mode if active
-    if (chatMode === "voice") {
-      audioRecorder.stopRecording();
-      audioPlayer.stop();
-      ws.disconnect();
-      setChatMode("text");
-    }
+    if (voice.chatMode === "voice") voice.stopVoice();
   }
 
-  // ─── Voice mode handlers ───────────────────────────────────────────────────
-
-  async function handleToggleVoice() {
-    if (chatMode === "voice") {
-      // Switching back to text mode
-      audioRecorder.stopRecording();
-      audioPlayer.stop();
-      ws.disconnect();
-      setChatMode("text");
-      return;
-    }
-
-    // Switching to voice mode
-    setChatMode("voice");
-
-    // Ensure we have a session id (generate one if first interaction)
-    const sid = sessionId ?? crypto.randomUUID();
-    if (!sessionId) setSessionId(sid);
-
-    // Initialize audio player (needs user gesture — this click counts)
-    await audioPlayer.init();
-
-    // Connect WebSocket
-    ws.connect("default_user", sid);
+  function openSessionRating() {
+    if (!session.sessionId || isStreaming) return;
+    if (voice.chatMode === "voice") voice.stopVoice();
+    session.setRatingOpen(true);
   }
 
-  async function handleMicToggle() {
-    if (audioRecorder.isRecording) {
-      audioRecorder.stopRecording();
-    } else {
-      // Stop any playback when user starts talking
-      audioPlayer.stop();
-      voiceTranscriptIdRef.current = null;
-      await audioRecorder.startRecording();
+  async function handleFileUploaded(file: UploadedFile) {
+    const sid = file.sessionId ?? session.sessionId;
+    if (sid) {
+      if (!session.sessionId) session.setSessionId(sid);
+      await fields.refreshSessionUploads(sid, [file]);
     }
+    setUploadOpen(false);
   }
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
       {/* ── Left panel ─────────────────────────────────── */}
       <div className="flex w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
-        {/* History sidebar */}
-        {historyOpen && (
+        {session.historyOpen && (
           <HistorySidebar
-            sessions={historySessions}
-            loading={historyLoading}
-            currentSessionId={sessionId}
-            onClose={() => setHistoryOpen(false)}
+            sessions={session.historySessions}
+            loading={session.historyLoading}
+            currentSessionId={session.sessionId}
+            onClose={() => session.setHistoryOpen(false)}
             onNewConversation={newConversation}
-            onLoadSession={loadSession}
+            onLoadSession={handleLoadSession}
           />
         )}
 
-        {/* Header */}
         <ChatHeader
           activeWorkflowField={activeWorkflowField}
-          chatMode={chatMode}
+          chatMode={voice.chatMode}
           isStreaming={isStreaming}
-          wsConnectionState={ws.connectionState}
-          isRecording={audioRecorder.isRecording}
-          onOpenHistory={openHistory}
-          onToggleVoice={handleToggleVoice}
+          wsConnectionState={voice.ws.connectionState}
+          isRecording={voice.audioRecorder.isRecording}
+          onOpenHistory={session.openHistory}
+          onToggleVoice={() => voice.handleToggleVoice(session.sessionId, session.setSessionId)}
         />
 
         <ChatTranscript
-          messages={messages}
-          sessionId={sessionId}
+          messages={msgs.messages}
+          sessionId={session.sessionId}
           bottomRef={bottomRef}
-          onFeedback={handleFeedback}
-          onFeedbackComment={handleFeedbackComment}
+          onFeedback={(id, vote) => msgs.handleFeedback(id, vote, session.sessionId, setError)}
+          onFeedbackComment={(id, comment) =>
+            msgs.handleFeedbackComment(id, comment, session.sessionId, setError)
+          }
         />
 
-        {/* Input area */}
         <ChatInput
-          chatMode={chatMode}
+          chatMode={voice.chatMode}
           input={input}
           isStreaming={isStreaming}
-          sessionEnded={sessionEnded}
-          sessionId={sessionId}
-          wsConnectionState={ws.connectionState}
-          isRecording={audioRecorder.isRecording}
-          isPlaying={audioPlayer.isPlaying}
-          recorderError={audioRecorder.error}
+          sessionEnded={session.sessionEnded}
+          sessionId={session.sessionId}
+          wsConnectionState={voice.ws.connectionState}
+          isRecording={voice.audioRecorder.isRecording}
+          isPlaying={voice.audioPlayer.isPlaying}
+          recorderError={voice.audioRecorder.error}
           textareaRef={textareaRef}
           onInputChange={setInput}
           onKeyDown={handleKeyDown}
-          onSend={handleSend}
+          onSend={() => void handleSend()}
           onOpenUpload={() => setUploadOpen(true)}
           onOpenRating={openSessionRating}
-          onMicToggle={handleMicToggle}
+          onMicToggle={() => void voice.handleMicToggle()}
         />
 
-        {/* File upload modal */}
         {uploadOpen && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
@@ -1663,27 +1017,28 @@ export default function ChatPage() {
                   ✕
                 </button>
               </div>
-              <FileUpload sessionId={sessionId} onUploaded={handleFileUploaded} onEnsureSession={ensureSession} />
+              <FileUpload
+                sessionId={session.sessionId}
+                onUploaded={handleFileUploaded}
+                onEnsureSession={session.ensureSession}
+              />
             </div>
           </div>
         )}
 
         <SessionRatingModal
-          open={ratingOpen}
-          rating={sessionRating}
-          comment={sessionRatingComment}
-          submitting={isSubmittingSessionRating}
-          onClose={() => setRatingOpen(false)}
-          onRatingChange={setSessionRating}
-          onCommentChange={setSessionRatingComment}
-          onSubmit={handleSessionRatingSubmit}
+          open={session.ratingOpen}
+          rating={session.sessionRating}
+          comment={session.sessionRatingComment}
+          submitting={session.isSubmittingSessionRating}
+          onClose={() => session.setRatingOpen(false)}
+          onRatingChange={session.setSessionRating}
+          onCommentChange={session.setSessionRatingComment}
+          onSubmit={session.handleSessionRatingSubmit}
         />
 
-        {/* Disclaimer */}
         <div className="shrink-0 px-4 py-1.5 text-center">
-          <p className="text-[10px] text-gray-400">
-            {t("disclaimer")}
-          </p>
+          <p className="text-[10px] text-gray-400">{t("disclaimer")}</p>
         </div>
       </div>
 
@@ -1692,17 +1047,20 @@ export default function ChatPage() {
         <RsDocumentPanel
           activeTab={activeTab}
           onTabChange={setActiveTab}
-          rsPartial={rsPartial}
-          directFields={directFields}
-          onDirectFieldChange={handleDirectFieldChange}
-          sessionId={sessionId}
+          rsPartial={rs.rsPartial}
+          directFields={fields.directFields}
+          onDirectFieldChange={(key, value) =>
+            fields.handleDirectFieldChange(key, value, session.sessionId)
+          }
+          sessionId={session.sessionId}
           onGenerateFull={handleGenerateFull}
-          srsData={srsData}
-          finalizingStatus={finalizingStatus}
-          finalAnalysis={finalAnalysis}
-          isExtracting={isExtracting}
+          srsData={rs.srsData}
+          finalizingStatus={rs.finalizingStatus}
+          finalAnalysis={rs.finalAnalysis}
+          isExtracting={rs.isExtracting}
         />
       </div>
+
       {error && <ErrorToast message={error} onDismiss={() => setError(null)} />}
     </div>
   );
