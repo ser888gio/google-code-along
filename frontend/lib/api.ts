@@ -240,7 +240,10 @@ export async function downloadRsTemplateDocx(sessionId: string): Promise<void> {
   const a = document.createElement("a");
   a.href = url;
   a.download = "rs_template.docx";
+  a.style.display = "none";
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 
