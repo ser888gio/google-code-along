@@ -270,12 +270,6 @@ function RsDocumentPanel({
               }`}
             >
               {TAB_LABELS[tab] ?? tab}
-              {tab === "Analysis" && finalizingStatus === "finalizing" && (
-                <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 align-middle" />
-              )}
-              {tab === "Analysis" && finalizingStatus === "complete" && (
-                <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#4caf50] align-middle" />
-              )}
             </button>
           )})}
         </div>
