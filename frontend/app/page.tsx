@@ -220,6 +220,7 @@ function RsDocumentPanel({
   onDismissSuggestion,
   sessionId,
   onGenerateFull,
+  isDownloadingRs,
   srsData,
   finalizingStatus,
   finalAnalysis,
@@ -234,6 +235,7 @@ function RsDocumentPanel({
   onDismissSuggestion: (key: string) => void;
   sessionId: string | null;
   onGenerateFull: () => void;
+  isDownloadingRs: boolean;
   srsData: SrsData | null;
   finalizingStatus: FinalizingStatus;
   finalAnalysis: FinalAnalysis | null;
@@ -310,18 +312,24 @@ function RsDocumentPanel({
             )}
             <button
               onClick={onGenerateFull}
-              disabled={rsCompleteness < 80}
+              disabled={rsCompleteness < 80 || isDownloadingRs}
               className={`flex items-center gap-2 rounded px-5 py-2.5 text-sm font-semibold transition-opacity ${
-                rsCompleteness >= 80
+                rsCompleteness >= 80 && !isDownloadingRs
                   ? "bg-[#4a6659] text-white hover:opacity-90"
                   : "cursor-not-allowed bg-gray-200 text-gray-400"
               }`}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1v8M4 6l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M1 10v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-              {t("download.rs")}
+              {isDownloadingRs ? (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="animate-spin">
+                  <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.8" strokeDasharray="28" strokeDashoffset="10" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 1v8M4 6l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M1 10v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                </svg>
+              )}
+              {isDownloadingRs ? t("download.generating") : t("download.rs")}
             </button>
           </div>
         ) : (
@@ -758,6 +766,7 @@ function ChatTranscript({
 export default function ChatPage() {
   const { locale, t } = useLocale();
   const [error, setError] = useState<string | null>(null);
+  const [isDownloadingRs, setIsDownloadingRs] = useState(false);
   const [activeTab, setActiveTab] = useState<RsTab>("Preview");
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -890,11 +899,17 @@ export default function ChatPage() {
   }
 
   async function handleGenerateFull() {
-    if (!session.sessionId) return;
+    if (!session.sessionId) {
+      setError("No active session — please send a message first.");
+      return;
+    }
+    setIsDownloadingRs(true);
     try {
       await downloadRsTemplateDocx(session.sessionId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to generate document");
+    } finally {
+      setIsDownloadingRs(false);
     }
   }
 
@@ -1043,6 +1058,7 @@ export default function ChatPage() {
           onDismissSuggestion={rsState.dismissSuggestion}
           sessionId={session.sessionId}
           onGenerateFull={handleGenerateFull}
+          isDownloadingRs={isDownloadingRs}
           srsData={rs.srsData}
           finalizingStatus={rs.finalizingStatus}
           finalAnalysis={rs.finalAnalysis}

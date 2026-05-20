@@ -42,6 +42,7 @@
   "modal.end_chat": "End chat",
   "error.something_wrong": "Something went wrong",
   "download.rs": "Download Requirements Specification",
+  "download.generating": "Generating…",
   "analysis.pending": "Analysis will appear here once the discovery is complete (≥ 90%).",
   "input.placeholder": "Describe your project or answer the consultant's questions…",
   "disclaimer": "This is an AI system and cannot always be accurate. Please review outputs.",

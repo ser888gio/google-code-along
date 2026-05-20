@@ -42,6 +42,7 @@
   "modal.end_chat": "Ukončit chat",
   "error.something_wrong": "Něco se pokazilo",
   "download.rs": "Stáhnout specifikaci požadavků",
+  "download.generating": "Generuji…",
   "analysis.pending": "Analýza se zobrazí po dokončení naše konverzace (≥ 90 %).",
   "input.placeholder": "Popište svůj projekt nebo odpovězte na otázky",
   "disclaimer": "Toto je systém využivající AI a nemusí být vždy přesný. Zkontrolujte výstupy.",
