@@ -83,7 +83,7 @@ function FieldCard({ label, value }: { label: string; value: string | null | und
           FS
         </span>
       </div>
-      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gray-700">
+      <p className="whitespace-pre-wrap wrap-break-word text-sm leading-relaxed text-gray-700">
         {displayValue}
       </p>
     </div>
@@ -171,7 +171,7 @@ export default function FirestoreSrsPanel({ data }: { data: SrsData | null }) {
           <path d="M4 16c0 2.76 5.37 5 12 5s12-2.24 12-5" stroke="currentColor" strokeWidth="1.5" />
         </svg>
         <p className="text-sm font-semibold text-gray-400">No data yet</p>
-        <p className="max-w-[200px] text-xs text-gray-300">
+        <p className="max-w-50 text-xs text-gray-300">
           Firestore will be updated automatically after the first AI response.
         </p>
       </div>

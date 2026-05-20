@@ -112,7 +112,10 @@ export function useDirectFields(
     const next = { ...directFields, [key]: value };
     setDirectFields(next);
     if (value.trim()) setDeferredDirectFields((prev) => prev.filter((f) => f !== key));
-    setRsPartial((prev) => (prev ? { ...prev, completeness: computeOptimisticCompleteness(prev, next) } : prev));
+    setRsPartial((prev) => {
+      const base = prev ?? { completeness: 0, fields: {} };
+      return { ...base, completeness: computeOptimisticCompleteness(base, next) };
+    });
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       if (!sessionId) return;
