@@ -256,7 +256,10 @@ function RsDocumentPanel({
           {t("header.rs")}
         </span>
         <div className="flex overflow-x-auto">
-          {RS_TABS.map((tab) => (
+          {RS_TABS.map((tab) => {
+            // Hide specific tabs
+            if (tab === "BPMN" || tab === "Data" || tab === "Analysis") return null;
+            return (
             <button
               key={tab}
               onClick={() => onTabChange(tab)}
@@ -274,7 +277,7 @@ function RsDocumentPanel({
                 <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[#4caf50] align-middle" />
               )}
             </button>
-          ))}
+          )})}
         </div>
       </div>
 
