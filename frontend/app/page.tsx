@@ -59,7 +59,8 @@ function MessageBubble({
   const { t } = useLocale();
   const isUser = msg.role === "user";
   const [commentOpen, setCommentOpen] = useState(false);
-  const [comment, setComment] = useState(msg.feedback?.comment ?? "");
+  const [localComment, setLocalComment] = useState<string | null>(null);
+  const comment = localComment ?? (msg.feedback?.comment ?? "");
 
   if (isUser) {
     return (
@@ -91,6 +92,7 @@ function MessageBubble({
     e.preventDefault();
     if (!canSendFeedback || !activeVote || feedbackPending) return;
     await onFeedbackComment(msg.id, comment);
+    setLocalComment(null);
   }
 
   return (
@@ -166,7 +168,7 @@ function MessageBubble({
             <form onSubmit={handleCommentSubmit} className="mt-2 flex gap-2">
               <textarea
                 value={comment}
-                onChange={(e) => setComment(e.target.value)}
+                onChange={(e) => setLocalComment(e.target.value)}
                 placeholder={t("feedback.optional_comment")}
                 rows={2}
                 className="min-h-16 flex-1 resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
