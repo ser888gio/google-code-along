@@ -553,14 +553,21 @@ def upsert_discovery_state(session_id: str, discovery: dict) -> None:
 
 
 def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
-    """Merge *direct* key-value pairs into *state* and recompute completeness."""
+    """Merge *direct* key-value pairs into *state* and recompute completeness.
+
+    Direct fields take precedence over AI-extracted values.  An empty-string
+    value clears the field (user deleted their input).  Each merged entry is
+    tagged source='user' (or 'upload' for the attachments key) so the frontend
+    can distinguish user-typed values from AI-extracted ones.
+    """
     fields = state.setdefault("fields", {})
     for key, value in direct.items():
         if value is not None and str(value).strip():
-            fields[key] = {"filled": True, "value": value}
-        elif key in fields and not fields[key].get("filled"):
-            # Keep null entry consistent
-            fields[key] = {"filled": False, "value": None}
+            source = "upload" if key == "attachments" else "user"
+            fields[key] = {"filled": True, "value": value, "source": source}
+        else:
+            # Empty string or None — clear the field regardless of prior state
+            fields[key] = {"filled": False, "value": None, "source": None}
     filled_required = sum(1 for k in REQUIRED_FIELDS if fields.get(k, {}).get("filled", False))
     state["completeness"] = round((filled_required / len(REQUIRED_FIELDS)) * 100)
 
@@ -724,6 +731,11 @@ def get_discovery_state(session_id: str) -> dict | None:
         state: dict = json.loads(ai_json) if ai_json else {"completeness": 0, "fields": {}, "missing_priority": []}
     except Exception:
         state = {"completeness": 0, "fields": {}, "missing_priority": []}
+
+    # Tag every AI-extracted field with source='ai' before direct fields overlay.
+    for entry in state.get("fields", {}).values():
+        if isinstance(entry, dict):
+            entry.setdefault("source", "ai" if entry.get("filled") else None)
 
     if direct_json:
         try:

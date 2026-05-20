@@ -1558,6 +1558,7 @@ class ContextRequest(BaseModel):
 class FieldData(BaseModel):
     filled: bool
     value: str | None
+    source: str | None = None  # "user" | "ai" | "upload" | null
 
 
 class ContextResponse(BaseModel):
