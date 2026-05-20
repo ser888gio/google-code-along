@@ -294,7 +294,6 @@ function RsDocumentPanel({
           <RsLiveTemplate
             rsPartial={rsPartial}
             directFields={directFields}
-            onGenerateFull={onGenerateFull}
             onDirectFieldChange={onDirectFieldChange}
             isExtracting={isExtracting}
           />
@@ -315,13 +314,24 @@ function RsDocumentPanel({
             </div>
           )
         ) : activeTab === "Summary" ? (
-          <div className="flex h-full flex-col items-center justify-center gap-4">
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            {(rsPartial?.completeness ?? 0) < 80 && (
+              <p className="text-xs text-gray-400">
+                {rsPartial?.completeness ?? 0}% — {t("rs.reach_80")} 80%)
+              </p>
+            )}
             <button
-              className="flex items-center gap-2 rounded bg-[#4a6659] px-5 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              onClick={onGenerateFull}
+              disabled={(rsPartial?.completeness ?? 0) < 80}
+              className={`flex items-center gap-2 rounded px-5 py-2.5 text-sm font-semibold transition-opacity ${
+                (rsPartial?.completeness ?? 0) >= 80
+                  ? "bg-[#4a6659] text-white hover:opacity-90"
+                  : "cursor-not-allowed bg-gray-200 text-gray-400"
+              }`}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1v8M4 6l3 3 3-3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M1 10v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="white" strokeWidth="1.8" strokeLinecap="round" />
+                <path d="M7 1v8M4 6l3 3 3-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M1 10v1a2 2 0 002 2h8a2 2 0 002-2v-1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
               </svg>
               {t("download.rs")}
             </button>

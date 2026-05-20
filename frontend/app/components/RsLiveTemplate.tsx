@@ -204,13 +204,10 @@ function SectionGroup({
 
 function CompletenessHeader({
   completeness,
-  onGenerateFull,
 }: {
   completeness: number;
-  onGenerateFull: () => void;
 }) {
   const { t } = useLocale();
-  const canGenerate = completeness >= 80;
 
   const barColor =
     completeness >= 80 ? "bg-[#4caf50]" :
@@ -229,36 +226,9 @@ function CompletenessHeader({
 
   return (
     <div className="shrink-0 border-b border-gray-200 bg-white px-5 py-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <p className="text-sm font-bold text-gray-800">{t("rs.title")}</p>
-          <p className="text-xs text-gray-400">{t("rs.subtitle")}</p>
-        </div>
-        <button
-          onClick={onGenerateFull}
-          disabled={!canGenerate}
-          title={
-            canGenerate
-              ? t("rs.generate")
-              : `${t("rs.reach_80")} ${completeness}%)`
-          }
-          className={`flex items-center gap-1.5 rounded px-3 py-2 text-xs font-semibold transition-all ${
-            canGenerate
-              ? "bg-[#4a6659] text-white hover:opacity-90"
-              : "cursor-not-allowed bg-gray-100 text-gray-400"
-          }`}
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path
-              d="M1 9l3-3 2 2 4-5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          {canGenerate ? t("rs.generate") : `${completeness}% ${t("rs.keep_chatting_suffix")}`}
-        </button>
+      <div className="mb-3">
+        <p className="text-sm font-bold text-gray-800">{t("rs.title")}</p>
+        <p className="text-xs text-gray-400">{t("rs.subtitle")}</p>
       </div>
 
       <div>
@@ -284,13 +254,11 @@ function CompletenessHeader({
 export default function RsLiveTemplate({
   rsPartial,
   directFields,
-  onGenerateFull,
   onDirectFieldChange,
   isExtracting = false,
 }: {
   rsPartial: RsPartialData | null;
   directFields: Record<string, string>;
-  onGenerateFull: () => void;
   onDirectFieldChange: (key: string, value: string) => void;
   isExtracting?: boolean;
 }) {
@@ -299,7 +267,7 @@ export default function RsLiveTemplate({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <CompletenessHeader completeness={completeness} onGenerateFull={onGenerateFull} />
+      <CompletenessHeader completeness={completeness} />
       {isExtracting && (
         <div className="shrink-0 bg-amber-50 px-4 py-1.5 text-center text-[11px] text-amber-700 border-b border-amber-100">
           {t("rs.processing")}
