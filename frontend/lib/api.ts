@@ -8,6 +8,7 @@ interface DocumentResponse {
 export interface UploadedFile {
   filename: string;
   gcs_path: string;
+  sessionId?: string;
 }
 
 export type FeedbackVote = "up" | "down";

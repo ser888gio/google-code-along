@@ -1207,9 +1207,18 @@ export default function ChatPage() {
     if (merged) setRsPartial(merged);
   }
 
+  function ensureSession(): string {
+    if (sessionId) return sessionId;
+    const newId = crypto.randomUUID();
+    setSessionId(newId);
+    return newId;
+  }
+
   async function handleFileUploaded(file: UploadedFile) {
-    if (sessionId) {
-      await refreshSessionUploads(sessionId, [file]);
+    const sid = file.sessionId ?? sessionId;
+    if (sid) {
+      if (!sessionId) setSessionId(sid);
+      await refreshSessionUploads(sid, [file]);
     }
     setUploadOpen(false);
   }
@@ -1612,7 +1621,7 @@ export default function ChatPage() {
                   ✕
                 </button>
               </div>
-              <FileUpload sessionId={sessionId} onUploaded={handleFileUploaded} />
+              <FileUpload sessionId={sessionId} onUploaded={handleFileUploaded} onEnsureSession={ensureSession} />
             </div>
           </div>
         )}

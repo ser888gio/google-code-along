@@ -7,6 +7,8 @@ import { useLocale } from "../i18n/LocaleContext";
 interface FileUploadProps {
   sessionId: string | null;
   onUploaded?: (file: UploadedFile) => void;
+  /** Called when no session exists yet; must create one and return the new session ID. */
+  onEnsureSession?: () => string;
 }
 
 interface UploadDropZoneProps {
@@ -99,7 +101,7 @@ function UploadedFileList({ files }: { files: UploadedFile[] }) {
   );
 }
 
-export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
+export default function FileUpload({ sessionId, onUploaded, onEnsureSession }: FileUploadProps) {
   const { t } = useLocale();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -110,7 +112,9 @@ export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    if (!sessionId) {
+
+    const sid = sessionId ?? onEnsureSession?.();
+    if (!sid) {
       setError(t("upload.no_session"));
       return;
     }
@@ -121,8 +125,8 @@ export default function FileUpload({ sessionId, onUploaded }: FileUploadProps) {
 
     const file = files[0];
     try {
-      const result = await uploadFile(file, sessionId, setProgress);
-      const entry = { filename: result.filename, gcs_path: result.gcs_path };
+      const result = await uploadFile(file, sid, setProgress);
+      const entry = { filename: result.filename, gcs_path: result.gcs_path, sessionId: sid };
       setUploaded((prev) => [...prev, entry]);
       onUploaded?.(entry);
     } catch (err) {
