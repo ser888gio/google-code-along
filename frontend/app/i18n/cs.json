@@ -1,6 +1,6 @@
 {
   "label.you": "VY",
-  "label.ai_consultant": "DISCOVERY AGENT",
+  "label.ai_consultant": "Discovery Agent",
   "thinking": "Přemýšlím",
   "btn.send": "Odeslat",
   "btn.voice_mode": "Hlasový režim",
@@ -45,7 +45,7 @@
   "analysis.pending": "Analýza se zobrazí po dokončení naše konverzace (≥ 90 %).",
   "input.placeholder": "Popište svůj projekt nebo odpovězte na otázky",
   "disclaimer": "Toto je systém využivající AI a nemusí být vždy přesný. Zkontrolujte výstupy.",
-  "welcome_message": "Vítejte, jsem Váš DISCOVERY AGENT. Provedu vás strukturovaným procesem zjišťování požadavků, jehož výsledkem bude přehledná specifikace požadavků pro váš projekt.\n\nMějte prosím na paměti, že jsem systém umělé inteligence: vždy zkontrolujte moje výstupy a opravte vše, co neodpovídá vašim záměrům.\n\nJako první krok mi prosím stručně popište váš současný proces a hlavní problémy, které chcete vyřešit.",
+  "welcome_message": "Vítejte, jsem Váš Discovery Agent. Provedu vás strukturovaným procesem zjišťování požadavků, jehož výsledkem bude přehledná specifikace požadavků pro váš projekt.\n\nMějte prosím na paměti, že jsem systém umělé inteligence: vždy zkontrolujte moje výstupy a opravte vše, co neodpovídá vašim záměrům.\n\nJako první krok mi prosím stručně popište váš současný proces a hlavní problémy, které chcete vyřešit.",
   "rs.title": "Specifikace požadavků",
   "rs.subtitle": "Vyplňuje se automaticky při konverzaci",
   "rs.generate": "Generovat celý dokument",

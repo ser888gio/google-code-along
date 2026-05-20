@@ -3,7 +3,7 @@ import Providers from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RS Generator â€” Discovery Agent",
+  title: "RS Generator” Discovery Agent",
   description: "AI-powered Requirement Specification Generator",
   icons: {
     icon: "/skoda.png",

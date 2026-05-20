@@ -1,6 +1,6 @@
 {
   "label.you": "YOU",
-  "label.ai_consultant": "DISCOVERY AGENT",
+  "label.ai_consultant": "Discovery Agent",
   "thinking": "Thinking",
   "btn.send": "Send",
   "btn.voice_mode": "Voice Mode",
@@ -45,7 +45,7 @@
   "analysis.pending": "Analysis will appear here once the discovery is complete (≥ 90%).",
   "input.placeholder": "Describe your project or answer the consultant's questions…",
   "disclaimer": "This is an AI system and cannot always be accurate. Please review outputs.",
-  "welcome_message": "Welcome to your Business Analyst session. I'm your DISCOVERY AGENT. I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
+  "welcome_message": "Welcome, I'm your Discovery Agent. I'll guide you through a structured discovery process to produce a clear Requirements Specification for your project.\n\nPlease keep in mind that I am an AI system: always review my outputs and correct anything that doesn't reflect your intentions.\n\nTo get started, could you briefly describe your current process and the main pain points you're looking to solve?",
   "rs.title": "Requirements Specification",
   "rs.subtitle": "Filling automatically as you chat",
   "rs.generate": "Generate Full Document",

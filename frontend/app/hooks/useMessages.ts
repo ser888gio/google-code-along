@@ -18,7 +18,7 @@ export interface Message {
   };
 }
 
-export function makeWelcomeMessage(text: string): Message {
+function makeWelcomeMessage(text: string): Message {
   return { id: "welcome", role: "assistant", text, streaming: false };
 }
 

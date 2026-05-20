@@ -1,6 +1,7 @@
 """Shared utility functions used across backend modules."""
 
 import re
+import unicodedata
 
 from google.adk.sessions import Session
 
@@ -18,7 +19,16 @@ def sanitize_gcs_segment(value: str, *, field_name: str = "path segment") -> str
 def sanitize_gcs_filename(filename: str) -> str:
     """Return a safe basename for a user-supplied upload filename."""
     normalized = filename.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    # Decompose Unicode (e.g. í → i + combining accent), then drop non-ASCII.
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
     normalized = normalized.replace(" ", "_")
+    # Remove any characters still outside the allowed set.
+    normalized = re.sub(r"[^A-Za-z0-9._-]", "_", normalized)
+    # Collapse consecutive underscores and strip leading/trailing ones.
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    if not normalized:
+        normalized = "file"
     return sanitize_gcs_segment(normalized, field_name="filename")
 
 

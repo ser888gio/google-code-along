@@ -23,7 +23,7 @@ import FirestoreSrsPanel from "./components/FirestoreSrsPanel";
 import LanguageSwitcher from "./i18n/LanguageSwitcher";
 import { useLocale } from "./i18n/LocaleContext";
 import { DirectChatFieldKey } from "./generated/rsSchema";
-import { useMessages, makeWelcomeMessage, Message } from "./hooks/useMessages";
+import { useMessages, Message } from "./hooks/useMessages";
 import { useChatSession, FinalizingStatus } from "./hooks/useChatSession";
 import { useRsExtraction } from "./hooks/useRsExtraction";
 import {
@@ -36,7 +36,6 @@ import { useVoiceMode, ChatMode } from "./hooks/useVoiceMode";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Role = "user" | "assistant";
 
 const RS_TABS = ["Preview", "BPMN", "Data", "Database", "Analysis", "Summary"] as const;
 type RsTab = (typeof RS_TABS)[number];
