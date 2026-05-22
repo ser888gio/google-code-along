@@ -1,19 +1,48 @@
 # .pre-commit-config.yaml
 repos:
   # ----------------------------------------------------
-  # GENERAL / CONFIG: Whitespace, YAML, TOML
+  # GENERAL / CONFIG: Whitespace, YAML, TOML, Standard Hooks
   # ----------------------------------------------------
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
-        # Optional: Exclude generated frontend files
         exclude: ^frontend/(dist|build|node_modules)/.*
       - id: end-of-file-fixer
         exclude: ^frontend/(dist|build|node_modules)/.*
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+
+  # ----------------------------------------------------
+  # SECURITY: Secret Scanning
+  # ----------------------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.2
+    hooks:
+      - id: gitleaks
+
+  # ----------------------------------------------------
+  # QUALITY: Typo Checking
+  # ----------------------------------------------------
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.22.2
+    hooks:
+      - id: typos
+        exclude: ^frontend/.*(lock\.json|node_modules).*$
+
+  # ----------------------------------------------------
+  # FRONTEND: Biome (Formatter/Linter)
+  # ----------------------------------------------------
+  - repo: https://github.com/biomejs/pre-commit
+    rev: "v0.1.0"
+    hooks:
+      - id: biome-check
+        additional_dependencies: ["@biomejs/biome@1.8.3"]
+        files: ^frontend/.*\.(js|ts|jsx|tsx|json)$
 
   # ----------------------------------------------------
   # SCRIPTS: ShellCheck
@@ -25,7 +54,7 @@ repos:
         args: ["--severity=warning"]
 
   # ----------------------------------------------------
-  # LOCAL HOOKS: Ruff, Mypy, and Knip
+  # LOCAL HOOKS: Ruff, Mypy, Knip, Debtmap
   # ----------------------------------------------------
   - repo: local
     hooks:
