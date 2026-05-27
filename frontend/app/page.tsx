@@ -558,6 +558,7 @@ function ChatHeader({
 	isRecording,
 	onOpenHistory,
 	onToggleVoice,
+	onNewConversation,
 }: {
 	activeWorkflowField: string | null;
 	chatMode: ChatMode;
@@ -566,6 +567,7 @@ function ChatHeader({
 	isRecording: boolean;
 	onOpenHistory: () => void;
 	onToggleVoice: () => void;
+	onNewConversation: () => void;
 }) {
 	const { t } = useLocale();
 	return (
@@ -581,6 +583,13 @@ function ChatHeader({
 				)}
 			</div>
 			<div className="flex items-center gap-3">
+				<button
+					type="button"
+					onClick={onNewConversation}
+					className="flex items-center gap-1.5 rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+				>
+					{t("btn.new_conversation")}
+				</button>
 				<button
 					type="button"
 					onClick={onOpenHistory}
@@ -1276,6 +1285,7 @@ export default function ChatPage() {
 					wsConnectionState={voice.ws.connectionState}
 					isRecording={voice.audioRecorder.isRecording}
 					onOpenHistory={session.openHistory}
+					onNewConversation={newConversation}
 					onToggleVoice={() =>
 						voice.handleToggleVoice(session.sessionId, session.setSessionId)
 					}
