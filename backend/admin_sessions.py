@@ -15,6 +15,7 @@ from config import (
     require_config_value,
 )
 from fastapi import HTTPException
+from google.cloud import bigquery
 from starlette.requests import Request
 
 _TABLE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_]+){1,2}$")
@@ -85,8 +86,6 @@ def _dominant_feedback(row: dict[str, Any]) -> str:
 
 
 def _query_job_config(params: list[Any]):
-    from google.cloud import bigquery
-
     return bigquery.QueryJobConfig(query_parameters=params)
 
 
@@ -96,8 +95,6 @@ def list_admin_sessions(
     filter_value: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return BigQuery-backed admin session summaries."""
-    from google.cloud import bigquery
-
     bounded_limit = min(max(limit, 1), 200)
     messages_table = _table("BIGQUERY_MESSAGES_VIEW", BIGQUERY_MESSAGES_VIEW)
     feedback_table = _table("BIGQUERY_FEEDBACK_VIEW", BIGQUERY_FEEDBACK_VIEW)
@@ -182,8 +179,6 @@ def list_admin_sessions(
 
 def get_admin_metrics(*, days: int = 7) -> dict[str, Any]:
     """Return BigQuery-backed observability aggregates for the admin UI."""
-    from google.cloud import bigquery
-
     bounded_days = min(max(days, 1), 90)
     messages_table = _table("BIGQUERY_MESSAGES_VIEW", BIGQUERY_MESSAGES_VIEW)
     feedback_table = _table("BIGQUERY_FEEDBACK_VIEW", BIGQUERY_FEEDBACK_VIEW)
@@ -310,8 +305,6 @@ def get_admin_metrics(*, days: int = 7) -> dict[str, Any]:
 
 def get_admin_session(session_id: str) -> dict[str, Any] | None:
     """Return a full BigQuery transcript with costs, tools, feedback, and traces."""
-    from google.cloud import bigquery
-
     messages_table = _table("BIGQUERY_MESSAGES_VIEW", BIGQUERY_MESSAGES_VIEW)
     feedback_table = _table("BIGQUERY_FEEDBACK_VIEW", BIGQUERY_FEEDBACK_VIEW)
     query = f"""

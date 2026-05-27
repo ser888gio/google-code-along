@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
 	type RsPartialData,
 	type SrsData,
@@ -48,7 +48,11 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 	const voiceTranscriptIdRef = useRef<string | null>(null);
 	const voiceUserTranscriptIdRef = useRef<string | null>(null);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: handlers object identity changes every render; stable deps come from audioPlayer
+	const handlersRef = useRef(handlers);
+	useLayoutEffect(() => {
+		handlersRef.current = handlers;
+	});
+
 	const handleWsMessage = useCallback(
 		(msg: WsServerMessage) => {
 			const {
@@ -64,7 +68,7 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 				extractNonceRef,
 				setError,
 				sessionId,
-			} = handlers;
+			} = handlersRef.current;
 
 			if (msg.type === "user_transcript_partial") {
 				if (voiceUserTranscriptIdRef.current) {
