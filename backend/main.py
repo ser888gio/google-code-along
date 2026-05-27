@@ -353,6 +353,107 @@ def _empty_discovery_state() -> dict:
     return {"completeness": 0, "fields": {}, "missing_priority": []}
 
 
+async def _apply_answered(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    session_id: str,
+    field_key: str,
+    value: str,
+    statuses: dict,
+    miss_counts: dict,
+    discovery_state: dict | None,
+    direct_fields: dict[str, str],
+    deferred_fields: dict,
+) -> dict | None:
+    statuses[field_key] = "answered"
+    miss_counts[field_key] = 0
+    if discovery_state is None:
+        discovery_state = _empty_discovery_state()
+    discovery_state.setdefault("fields", {})[field_key] = _field_entry(value)
+    _recompute_discovery_completeness(discovery_state)
+    await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
+    if field_key in DIRECT_FIELD_KEYS:
+        direct_fields[field_key] = value
+        await loop.run_in_executor(None, upsert_direct_fields, session_id, {field_key: value})
+    if field_key in deferred_fields:
+        deferred_fields.pop(field_key, None)
+        await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
+    return discovery_state
+
+
+async def _apply_deferred(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    session_id: str,
+    field_key: str,
+    statuses: dict,
+    miss_counts: dict,
+    deferred_fields: dict,
+) -> None:
+    statuses[field_key] = "deferred"
+    miss_counts[field_key] = 0
+    deferred_fields[field_key] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
+    await loop.run_in_executor(None, upsert_deferred_fields, session_id, {field_key: deferred_fields[field_key]})
+
+
+async def _apply_classification_result(
+    *,
+    loop: asyncio.AbstractEventLoop,
+    session_id: str,
+    field_key: str,
+    message: str,
+    classification: "ClassifierResult",
+    statuses: dict,
+    miss_counts: dict,
+    clarification_counts: dict,
+    discovery_state: dict | None,
+    direct_fields: dict[str, str],
+    deferred_fields: dict,
+) -> dict | None:
+    clf = classification["classification"]
+    if clf == "answered":
+        value = classification.get("value")
+        if value:
+            discovery_state = await _apply_answered(
+                loop=loop,
+                session_id=session_id,
+                field_key=field_key,
+                value=value,
+                statuses=statuses,
+                miss_counts=miss_counts,
+                discovery_state=discovery_state,
+                direct_fields=direct_fields,
+                deferred_fields=deferred_fields,
+            )
+        else:
+            statuses[field_key] = "missing"
+    elif clf == "deferred":
+        await _apply_deferred(
+            loop=loop,
+            session_id=session_id,
+            field_key=field_key,
+            statuses=statuses,
+            miss_counts=miss_counts,
+            deferred_fields=deferred_fields,
+        )
+    elif clf == "clarification_requested":
+        statuses[field_key] = "clarification_requested"
+        clarification_counts[field_key] = int(clarification_counts.get(field_key) or 0) + 1
+    elif is_deferred_answer(message):
+        await _apply_deferred(
+            loop=loop,
+            session_id=session_id,
+            field_key=field_key,
+            statuses=statuses,
+            miss_counts=miss_counts,
+            deferred_fields=deferred_fields,
+        )
+    else:
+        statuses[field_key] = "missing"
+        miss_counts[field_key] = int(miss_counts.get(field_key) or 0) + 1
+    return discovery_state
+
+
 async def _classify_and_update_active_field(
     *,
     session_id: str,
@@ -389,43 +490,19 @@ async def _classify_and_update_active_field(
     else:
         coverage_gaps_by_field.pop(field_key, None)
 
-    clf = classification["classification"]
-    if clf == "answered":
-        value = classification.get("value")
-        if value:
-            statuses[field_key] = "answered"
-            miss_counts[field_key] = 0
-            if discovery_state is None:
-                discovery_state = _empty_discovery_state()
-            discovery_state.setdefault("fields", {})[field_key] = _field_entry(value)
-            _recompute_discovery_completeness(discovery_state)
-            await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
-            if field_key in DIRECT_FIELD_KEYS:
-                direct_fields[field_key] = value
-                await loop.run_in_executor(None, upsert_direct_fields, session_id, {field_key: value})
-            if field_key in deferred_fields:
-                deferred_fields.pop(field_key, None)
-                await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
-        else:
-            statuses[field_key] = "missing"
-    elif clf == "deferred":
-        statuses[field_key] = "deferred"
-        miss_counts[field_key] = 0
-        deferred_fields[field_key] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
-        await loop.run_in_executor(None, upsert_deferred_fields, session_id, {field_key: deferred_fields[field_key]})
-    elif clf == "clarification_requested":
-        statuses[field_key] = "clarification_requested"
-        clarification_counts[field_key] = int(clarification_counts.get(field_key) or 0) + 1
-    else:
-        if is_deferred_answer(message):
-            statuses[field_key] = "deferred"
-            deferred_fields[field_key] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
-            await loop.run_in_executor(
-                None, upsert_deferred_fields, session_id, {field_key: deferred_fields[field_key]}
-            )
-        else:
-            statuses[field_key] = "missing"
-            miss_counts[field_key] = int(miss_counts.get(field_key) or 0) + 1
+    discovery_state = await _apply_classification_result(
+        loop=loop,
+        session_id=session_id,
+        field_key=field_key,
+        message=message,
+        classification=classification,
+        statuses=statuses,
+        miss_counts=miss_counts,
+        clarification_counts=clarification_counts,
+        discovery_state=discovery_state,
+        direct_fields=direct_fields,
+        deferred_fields=deferred_fields,
+    )
 
     return classification, discovery_state
 
