@@ -1445,11 +1445,15 @@ async def download_rs_template_docx(req: SessionRef):
     """
     t0 = time.perf_counter()
     loop = asyncio.get_running_loop()
-    state = await loop.run_in_executor(None, get_discovery_state, req.session_id)
-
-    fields: dict = {}
-    if state:
-        fields = state.get("fields", {})
+    # Use only user-confirmed direct fields as the source of truth.
+    # AI-extracted values are never written to the document unless the user
+    # explicitly accepted them in the Preview.
+    direct = await loop.run_in_executor(None, get_direct_fields, req.session_id)
+    fields: dict = {
+        key: {"filled": True, "value": value, "source": "user"}
+        for key, value in direct.items()
+        if value and str(value).strip()
+    }
 
     docx_bytes = rs_template_to_docx(fields)
 
