@@ -71,6 +71,13 @@ export function useMessages(initialText: string) {
 		setMessages([makeWelcomeMessage(text)]);
 	}
 
+	function updateWelcomeMessage(text: string) {
+		setMessages((prev) => {
+			if (prev.length !== 1 || prev[0]?.id !== "welcome") return prev;
+			return [makeWelcomeMessage(text)];
+		});
+	}
+
 	function loadMessages(
 		raw: Array<{ role: Role; text: string; message_id?: string }>,
 	) {
@@ -177,6 +184,7 @@ export function useMessages(initialText: string) {
 		finalizeMessage,
 		setMessageBackendId,
 		resetMessages,
+		updateWelcomeMessage,
 		loadMessages,
 		handleFeedback,
 		handleFeedbackComment,

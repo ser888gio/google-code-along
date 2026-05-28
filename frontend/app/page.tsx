@@ -1090,10 +1090,10 @@ export default function ChatPage() {
 		sessionId: session.sessionId,
 	});
 
-	// Re-initialize welcome message when locale changes
+	// Translate the synthetic welcome bubble without clearing real transcripts.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only re-run when locale changes
 	useEffect(() => {
-		msgs.resetMessages(t("welcome_message"));
+		msgs.updateWelcomeMessage(t("welcome_message"));
 	}, [locale]);
 
 	// Scroll to bottom on new messages
