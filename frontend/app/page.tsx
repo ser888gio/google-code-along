@@ -98,7 +98,7 @@ function MessageBubble({
 							strokeLinecap="round"
 						/>
 					</svg>
-					<span className="text-sm text-gray-700">{msg.text}</span>
+					<span className="text-base text-gray-700">{msg.text}</span>
 				</div>
 			</div>
 		);
@@ -128,7 +128,7 @@ function MessageBubble({
 				{t("label.ai_consultant")}
 			</div>
 			{isThinking ? (
-				<p className="text-sm italic text-gray-400">
+				<p className="text-base italic text-gray-400">
 					{t("thinking")}
 					<span className="inline-flex gap-0.5 ml-0.5 align-middle">
 						<span className="animate-[blink_1.2s_step-end_infinite] [animation-delay:0s]">
@@ -143,7 +143,7 @@ function MessageBubble({
 					</span>
 				</p>
 			) : (
-				<div className="text-sm text-gray-800 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_a]:text-[#4a6659] [&_a]:underline [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold">
+				<div className="text-base text-gray-800 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_a]:text-[#4a6659] [&_a]:underline [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-base [&_h3]:font-semibold">
 					<ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
 					{msg.streaming && (
 						<span className="ml-0.5 inline-block h-4 w-1.5 animate-[blink_1s_step-end_infinite] bg-gray-400 align-middle" />
@@ -557,7 +557,6 @@ function ChatHeader({
 	isRecording,
 	onOpenHistory,
 	onToggleVoice,
-	onNewConversation,
 }: {
 	activeWorkflowField: string | null;
 	chatMode: ChatMode;
@@ -566,11 +565,10 @@ function ChatHeader({
 	isRecording: boolean;
 	onOpenHistory: () => void;
 	onToggleVoice: () => void;
-	onNewConversation: () => void;
 }) {
 	const { t } = useLocale();
 	return (
-		<div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
+		<div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-2">
 			<div className="flex items-center gap-2">
 				<span className="text-sm font-bold text-gray-800">
 					{t("header.title")}
@@ -582,13 +580,6 @@ function ChatHeader({
 				)}
 			</div>
 			<div className="flex items-center gap-3">
-				<button
-					type="button"
-					onClick={onNewConversation}
-					className="flex items-center gap-1.5 rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1 text-xs font-semibold text-white transition-opacity hover:opacity-90"
-				>
-					{t("btn.new_conversation")}
-				</button>
 				<button
 					type="button"
 					onClick={onOpenHistory}
@@ -692,7 +683,6 @@ function ChatHeader({
 						</>
 					)}
 				</button>
-				<LanguageSwitcher />
 				<div
 					className={`h-3 w-3 rounded-full ${
 						chatMode === "voice"
@@ -851,7 +841,7 @@ function ChatInput({
 						placeholder={t("input.placeholder")}
 						rows={1}
 						disabled={isStreaming || sessionEnded}
-						className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
+						className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-base text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
 						style={{ minHeight: 40, maxHeight: 160 }}
 					/>
 					<div className="flex shrink-0 flex-col gap-2">
@@ -859,7 +849,7 @@ function ChatInput({
 							type="button"
 							onClick={onSend}
 							disabled={!input.trim() || isStreaming || sessionEnded}
-							className="flex items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+							className="flex items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-base font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
 						>
 							{isStreaming ? (
 								<svg
@@ -1048,7 +1038,7 @@ function ChatTranscript({
 	onFeedbackComment: (localId: string, comment: string) => Promise<void>;
 }) {
 	return (
-		<div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+		<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
 			{messages.map((msg) => (
 				<MessageBubble
 					key={msg.id}
@@ -1265,8 +1255,18 @@ export default function ChatPage() {
 
 	return (
 		<div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
+			<div className="fixed right-4 top-4 z-50 flex items-center gap-3">
+				<button
+					type="button"
+					onClick={newConversation}
+					className="flex items-center gap-1.5 rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+				>
+					{t("btn.new_conversation")}
+				</button>
+				<LanguageSwitcher />
+			</div>
 			{/* ── Left panel ─────────────────────────────────── */}
-			<div className="flex w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
+			<div className="flex min-h-0 w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
 				{session.historyOpen && (
 					<HistorySidebar
 						sessions={session.historySessions}
@@ -1285,7 +1285,6 @@ export default function ChatPage() {
 					wsConnectionState={voice.ws.connectionState}
 					isRecording={voice.audioRecorder.isRecording}
 					onOpenHistory={session.openHistory}
-					onNewConversation={newConversation}
 					onToggleVoice={async () => {
 						// Turning voice ON mid-completion would race the in-flight text
 						// turn / debounced field PATCHes, so the voice agent could boot
