@@ -621,12 +621,13 @@ function ChatHeader({
 				<button
 					type="button"
 					onClick={onToggleVoice}
+					disabled={chatMode === "text" && isStreaming}
 					title={
 						chatMode === "voice"
 							? t("header.voice_to_text")
 							: t("header.text_to_voice")
 					}
-					className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
+					className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
 						chatMode === "voice"
 							? "bg-red-50 text-red-600 hover:bg-red-100"
 							: "text-gray-500 hover:bg-gray-100"
@@ -1285,9 +1286,17 @@ export default function ChatPage() {
 					isRecording={voice.audioRecorder.isRecording}
 					onOpenHistory={session.openHistory}
 					onNewConversation={newConversation}
-					onToggleVoice={() =>
-						voice.handleToggleVoice(session.sessionId, session.setSessionId)
-					}
+					onToggleVoice={async () => {
+						// Turning voice ON mid-completion would race the in-flight text
+						// turn / debounced field PATCHes, so the voice agent could boot
+						// from stale Firestore state and re-ask answered fields. Block
+						// while streaming and flush pending edits first.
+						if (voice.chatMode === "text") {
+							if (isStreaming) return;
+							await rsState.flushPendingPatches();
+						}
+						voice.handleToggleVoice(session.sessionId, session.setSessionId);
+					}}
 				/>
 
 				<ChatTranscript

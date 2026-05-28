@@ -46,7 +46,11 @@ from config import (
     validate_config,
 )
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
-from direct_field_context import build_augmented_user_message, merge_direct_fields
+from direct_field_context import (
+    build_augmented_user_message,
+    clean_direct_fields,
+    merge_direct_fields,
+)
 from fastapi import (
     Depends,
     FastAPI,
@@ -659,6 +663,82 @@ async def _prepare_workflow_turn(
         "tail_text": tail_text,
         "solution_type": solution_type_value,
     }
+
+
+def build_workflow_context_snapshot(
+    session_id: str,
+    direct_fields: dict[str, str],
+) -> tuple[dict, list[str]]:
+    """Compute the current workflow-context block without advancing state.
+
+    Unlike _prepare_workflow_turn, this performs no classification and persists
+    nothing — it is a pure read used to prime a voice session at connect time so
+    the audio agent sees the same hidden context the text path injects per turn.
+    """
+    discovery_state = get_discovery_state(session_id)
+    deferred_fields = get_deferred_fields(session_id)
+    stored_workflow = get_workflow_state(session_id)
+    workflow = sync_workflow_with_discovery_state(
+        stored_workflow or initialize_workflow_state(),
+        discovery_state,
+        direct_fields,
+        deferred_fields,
+    )
+
+    if workflow.get("phase") == "ready_to_finalize":
+        active_field = None
+    else:
+        active_field = pick_next_active_field(
+            workflow,
+            discovery_state,
+            direct_fields,
+            deferred_fields,
+        )
+        if active_field is None:
+            workflow["phase"] = "wrap_up"
+        elif workflow.get("phase") != "wrap_up":
+            workflow["phase"] = "discovery"
+        workflow["active_field"] = active_field
+
+    answered_values = _answered_field_values(discovery_state, direct_fields)
+    active_field_for_ctx = workflow.get("active_field")
+    coverage_gaps_map = workflow.get("coverage_gaps") or {}
+    workflow_context = {
+        "phase": workflow.get("phase"),
+        "active_field": active_field_for_ctx,
+        "clarification_requested": False,
+        "miss_count": int((workflow.get("miss_counts") or {}).get(active_field_for_ctx) or 0),
+        "answered_fields": answered_values,
+        "deferred_fields": list(deferred_fields.keys()),
+        "ready_to_finalize": workflow.get("phase") == "ready_to_finalize",
+        "active_field_coverage_gaps": list(coverage_gaps_map.get(active_field_for_ctx) or []),
+        "previous_field_coverage_gaps": [],
+    }
+    return workflow_context, list(deferred_fields.keys())
+
+
+def load_voice_priming(session_id: str) -> str | None:
+    """Build the hidden workflow-context block to seed a voice session.
+
+    Returns None for a session with no prior progress (nothing answered, no
+    active field, nothing deferred) so brand-new voice sessions are unaffected.
+    """
+    direct_fields = get_direct_fields(session_id)
+    workflow_context, _deferred = build_workflow_context_snapshot(session_id, direct_fields)
+
+    has_direct = bool(clean_direct_fields(direct_fields))
+    has_answers = bool(workflow_context.get("answered_fields"))
+    has_deferred = bool(workflow_context.get("deferred_fields"))
+    if not (has_direct or has_answers or has_deferred):
+        return None
+
+    return build_augmented_user_message(
+        "",
+        direct_fields,
+        workflow_context["deferred_fields"],
+        workflow_context=workflow_context,
+        field_labels=FIELD_LABELS,
+    )
 
 
 # --- Request / response models ---
@@ -2220,6 +2300,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                 session_bridge=session_bridge,
                 audio_runner=audio_runner,
                 run_turn_postprocessing=_run_turn_postprocessing,
+                load_voice_priming=load_voice_priming,
                 logger=logger,
             ),
         )

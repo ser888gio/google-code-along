@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.adk.agents.run_config import RunConfig
+from google.adk.events.event import Event
 from google.genai.errors import APIError as GenaiAPIError
 from google.genai.types import Blob, Content, Part
 
@@ -22,6 +23,7 @@ class AudioWebsocketDeps:
     session_bridge: Any
     audio_runner: Any
     run_turn_postprocessing: Callable[..., Any]
+    load_voice_priming: Callable[[str], str | None]
     logger: Any
 
 
@@ -53,13 +55,56 @@ async def _ensure_audio_session(deps: AudioWebsocketDeps, user_id: str, session_
         user_id=user_id,
         session_id=session_id,
     )
-    if session is not None:
-        return session
-    return await deps.session_service.create_session(
-        app_name=deps.app_name,
-        user_id=user_id,
-        session_id=session_id,
-    )
+    if session is None:
+        session = await deps.session_service.create_session(
+            app_name=deps.app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+    await _prime_audio_session(deps, session, session_id)
+    return session
+
+
+_PRIMING_MARKER = "[VOICE_PRIMING]"
+
+
+def _latest_priming_text(session) -> str | None:
+    """Return the text of the most recent priming event already in history."""
+    for event in reversed(session.events or []):
+        if not event.content or not event.content.parts:
+            continue
+        for part in event.content.parts:
+            text = getattr(part, "text", None)
+            if text and text.startswith(_PRIMING_MARKER):
+                return text
+    return None
+
+
+async def _prime_audio_session(deps: AudioWebsocketDeps, session, session_id: str) -> None:
+    """Seed the audio session history with the hidden workflow-context block.
+
+    Appended as a synthetic user event (not pushed through the live queue) so the
+    voice agent sees fields already answered in text mode on its next real turn,
+    without being prompted to respond on connect.
+
+    Idempotent across reconnects: each priming event carries a marker prefix, and
+    we skip appending when the latest priming block in history is unchanged — so
+    repeated text/voice toggles don't accumulate duplicate hidden blocks.
+    """
+    try:
+        priming = await asyncio.get_running_loop().run_in_executor(None, deps.load_voice_priming, session_id)
+    except Exception as exc:
+        deps.logger.error(f"[WS] Voice priming load failed: session={session_id} {exc}")
+        return
+    if not priming or not priming.strip():
+        return
+    tagged = f"{_PRIMING_MARKER}\n{priming}"
+    if _latest_priming_text(session) == tagged:
+        deps.logger.debug(f"[WS] Voice priming unchanged, skipping append: session={session_id}")
+        return
+    event = Event(author="user", content=_text_content(tagged))
+    await deps.session_service.append_event(session, event)
+    deps.logger.info(f"[WS] Voice session primed with workflow context: session={session_id}")
 
 
 def _send_upstream_text_message(msg: dict, live_request_queue: LiveRequestQueue) -> None:
