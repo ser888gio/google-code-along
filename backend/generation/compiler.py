@@ -43,7 +43,6 @@ async def compile_rs_from_session(
         full_text = "".join(part.text for part in event.content.parts if part.text)
 
         if RS_MARKER in full_text:
-            # Return everything after the marker
             _, _, rs_body = full_text.partition(RS_MARKER)
             return rs_body.strip()
 

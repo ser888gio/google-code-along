@@ -58,7 +58,6 @@ async def generate_bpmn_diagram(conversation_text: str) -> str:
     # Strip markdown fences if the model wrapped the output anyway
     if mermaid.startswith("```"):
         lines = mermaid.splitlines()
-        # Remove first and last fence lines
         inner = [line for line in lines if not line.strip().startswith("```")]
         mermaid = "\n".join(inner).strip()
 

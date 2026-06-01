@@ -23,7 +23,6 @@ def sanitize_gcs_filename(filename: str) -> str:
     normalized = unicodedata.normalize("NFKD", normalized)
     normalized = normalized.encode("ascii", "ignore").decode("ascii")
     normalized = normalized.replace(" ", "_")
-    # Remove any characters still outside the allowed set.
     normalized = re.sub(r"[^A-Za-z0-9._-]", "_", normalized)
     # Collapse consecutive underscores and strip leading/trailing ones.
     normalized = re.sub(r"_+", "_", normalized).strip("_")

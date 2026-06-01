@@ -100,7 +100,6 @@ class SessionBridge:
 
         session = await self._get_or_create_session(user_id, session_id)
 
-        # Log session state before injection for debugging
         content_events = [e for e in (session.events or []) if e.content and e.content.parts]
         logger.info(
             f"[SessionBridge] Session state before injection: "
