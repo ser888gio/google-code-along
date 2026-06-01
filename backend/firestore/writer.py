@@ -12,6 +12,7 @@ have a value — previously filled fields are never erased.
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, cast
@@ -26,6 +27,8 @@ from field_schema import REQUIRED_FIELDS
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_document import DocumentSnapshot
 from privacy import hash_text, redact_text
+
+logger = logging.getLogger(__name__)
 
 
 def _snap(ref: Any) -> DocumentSnapshot:
@@ -523,8 +526,8 @@ def get_final_analysis(session_id: str) -> dict | None:
             result = json.loads(json_str)
             result["finalization_status"] = "complete"
             return result
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"[Firestore] Failed to parse final_analysis_json: {exc}")
     return data
 
 
@@ -568,7 +571,9 @@ def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
         else:
             # Empty string or None — clear the field regardless of prior state
             fields[key] = {"filled": False, "value": None, "source": None}
-    filled_required = sum(1 for k in REQUIRED_FIELDS if fields.get(k, {}).get("filled", False))
+    filled_required = sum(
+        1 for k in REQUIRED_FIELDS if isinstance(fields.get(k), dict) and fields[k].get("filled", False)
+    )
     state["completeness"] = round((filled_required / len(REQUIRED_FIELDS)) * 100)
 
 
@@ -741,8 +746,8 @@ def get_discovery_state(session_id: str) -> dict | None:
         try:
             direct: dict[str, str] = json.loads(direct_json)
             _merge_direct_fields(state, direct)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(f"[Firestore] Failed to merge direct_input fields from JSON: {exc}")
 
     return state
 

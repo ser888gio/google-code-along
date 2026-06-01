@@ -1,0 +1,29 @@
+[project]
+name = "google-code-along-backend"
+version = "0.0.0"
+description = "aislop-only manifest. Real deps live in backend/requirements.txt and the root pyproject.toml."
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+# Names below are first-party top-level modules in backend/ or import-name
+# aliases that aislop's hallucinated-import rule can't resolve from
+# requirements.txt alone (e.g. `opentelemetry` ships as `opentelemetry-api`,
+# `opentelemetry-sdk`, etc.). Listing them here makes aislop accept the
+# imports. This file is NOT used by pip/uv; the canonical manifests are
+# /pyproject.toml and /backend/requirements.txt.
+aislop-extras = [
+  "opentelemetry",
+  "admin_sessions",
+  "answer_classifier",
+  "answer_quality",
+  "audio_websocket",
+  "config",
+  "direct_field_context",
+  "field_schema",
+  "logger",
+  "privacy",
+  "session_bridge",
+  "solution_configs",
+  "utils",
+]

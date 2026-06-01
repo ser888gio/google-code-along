@@ -246,13 +246,8 @@ async def _mark_finalizer_failed(session_id: str) -> None:
     """Best-effort status update after finalization fails."""
     try:
         await asyncio.to_thread(set_finalization_error, session_id)
-    except Exception:
-        pass
-
-
-# ---------------------------------------------------------------------------
-# Main entry point — called from main.py as an asyncio background task
-# ---------------------------------------------------------------------------
+    except Exception as exc:
+        logger.warning(f"[Finalizer] Failed to mark session as errored: session={session_id} {exc}")
 
 
 async def run_finalizer(

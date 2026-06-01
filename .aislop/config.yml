@@ -1,0 +1,9 @@
+version: 1
+
+# Rules we explicitly disable. `off` removes the rule entirely (no diagnostic,
+# no auto-fix). Both rules below are auto-fixable, meaning `npx aislop fix`
+# would delete the flagged comments — and we keep many of those intentionally
+# (WHY notes, non-obvious context). Disable to preserve them.
+rules:
+  ai-slop/trivial-comment: off
+  ai-slop/narrative-comment: off

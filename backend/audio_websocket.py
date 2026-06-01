@@ -148,7 +148,7 @@ async def _websocket_audio_upstream(
         while await _handle_audio_upstream_frame(websocket, live_request_queue, deps):
             pass
     except WebSocketDisconnect:
-        pass
+        deps.logger.debug(f"[WS] Upstream client disconnected: user={user_id} session={session_id}")
     except Exception as exc:
         deps.logger.error(f"[WS] Upstream error: {exc}", exc_info=True)
     finally:
@@ -181,9 +181,6 @@ async def _send_user_transcription(
         if chunk and chunk.strip():
             await _send_ws_json(websocket, {"type": "user_transcript_partial", "text": chunk})
     else:
-        # Full accumulated text for the turn. Frontend replaces the live
-        # bubble with this authoritative string, then we keep it for the
-        # session_bridge injection at turn_complete.
         turn.user = event.input_transcription.text
         clean = turn.user.strip()
         if clean:
@@ -275,11 +272,11 @@ async def _complete_voice_turn(
     turn.reset()
 
 
-async def _send_voice_error(websocket: WebSocket, message: str) -> None:
+async def _send_voice_error(websocket: WebSocket, deps: AudioWebsocketDeps, message: str) -> None:
     try:
         await _send_ws_json(websocket, {"type": "error", "message": message})
-    except Exception:
-        pass
+    except Exception as exc:
+        deps.logger.debug(f"[WS] Failed to deliver voice error to client (socket likely closed): {exc}")
 
 
 async def _websocket_audio_downstream(
@@ -311,10 +308,10 @@ async def _websocket_audio_downstream(
             deps.logger.info(f"[WS] Gemini Live session closed normally: session={session_id}")
         else:
             deps.logger.error(f"[WS] Gemini Live API error: {exc}", exc_info=True)
-            await _send_voice_error(websocket, "A voice API error occurred. Please try again.")
+            await _send_voice_error(websocket, deps, "A voice API error occurred. Please try again.")
     except Exception as exc:
         deps.logger.error(f"[WS] Downstream error: {exc}", exc_info=True)
-        await _send_voice_error(websocket, "An internal error occurred. Please reconnect.")
+        await _send_voice_error(websocket, deps, "An internal error occurred. Please reconnect.")
     finally:
         deps.logger.debug(f"[WS] Downstream closed: user={user_id} session={session_id}")
 

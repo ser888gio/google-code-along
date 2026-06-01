@@ -347,9 +347,21 @@ def _field_entry(value: str) -> dict:
     return {"filled": True, "value": value}
 
 
+def _solution_type_value(discovery_state: dict | None) -> str | None:
+    if not discovery_state:
+        return None
+    fields = discovery_state.get("fields")
+    if not isinstance(fields, dict):
+        return None
+    entry = fields.get("solution_type")
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("value")
+
+
 def _recompute_discovery_completeness(state: dict) -> None:
     fields = state.setdefault("fields", {})
-    filled = sum(1 for key in REQUIRED_FIELDS if fields.get(key, {}).get("filled"))
+    filled = sum(1 for key in REQUIRED_FIELDS if isinstance(fields.get(key), dict) and fields[key].get("filled"))
     state["completeness"] = round((filled / len(REQUIRED_FIELDS)) * 100)
 
 
@@ -582,9 +594,7 @@ async def _prepare_workflow_turn(
         "coverage_gaps": [],
     }
 
-    solution_type_value: str | None = (
-        ((discovery_state or {}).get("fields") or {}).get("solution_type", {}).get("value")
-    )
+    solution_type_value = _solution_type_value(discovery_state)
 
     tail_text = _build_conversation_tail(session, req.message)
     if workflow.get("phase") == "wrap_up":
@@ -1878,7 +1888,7 @@ async def context_extract(req: ContextRequest):
         try:
             loop = asyncio.get_running_loop()
             _saved_state = await loop.run_in_executor(None, get_discovery_state, sid)
-            _sol_type: str | None = ((_saved_state or {}).get("fields") or {}).get("solution_type", {}).get("value")
+            _sol_type = _solution_type_value(_saved_state)
             result = await extract_discovery_fields(conversation_text, session_id=sid, solution_type=_sol_type)
         except CostCircuitBreakerTripped as exc:
             raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
@@ -2092,7 +2102,6 @@ async def get_analysis(session_id: str):
     status = result.get("finalization_status", "not_found")
 
     if status == "complete":
-        # Remove the internal status flag before returning to frontend
         result.pop("finalization_status", None)
         logger.info(f"Analysis ready: session_id={session_id}")
         return {"status": "complete", "analysis": result}
@@ -2181,7 +2190,6 @@ async def _run_turn_postprocessing(
         logger.info(f"[FINALIZING] detected: session={session_id} — launching finalizer")
         loop.run_in_executor(None, set_finalization_pending, session_id)
 
-        # Build conversation transcript for the finalizer
         session_snap = await session_service.get_session(
             app_name=APP_NAME,
             user_id=user_id,
@@ -2193,10 +2201,9 @@ async def _run_turn_postprocessing(
             else (fallback_transcript or f"User: {user_text}\nConsultant: {assistant_text}")
         )
 
-        # Extract discovery fields for the finalizer
         try:
             _fin_saved = await loop.run_in_executor(None, get_discovery_state, session_id)
-            _fin_sol_type: str | None = ((_fin_saved or {}).get("fields") or {}).get("solution_type", {}).get("value")
+            _fin_sol_type = _solution_type_value(_fin_saved)
             discovery_fields = await extract_discovery_fields(
                 conversation_text,
                 session_id=session_id,

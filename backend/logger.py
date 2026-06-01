@@ -31,9 +31,10 @@ def setup_logging(level: str = "INFO") -> None:
             # structured JSON and auto-correlates to Cloud Trace spans.
             client.setup_logging(log_level=log_level)
             return
-        except Exception:
-            # Fall through to stdout handler if anything goes wrong
-            pass
+        except Exception as exc:
+            # Cloud Logging unavailable (missing creds, network failure, import error
+            # in dev environments) — fall through to stdout handler instead of crashing.
+            sys.stderr.write(f"Cloud Logging setup failed, using stdout: {exc}\n")
 
     # Local dev fallback — plain stdout
     logging.basicConfig(

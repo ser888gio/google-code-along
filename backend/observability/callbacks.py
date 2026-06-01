@@ -15,6 +15,7 @@ They never modify the LLM request/response — always return None.
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 
 from opentelemetry import trace
@@ -29,6 +30,8 @@ from observability.metrics import (
 )
 from observability.safety import add_session_cost
 from observability.turns import record_model_call, record_tool_call
+
+logger = logging.getLogger(__name__)
 
 _SNIPPET_MAX_CHARS = 500  # max chars captured as span event content
 
@@ -71,8 +74,8 @@ def _add_redacted_content_event(span, event_name: str, content) -> None:
         snippet = _redact_snippet(_extract_text_from_content(content))
         if snippet:
             span.add_event(event_name, attributes={"content": snippet})
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"[Observability] Failed to attach redacted span event '{event_name}': {exc}")
 
 
 def _usage_counts(usage) -> dict[str, int]:

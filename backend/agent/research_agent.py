@@ -85,9 +85,10 @@ def search_past_analyses(query: str, max_results: int = 3) -> dict:
         for path in analysis_paths:
             try:
                 data = json.loads(read_text(path))
-                form = data.get("use_case_form", {})
-                tech = data.get("technology_recommendation", {})
-                tier = data.get("priority_tier", {})
+                form = data.get("use_case_form") or {}
+                tech = data.get("technology_recommendation") or {}
+                tier = data.get("priority_tier") or {}
+                meta = data.get("_meta") or {}
                 summary_text = (
                     f"{form.get('use_case_title', '')} "
                     f"{form.get('department', '')} "
@@ -99,7 +100,7 @@ def search_past_analyses(query: str, max_results: int = 3) -> dict:
                     (
                         score,
                         {
-                            "session_id": data.get("_meta", {}).get("session_id", path.split("/")[1]),
+                            "session_id": meta.get("session_id", path.split("/")[1]),
                             "use_case_title": form.get("use_case_title", ""),
                             "department": form.get("department", ""),
                             "solution_type": form.get("solution_type", tech.get("primary", "")),
