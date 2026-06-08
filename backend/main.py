@@ -22,7 +22,6 @@ from admin_sessions import (
 from agent import audio_agent, rs_agent
 from agent.discovery_agent import (
     extract_discovery_fields,
-    initialize_workflow_state,
     is_not_applicable_allowed,
     pick_next_active_field,
     sync_workflow_with_discovery_state,
@@ -134,6 +133,7 @@ from pydantic import BaseModel
 from session_bridge import SessionBridge
 from starlette.requests import Request
 from utils import extract_conversation_text, sanitize_gcs_filename, sanitize_gcs_segment
+from workflow_state import AgentContext, FieldStatus, Phase, WorkflowEvent, WorkflowState
 
 setup_logging()
 logger = get_logger(__name__)
@@ -326,7 +326,7 @@ def _is_finalize_choice(message: str) -> bool:
 async def _reopen_first_deferred_field(
     *,
     session_id: str,
-    workflow: dict,
+    state: WorkflowState,
     deferred_fields: dict,
 ) -> None:
     """Move wrap-up back to discovery for the first deferred field."""
@@ -335,10 +335,7 @@ async def _reopen_first_deferred_field(
 
     field_key = next(iter(deferred_fields))
     deferred_fields.pop(field_key, None)
-    workflow["phase"] = "discovery"
-    workflow["active_field"] = field_key
-    workflow.setdefault("field_status", {})[field_key] = "missing"
-    workflow.setdefault("miss_counts", {})[field_key] = 0
+    state.transition(WorkflowEvent.REOPEN_DEFERRED, active_field=field_key)
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
@@ -478,7 +475,7 @@ async def _classify_and_update_active_field(
     message: str,
     tail_text: str,
     solution_type: str | None,
-    workflow: dict,
+    state: WorkflowState,
     discovery_state: dict | None,
     direct_fields: dict[str, str],
     deferred_fields: dict,
@@ -491,21 +488,16 @@ async def _classify_and_update_active_field(
     )
     await rate_answer(
         field_key,
-        str((workflow.get("last_question_by_field") or {}).get(field_key, "")),
+        str((state.last_question_by_field or {}).get(field_key, "")),
         message,
         classification["classification"],
     )
 
-    statuses = workflow["field_status"]
-    miss_counts = workflow.setdefault("miss_counts", {})
-    clarification_counts = workflow.setdefault("clarification_counts", {})
-    coverage_gaps_by_field = workflow.setdefault("coverage_gaps", {})
-
     latest_gaps = list(classification.get("coverage_gaps") or [])
     if latest_gaps:
-        coverage_gaps_by_field[field_key] = latest_gaps
+        state.coverage_gaps[field_key] = latest_gaps
     else:
-        coverage_gaps_by_field.pop(field_key, None)
+        state.coverage_gaps.pop(field_key, None)
 
     discovery_state = await _apply_classification_result(
         loop=loop,
@@ -513,9 +505,9 @@ async def _classify_and_update_active_field(
         field_key=field_key,
         message=message,
         classification=classification,
-        statuses=statuses,
-        miss_counts=miss_counts,
-        clarification_counts=clarification_counts,
+        statuses=state.field_status,
+        miss_counts=state.miss_counts,
+        clarification_counts=state.clarification_counts,
         discovery_state=discovery_state,
         direct_fields=direct_fields,
         deferred_fields=deferred_fields,
@@ -529,7 +521,7 @@ async def _apply_proactive_updates(
     session_id: str,
     classification: ClassifierResult,
     active_field: str,
-    workflow: dict,
+    state: WorkflowState,
     discovery_state: dict | None,
 ) -> dict | None:
     """Persist any side-channel field values the classifier extracted proactively."""
@@ -541,7 +533,7 @@ async def _apply_proactive_updates(
             continue
         value = str(entry.get("value") or "").strip()
         if value:
-            workflow["field_status"][key] = "answered"
+            state.field_status[key] = FieldStatus.ANSWERED
             proactive_updates[key] = value
 
     if not proactive_updates:
@@ -570,12 +562,8 @@ async def _prepare_workflow_turn(
     discovery_state = await loop.run_in_executor(None, get_discovery_state, session_id)
     deferred_fields = await loop.run_in_executor(None, get_deferred_fields, session_id)
     stored_workflow = await loop.run_in_executor(None, get_workflow_state, session_id)
-    workflow = sync_workflow_with_discovery_state(
-        stored_workflow or initialize_workflow_state(),
-        discovery_state,
-        direct_fields,
-        deferred_fields,
-    )
+    state = WorkflowState.from_dict(stored_workflow)
+    state = sync_workflow_with_discovery_state(state, discovery_state, direct_fields, deferred_fields)
 
     incoming_deferred = {
         key: {"deferred_at": datetime.now(timezone.utc).isoformat()}
@@ -586,7 +574,7 @@ async def _prepare_workflow_turn(
         deferred_fields.update(incoming_deferred)
         await loop.run_in_executor(None, upsert_deferred_fields, session_id, incoming_deferred)
 
-    previous_active = workflow.get("active_field")
+    previous_active = state.active_field
     classification: ClassifierResult = {
         "classification": "not_answered",
         "value": None,
@@ -598,14 +586,13 @@ async def _prepare_workflow_turn(
     solution_type_value = _solution_type_value(discovery_state)
 
     tail_text = _build_conversation_tail(session, req.message)
-    if workflow.get("phase") == "wrap_up":
+    if state.phase == Phase.WRAP_UP:
         if _is_finalize_choice(req.message):
-            workflow["phase"] = "ready_to_finalize"
-            workflow["active_field"] = None
+            state.transition(WorkflowEvent.FINALIZE_CHOSEN)
         else:
             await _reopen_first_deferred_field(
                 session_id=session_id,
-                workflow=workflow,
+                state=state,
                 deferred_fields=deferred_fields,
             )
     elif previous_active:
@@ -615,7 +602,7 @@ async def _prepare_workflow_turn(
             message=req.message,
             tail_text=tail_text,
             solution_type=solution_type_value,
-            workflow=workflow,
+            state=state,
             discovery_state=discovery_state,
             direct_fields=direct_fields,
             deferred_fields=deferred_fields,
@@ -624,49 +611,34 @@ async def _prepare_workflow_turn(
             session_id=session_id,
             classification=classification,
             active_field=previous_active,
-            workflow=workflow,
+            state=state,
             discovery_state=discovery_state,
         )
 
-    if workflow.get("phase") == "ready_to_finalize":
-        active_field = None
-    else:
-        active_field = pick_next_active_field(
-            workflow,
-            discovery_state,
-            direct_fields,
-            deferred_fields,
-        )
-        if active_field is None:
-            workflow["phase"] = "wrap_up"
-        elif workflow.get("phase") != "wrap_up":
-            workflow["phase"] = "discovery"
-        workflow["active_field"] = active_field
+    if state.phase != Phase.READY_TO_FINALIZE:
+        next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
+        if next_field is None:
+            state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
+        else:
+            state.transition(WorkflowEvent.FIELD_FOUND, active_field=next_field)
 
     # Treat disallowed not-applicable statuses as deferred to avoid required-field skips.
-    for key, status in list(workflow.get("field_status", {}).items()):
-        if status == "not_applicable" and not is_not_applicable_allowed(key):
-            workflow["field_status"][key] = "deferred"
+    for key, status in list(state.field_status.items()):
+        if status == FieldStatus.NOT_APPLICABLE and not is_not_applicable_allowed(key):
+            state.field_status[key] = FieldStatus.DEFERRED
 
-    await loop.run_in_executor(None, upsert_workflow_state, session_id, workflow)
+    await loop.run_in_executor(None, upsert_workflow_state, session_id, state.to_dict())
 
     answered_values = _answered_field_values(discovery_state, direct_fields)
-    active_field_for_ctx = workflow.get("active_field")
-    coverage_gaps_map = workflow.get("coverage_gaps") or {}
-    workflow_context = {
-        "phase": workflow.get("phase"),
-        "active_field": active_field_for_ctx,
-        "clarification_requested": classification["classification"] == "clarification_requested",
-        "miss_count": int((workflow.get("miss_counts") or {}).get(active_field_for_ctx) or 0),
-        "answered_fields": answered_values,
-        "deferred_fields": list(deferred_fields.keys()),
-        "ready_to_finalize": workflow.get("phase") == "ready_to_finalize",
-        "active_field_coverage_gaps": list(coverage_gaps_map.get(active_field_for_ctx) or []),
-        "previous_field_coverage_gaps": list(coverage_gaps_map.get(previous_active) or []) if previous_active else [],
-    }
+    workflow_context = state.to_agent_context(
+        classification_result=classification["classification"],
+        answered_values=answered_values,
+        deferred_field_keys=list(deferred_fields.keys()),
+        previous_active=previous_active,
+    )
 
     return {
-        "workflow": workflow,
+        "workflow": state.to_dict(),
         "workflow_context": workflow_context,
         "direct_fields": direct_fields,
         "deferred_fields": list(deferred_fields.keys()),
@@ -679,7 +651,7 @@ async def _prepare_workflow_turn(
 def build_workflow_context_snapshot(
     session_id: str,
     direct_fields: dict[str, str],
-) -> tuple[dict, list[str]]:
+) -> tuple[AgentContext, list[str]]:
     """Compute the current workflow-context block without advancing state.
 
     Unlike _prepare_workflow_turn, this performs no classification and persists
@@ -689,42 +661,23 @@ def build_workflow_context_snapshot(
     discovery_state = get_discovery_state(session_id)
     deferred_fields = get_deferred_fields(session_id)
     stored_workflow = get_workflow_state(session_id)
-    workflow = sync_workflow_with_discovery_state(
-        stored_workflow or initialize_workflow_state(),
-        discovery_state,
-        direct_fields,
-        deferred_fields,
-    )
+    state = WorkflowState.from_dict(stored_workflow)
+    state = sync_workflow_with_discovery_state(state, discovery_state, direct_fields, deferred_fields)
 
-    if workflow.get("phase") == "ready_to_finalize":
-        active_field = None
-    else:
-        active_field = pick_next_active_field(
-            workflow,
-            discovery_state,
-            direct_fields,
-            deferred_fields,
-        )
-        if active_field is None:
-            workflow["phase"] = "wrap_up"
-        elif workflow.get("phase") != "wrap_up":
-            workflow["phase"] = "discovery"
-        workflow["active_field"] = active_field
+    if state.phase != Phase.READY_TO_FINALIZE:
+        next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
+        if next_field is None:
+            state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
+        else:
+            state.transition(WorkflowEvent.FIELD_FOUND, active_field=next_field)
 
     answered_values = _answered_field_values(discovery_state, direct_fields)
-    active_field_for_ctx = workflow.get("active_field")
-    coverage_gaps_map = workflow.get("coverage_gaps") or {}
-    workflow_context = {
-        "phase": workflow.get("phase"),
-        "active_field": active_field_for_ctx,
-        "clarification_requested": False,
-        "miss_count": int((workflow.get("miss_counts") or {}).get(active_field_for_ctx) or 0),
-        "answered_fields": answered_values,
-        "deferred_fields": list(deferred_fields.keys()),
-        "ready_to_finalize": workflow.get("phase") == "ready_to_finalize",
-        "active_field_coverage_gaps": list(coverage_gaps_map.get(active_field_for_ctx) or []),
-        "previous_field_coverage_gaps": [],
-    }
+    workflow_context = state.to_agent_context(
+        classification_result="not_answered",
+        answered_values=answered_values,
+        deferred_field_keys=list(deferred_fields.keys()),
+        previous_active=None,
+    )
     return workflow_context, list(deferred_fields.keys())
 
 

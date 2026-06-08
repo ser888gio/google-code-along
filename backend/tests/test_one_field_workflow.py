@@ -1,5 +1,4 @@
 from agent.discovery_agent import (
-    initialize_workflow_state,
     pick_next_active_field,
     sync_workflow_with_discovery_state,
 )
@@ -10,41 +9,42 @@ from answer_classifier import (
     mentions_other_direct_field,
 )
 from direct_field_context import build_augmented_user_message
+from workflow_state import WorkflowState
 
 
 def test_pick_next_active_field_prioritizes_required_schema_order():
-    state = initialize_workflow_state()
-    state["field_status"]["use_case_title"] = "answered"
-    state["field_status"]["department"] = "answered"
+    state = WorkflowState()
+    state.field_status["use_case_title"] = "answered"
+    state.field_status["department"] = "answered"
 
-    assert pick_next_active_field(state) == "requestor"
+    assert pick_next_active_field(state) == "requester"
 
 
 def test_pick_next_active_field_returns_none_when_all_fields_resolved():
-    state = initialize_workflow_state()
-    for key in state["field_status"]:
-        state["field_status"][key] = "answered"
+    state = WorkflowState()
+    for key in state.field_status:
+        state.field_status[key] = "answered"
 
     assert pick_next_active_field(state) is None
 
 
 def test_sync_workflow_marks_discovery_and_deferred_fields():
-    state = initialize_workflow_state()
+    state = WorkflowState()
     synced = sync_workflow_with_discovery_state(
         state,
         {
             "fields": {
                 "department": {"filled": True, "value": "HR"},
-                "requestor": {"filled": False, "value": None},
+                "requester": {"filled": False, "value": None},
             }
         },
         {},
         {"product_owner": {"deferred_at": "now"}},
     )
 
-    assert synced["field_status"]["department"] == "answered"
-    assert synced["field_status"]["product_owner"] == "deferred"
-    assert synced["field_status"]["requestor"] == "missing"
+    assert synced.field_status["department"] == "answered"
+    assert synced.field_status["product_owner"] == "deferred"
+    assert synced.field_status["requester"] == "missing"
 
 
 def test_deferred_answer_detection_is_czech_and_diacritic_insensitive():
@@ -61,7 +61,7 @@ def test_direct_answer_cleaning_and_clarification_heuristic():
 
 
 def test_direct_fast_path_detects_proactive_other_field_mentions():
-    assert mentions_other_direct_field("department", "Je to pro HR a requestor je Jan Novak")
+    assert mentions_other_direct_field("department", "Je to pro HR a requester je Jan Novak")
     assert not mentions_other_direct_field("department", "HR")
 
 
