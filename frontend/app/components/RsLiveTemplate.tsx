@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RsState } from "../../lib/api";
 import { RS_SECTIONS, type Section } from "../generated/rsSchema";
 import { useLocale } from "../i18n/LocaleContext";
