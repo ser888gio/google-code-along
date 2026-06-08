@@ -65,6 +65,7 @@
 	"rs.suggestion.label": "AI suggests:",
 	"rs.suggestion.accept": "Accept",
 	"rs.suggestion.dismiss": "Dismiss",
+	"rs.toast.updated": "updated",
 	"rs.section.identity_current_state": "Identity & Current State",
 	"rs.section.target_state": "Target State",
 	"rs.section.value_roi": "Value & ROI",

@@ -105,6 +105,14 @@ function applyMergeRule(
 export function useRsState(sessionId: string | null) {
 	const [fields, setFields] = useState<Record<string, RsField>>({});
 	const [deferredKeys, setDeferredKeys] = useState<DirectChatFieldKey[]>([]);
+	const [recentlyChangedKeys, setRecentlyChangedKeys] = useState<Set<string>>(
+		new Set(),
+	);
+
+	// Mirrors `fields` synchronously so applyExtraction can diff without a functional updater.
+	// Safe because applyExtraction is always called from async (network) contexts.
+	const latestFieldsRef = useRef<Record<string, RsField>>({});
+	latestFieldsRef.current = fields;
 
 	// Per-key debounce timers
 	const debounceRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -125,18 +133,29 @@ export function useRsState(sessionId: string | null) {
 
 	const applyExtraction = useCallback((partial: RsPartialData) => {
 		const now = Date.now();
-		setFields((prev) => {
-			const next = { ...prev };
-			let changed = false;
-			for (const [key, entry] of Object.entries(partial.fields)) {
-				const result = applyMergeRule(prev[key], entry, now);
-				if (result !== undefined) {
-					next[key] = result;
-					changed = true;
-				}
+		const prev = latestFieldsRef.current;
+		const next = { ...prev };
+		const newlyChanged: string[] = [];
+		let changed = false;
+		for (const [key, entry] of Object.entries(partial.fields)) {
+			const result = applyMergeRule(prev[key], entry, now);
+			if (result !== undefined) {
+				next[key] = result;
+				changed = true;
+				newlyChanged.push(key);
 			}
-			return changed ? next : prev;
-		});
+		}
+		if (changed) {
+			latestFieldsRef.current = next;
+			setFields(next);
+		}
+		if (newlyChanged.length > 0) {
+			setRecentlyChangedKeys((prev) => {
+				const nextSet = new Set(prev);
+				for (const k of newlyChanged) nextSet.add(k);
+				return nextSet;
+			});
+		}
 	}, []);
 
 	// ── setUserField ─────────────────────────────────────────────────────────────
@@ -238,6 +257,21 @@ export function useRsState(sessionId: string | null) {
 		},
 		[sessionId, applyExtraction],
 	);
+
+	// ── clearChangedKey / clearAllChangedKeys ────────────────────────────────────
+
+	const clearChangedKey = useCallback((key: string) => {
+		setRecentlyChangedKeys((prev) => {
+			if (!prev.has(key)) return prev;
+			const next = new Set(prev);
+			next.delete(key);
+			return next;
+		});
+	}, []);
+
+	const clearAllChangedKeys = useCallback(() => {
+		setRecentlyChangedKeys((prev) => (prev.size === 0 ? prev : new Set()));
+	}, []);
 
 	// ── applyDirectChatAnswer ────────────────────────────────────────────────────
 	// Called when user sends a message that answers an explicitly-asked direct field.
@@ -365,8 +399,10 @@ export function useRsState(sessionId: string | null) {
 		for (const t of debounceRefs.current.values()) clearTimeout(t);
 		debounceRefs.current.clear();
 		pendingPatchValuesRef.current.clear();
+		latestFieldsRef.current = {};
 		setFields({});
 		setDeferredKeys([]);
+		setRecentlyChangedKeys(new Set());
 	}, []);
 
 	return {
@@ -383,5 +419,8 @@ export function useRsState(sessionId: string | null) {
 		applyUploadAttachments,
 		hydrateFromSession,
 		reset,
+		recentlyChangedKeys,
+		clearChangedKey,
+		clearAllChangedKeys,
 	};
 }

@@ -342,6 +342,9 @@ function RsDocumentPanel({
 	finalizingStatus,
 	finalAnalysis,
 	isExtracting,
+	recentlyChangedKeys,
+	clearChangedKey,
+	clearAllChangedKeys,
 }: {
 	activeTab: RsTab;
 	onTabChange: (t: RsTab) => void;
@@ -357,6 +360,9 @@ function RsDocumentPanel({
 	finalizingStatus: FinalizingStatus;
 	finalAnalysis: FinalAnalysis | null;
 	isExtracting: boolean;
+	recentlyChangedKeys: Set<string>;
+	clearChangedKey: (key: string) => void;
+	clearAllChangedKeys: () => void;
 }) {
 	const { t } = useLocale();
 	const TAB_LABELS: Record<string, string> = {
@@ -406,6 +412,9 @@ function RsDocumentPanel({
 						onAcceptSuggestion={onAcceptSuggestion}
 						onDismissSuggestion={onDismissSuggestion}
 						isExtracting={isExtracting}
+						recentlyChangedKeys={recentlyChangedKeys}
+						clearChangedKey={clearChangedKey}
+						clearAllChangedKeys={clearAllChangedKeys}
 					/>
 				) : activeTab === "BPMN" ? (
 					<BpmnPanel sessionId={sessionId} />
@@ -1449,6 +1458,9 @@ export default function ChatPage() {
 					finalizingStatus={rs.finalizingStatus}
 					finalAnalysis={rs.finalAnalysis}
 					isExtracting={rs.isExtracting}
+					recentlyChangedKeys={rsState.recentlyChangedKeys}
+					clearChangedKey={rsState.clearChangedKey}
+					clearAllChangedKeys={rsState.clearAllChangedKeys}
 				/>
 			</div>
 

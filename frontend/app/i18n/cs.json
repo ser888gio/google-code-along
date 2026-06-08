@@ -65,6 +65,7 @@
 	"rs.suggestion.label": "AI navrhuje:",
 	"rs.suggestion.accept": "Přijmout",
 	"rs.suggestion.dismiss": "Odmítnout",
+	"rs.toast.updated": "aktualizováno",
 	"rs.section.identity_current_state": "Současný stav",
 	"rs.section.target_state": "Cílový stav",
 	"rs.section.value_roi": "Přínos a ROI",
