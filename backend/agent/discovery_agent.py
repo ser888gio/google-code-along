@@ -45,8 +45,7 @@ from observability.turns import record_model_call
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from prompts.agent import DISCOVERY_SYSTEM_PROMPT
-from prompts.context import DISCOVERY_EXTRACTION_PROMPT
-from solution_configs import get_all_field_shapes
+from prompts.context import build_discovery_extraction_prompt
 from utils import format_prompt_data_lines
 from workflow_state import FieldStatus, WorkflowState
 
@@ -72,12 +71,18 @@ def _empty_discovery_result() -> dict:
     return {"completeness": 0, "fields": dict(EMPTY_FIELDS), "missing_priority": []}
 
 
+_PROMPT_CACHE: dict[str | None, str] = {}
+
+
+def _get_extraction_prompt(solution_type: str | None) -> str:
+    if solution_type not in _PROMPT_CACHE:
+        _PROMPT_CACHE[solution_type] = build_discovery_extraction_prompt(solution_type)
+    return _PROMPT_CACHE[solution_type]
+
+
 def _build_discovery_prompt(conversation_text: str, solution_type: str | None) -> str:
-    # Use .replace() not .format() because transcripts can contain literal braces.
-    return DISCOVERY_EXTRACTION_PROMPT.replace(
-        "{field_shapes}",
-        get_all_field_shapes(solution_type),
-    ).replace(
+    # Use .replace() not .format() — transcripts can contain literal braces.
+    return _get_extraction_prompt(solution_type).replace(
         "{conversation}",
         format_prompt_data_lines(conversation_text),
     )

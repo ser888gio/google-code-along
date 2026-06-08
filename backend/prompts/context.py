@@ -1,20 +1,20 @@
 """
 Extraction prompts for the discovery pipeline.
 
-RS_EXTRACTION_PROMPT        — legacy 8-field extractor (keep until frontend is updated)
-DISCOVERY_EXTRACTION_PROMPT — new 22-field extractor used by discovery_agent
+build_discovery_extraction_prompt — 22-field extractor; generated from field_schema.py
+RS_EXTRACTION_PROMPT              — legacy 8-field extractor (keep until frontend updated)
 """
 
+from __future__ import annotations
+
+from field_schema import FIELD_SCHEMA, SECTION_TITLES
+from solution_configs import get_all_field_shapes
 
 # ---------------------------------------------------------------------------
-# NEW — 22-field discovery extraction prompt (used by discovery_agent.py)
+# Static fragments for build_discovery_extraction_prompt
 # ---------------------------------------------------------------------------
-# TODO: finalize field descriptions below once the exact PDF form field labels
-#       are confirmed with the business team.
-# TODO: tune the completeness scoring rules once we know which fields are truly
-#       blocking vs. nice-to-have (see FIELD_SCHEMA in field_schema.py).
 
-DISCOVERY_EXTRACTION_PROMPT = """\
+_PREAMBLE = """\
 You are analyzing a business requirements conversation between a user and
 an AI Business Analyst.
 
@@ -55,93 +55,18 @@ JSON structure:
 {
   "completeness": <integer 0-100>,
   "fields": {
-    "use_case_title":               { "filled": <bool>, "value": <string or null> },
-    "department":                   { "filled": <bool>, "value": <string or null> },
-    "requestor":                    { "filled": <bool>, "value": <string or null> },
-    "product_owner":                { "filled": <bool>, "value": <string or null> },
-    "target_users":                 { "filled": <bool>, "value": <string or null> },
-    "report_frequency":             { "filled": <bool>, "value": <string or null> },
-    "purpose_to_be":                { "filled": <bool>, "value": <string or null> },
-    "key_business_questions":       { "filled": <bool>, "value": <string or null> },
-    "kpis_and_metrics":             { "filled": <bool>, "value": <string or null> },
-    "process_as_is":                { "filled": <bool>, "value": <string or null> },
-    "process_context":              { "filled": <bool>, "value": <string or null> },
-    "trigger":                      { "filled": <bool>, "value": <string or null> },
-    "systems_and_tools":            { "filled": <bool>, "value": <string or null> },
-    "document_types":               { "filled": <bool>, "value": <string or null> },
-    "dimensions_and_cuts":          { "filled": <bool>, "value": <string or null> },
-    "saved_time_hours_per_year":    { "filled": <bool>, "value": <string or null> },
-    "cost_saving":                  { "filled": <bool>, "value": <string or null> },
-    "revenue_increase":             { "filled": <bool>, "value": <string or null> },
-    "time_criticality":             { "filled": <bool>, "value": <string or null> },
-    "impacted_users":               { "filled": <bool>, "value": <string or null> },
-    "strategic_impact":             { "filled": <bool>, "value": <string or null> },
-    "risk_avoidance":               { "filled": <bool>, "value": <string or null> },
-    "acceptance_criteria":          { "filled": <bool>, "value": <string or null> },
-    "add_value":                    { "filled": <bool>, "value": <string or null> },
-    "data_security_classification": { "filled": <bool>, "value": <string or null> },
-    "solution_type":                { "filled": <bool>, "value": <string or null> },
-    "comments":                     { "filled": <bool>, "value": <string or null> },
-    "attachments":                  { "filled": <bool>, "value": <string or null> }
+"""
+
+_JSON_SUFFIX = """\
   },
   "missing_priority": [
     <up to 3 field key strings that are most important to collect next>
   ]
 }
 
-What each field maps to:
+"""
 
-Section 1 — Identity & Current State:
-- use_case_title: Short English name for the use case (must be in English).
-- department: The main department or business unit requesting this.
-- requestor: Name or email of the person making the request.
-- product_owner: Name of the designated product owner.
-- process_as_is: Description of the current process before any improvement.
-- process_context: What happens before and after this process; how it
-  connects to other processes.
-- trigger: What event or condition starts this process (deadline,
-  regulation, manual request, etc.).
-
-Section 2 — Target State:
-- purpose_to_be: The desired state after the improvement. What should be different?
-
-Section 3 — Value & ROI:
-- saved_time_hours_per_year: Estimated hours saved per year across all
-  affected users. Fill ONLY if the user stated a number (approximate is OK
-  if the user used words like "about", "roughly", "~"). Accept explicit
-  "unknown" / "N/A" too. Otherwise leave empty.
-- cost_saving: Estimated cost reduction in money terms. Fill ONLY if the
-  user stated a money figure or explicit "unknown" / "N/A". Otherwise leave
-  empty.
-- revenue_increase: Estimated revenue increase. Fill ONLY if the user stated
-  a money figure or explicit "unknown" / "N/A". Otherwise leave empty.
-- impacted_users: Number of users affected and how much time each saves.
-- add_value: Description of qualitative or strategic value added beyond
-  pure cost savings.
-
-Section 4 — Priority & Risk:
-- time_criticality: Is there a regulatory, legislative, or business
-  deadline? How urgent?
-- strategic_impact: Is this strategically important to the organization? In what way?
-- risk_avoidance: Does this address a specific financial or operational
-  risk? Estimated amount?
-
-Section 5 — Technical Context:
-- systems_and_tools: Which systems and tools are involved in the current
-  process (SAP, SharePoint, Excel, etc.).
-- document_types: Types of documents involved (PDF, Word, Excel,
-  contracts, invoices, etc.).
-- data_security_classification: Data sensitivity level (personal data,
-  financial, contractual, public, etc.).
-- solution_type: Probable solution category (Power Platform, custom app,
-  SharePoint, SAP extension, etc.).
-
-Optional:
-- comments: Any additional useful information.
-- attachments: Any files the user mentioned uploading (list GCS paths if known).
-
-Field shapes (what a complete answer looks like, per field):
-{field_shapes}
+_COMPLETENESS_AND_CONVERSATION = """\
 
 Completeness scoring rules:
 - Score reflects how much of the REQUIRED fields have been meaningfully filled.
@@ -172,6 +97,52 @@ Conversation:
 {conversation}
 <conversation_transcript_END>
 """
+
+
+def _build_fields_json() -> str:
+    """JSON output schema block — one line per field key, aligned to column 32."""
+    keys = list(FIELD_SCHEMA.keys())
+    lines = []
+    for i, key in enumerate(keys):
+        padding = " " * max(1, 32 - len(key) - 3)
+        comma = "," if i < len(keys) - 1 else ""
+        lines.append(f'    "{key}":{padding}{{ "filled": <bool>, "value": <string or null> }}{comma}')
+    return "\n".join(lines)
+
+
+def _build_field_descriptions() -> str:
+    """'What each field maps to' section — derived from field_schema.expected_shape."""
+    blocks = []
+    for section_num, section_title in SECTION_TITLES.items():
+        section_fields = [(key, fd) for key, fd in FIELD_SCHEMA.items() if fd["section"] == section_num]
+        if not section_fields:
+            continue
+        lines = [f"Section {section_num} — {section_title}:"]
+        for key, fd in section_fields:
+            shape = fd.get("expected_shape", "")
+            if shape:
+                lines.append(f"- {key}: {shape}")
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def build_discovery_extraction_prompt(solution_type: str | None) -> str:
+    """Build the 22-field discovery extraction prompt for the given solution type.
+
+    Field keys, descriptions, and rubrics are derived from field_schema.py and
+    solution_configs.py. Edit those files, not this function.
+    """
+    return (
+        _PREAMBLE
+        + _build_fields_json()
+        + "\n"
+        + _JSON_SUFFIX
+        + "What each field maps to:\n\n"
+        + _build_field_descriptions()
+        + "\n\nField shapes (what a complete answer looks like, per field):\n"
+        + get_all_field_shapes(solution_type)
+        + _COMPLETENESS_AND_CONVERSATION
+    )
 
 
 ACTIVE_FIELD_CLASSIFIER_PROMPT = """\

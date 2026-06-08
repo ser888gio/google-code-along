@@ -1,0 +1,37 @@
+name: Check frontend schema is up to date
+
+on:
+  push:
+    paths:
+      - backend/field_schema.py
+      - frontend/app/generated/rsSchema.ts
+      - backend/scripts/generate_frontend_schema.py
+  pull_request:
+    paths:
+      - backend/field_schema.py
+      - frontend/app/generated/rsSchema.ts
+      - backend/scripts/generate_frontend_schema.py
+
+jobs:
+  check-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Regenerate rsSchema.ts
+        run: python backend/scripts/generate_frontend_schema.py
+        working-directory: ${{ github.workspace }}
+
+      - name: Fail if rsSchema.ts differs from committed version
+        run: |
+          if ! git diff --exit-code frontend/app/generated/rsSchema.ts; then
+            echo ""
+            echo "rsSchema.ts is out of date."
+            echo "Run: python backend/scripts/generate_frontend_schema.py"
+            echo "and commit the result."
+            exit 1
+          fi

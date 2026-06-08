@@ -105,11 +105,11 @@ class WorkflowState:
             phase=str(self.phase),
             active_field=active,
             clarification_requested=classification_result == "clarification_requested",
-            miss_count=int(self.miss_counts.get(active, 0) if active is not None else 0),
+            miss_count=self.miss_counts.get(active, 0) if active else 0,
             answered_fields=answered_values,
             deferred_fields=deferred_field_keys,
             ready_to_finalize=self.phase == Phase.READY_TO_FINALIZE,
-            active_field_coverage_gaps=list(coverage.get(active, []) if active is not None else []),
+            active_field_coverage_gaps=list(coverage.get(active, [])) if active else [],
             previous_field_coverage_gaps=list(coverage.get(previous_active) or []) if previous_active else [],
         )
 

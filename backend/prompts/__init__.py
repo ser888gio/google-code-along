@@ -4,7 +4,7 @@ Central prompts package — re-exports all prompt strings used across the pipeli
 Import directly from the sub-modules for clarity, or from here for convenience:
 
     from prompts.agent import ORCHESTRATOR_SYSTEM_PROMPT
-    from prompts.context import DISCOVERY_EXTRACTION_PROMPT
+    from prompts.context import build_discovery_extraction_prompt
     from prompts.bpmn import BPMN_GENERATION_PROMPT
     from prompts.dataflow import DATAFLOW_GENERATION_PROMPT
     from prompts.srs import SRS_EXTRACTION_PROMPT
@@ -17,7 +17,7 @@ from .agent import (
     RESEARCH_SYSTEM_PROMPT,
 )
 from .bpmn import BPMN_GENERATION_PROMPT, COMPLETENESS_PROMPT
-from .context import DISCOVERY_EXTRACTION_PROMPT, RS_EXTRACTION_PROMPT
+from .context import RS_EXTRACTION_PROMPT, build_discovery_extraction_prompt
 from .dataflow import DATAFLOW_COMPLETENESS_PROMPT, DATAFLOW_GENERATION_PROMPT
 from .srs import SRS_EXTRACTION_PROMPT
 
@@ -28,7 +28,7 @@ __all__ = [
     "DISCOVERY_SYSTEM_PROMPT",
     "FINALIZER_SYSTEM_PROMPT",
     # Context / extraction prompts
-    "DISCOVERY_EXTRACTION_PROMPT",
+    "build_discovery_extraction_prompt",
     "RS_EXTRACTION_PROMPT",
     # Diagram prompts
     "COMPLETENESS_PROMPT",
