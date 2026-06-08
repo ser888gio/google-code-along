@@ -15,6 +15,7 @@ export interface Message {
 	text: string;
 	streaming?: boolean;
 	messageId?: string;
+	choices?: string[];
 	feedback?: {
 		vote: FeedbackVote;
 		comment?: string;
@@ -64,6 +65,18 @@ export function useMessages(initialText: string) {
 	function setMessageBackendId(id: string, messageId: string) {
 		setMessages((prev) =>
 			updateMessageById(prev, id, (m) => ({ ...m, messageId })),
+		);
+	}
+
+	function setMessageChoices(id: string, choices: string[]) {
+		setMessages((prev) =>
+			updateMessageById(prev, id, (m) => ({ ...m, choices })),
+		);
+	}
+
+	function clearMessageChoices(id: string) {
+		setMessages((prev) =>
+			updateMessageById(prev, id, (m) => ({ ...m, choices: undefined })),
 		);
 	}
 
@@ -183,6 +196,8 @@ export function useMessages(initialText: string) {
 		replaceMessageText,
 		finalizeMessage,
 		setMessageBackendId,
+		setMessageChoices,
+		clearMessageChoices,
 		resetMessages,
 		updateWelcomeMessage,
 		loadMessages,

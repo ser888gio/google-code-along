@@ -55,11 +55,15 @@ function MessageBubble({
 	sessionId,
 	onFeedback,
 	onFeedbackComment,
+	onChoiceSelect,
+	textareaRef,
 }: {
 	msg: Message;
 	sessionId: string | null;
 	onFeedback: (localId: string, vote: FeedbackVote) => Promise<void>;
 	onFeedbackComment: (localId: string, comment: string) => Promise<void>;
+	onChoiceSelect?: (msgId: string, choice: string) => void;
+	textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
 }) {
 	const { t } = useLocale();
 	const isUser = msg.role === "user";
@@ -143,12 +147,43 @@ function MessageBubble({
 					</span>
 				</p>
 			) : (
-				<div className="text-base text-gray-800 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_a]:text-[#4a6659] [&_a]:underline [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-base [&_h3]:font-semibold">
-					<ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text}</ReactMarkdown>
-					{msg.streaming && (
-						<span className="ml-0.5 inline-block h-4 w-1.5 animate-[blink_1s_step-end_infinite] bg-gray-400 align-middle" />
-					)}
-				</div>
+				<>
+					<div className="text-base text-gray-800 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_a]:text-[#4a6659] [&_a]:underline [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-base [&_h3]:font-semibold">
+						<ReactMarkdown remarkPlugins={[remarkGfm]}>
+							{msg.text}
+						</ReactMarkdown>
+						{msg.streaming && (
+							<span className="ml-0.5 inline-block h-4 w-1.5 animate-[blink_1s_step-end_infinite] bg-gray-400 align-middle" />
+						)}
+					</div>
+					{msg.choices &&
+						msg.choices.length > 0 &&
+						!msg.streaming &&
+						onChoiceSelect && (
+							<div className="mt-3 flex flex-wrap gap-2">
+								{msg.choices.map((choice) => (
+									<button
+										key={choice}
+										type="button"
+										onClick={() => onChoiceSelect(msg.id, choice)}
+										className="rounded border border-[#4a6659] px-3 py-1.5 text-sm text-[#1a3a2a] transition-colors hover:bg-[#edf5ef]"
+									>
+										{choice}
+									</button>
+								))}
+								<button
+									type="button"
+									onClick={() => {
+										onChoiceSelect(msg.id, "");
+										textareaRef?.current?.focus();
+									}}
+									className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-500 transition-colors hover:border-gray-400 hover:text-gray-700"
+								>
+									{t("btn.other")}
+								</button>
+							</div>
+						)}
+				</>
 			)}
 			{canSendFeedback && !isThinking && (
 				<div className="mt-3 border-t border-gray-100 pt-2">
@@ -1030,12 +1065,16 @@ function ChatTranscript({
 	bottomRef,
 	onFeedback,
 	onFeedbackComment,
+	onChoiceSelect,
+	textareaRef,
 }: {
 	messages: Message[];
 	sessionId: string | null;
 	bottomRef: React.RefObject<HTMLDivElement | null>;
 	onFeedback: (localId: string, vote: FeedbackVote) => Promise<void>;
 	onFeedbackComment: (localId: string, comment: string) => Promise<void>;
+	onChoiceSelect: (msgId: string, choice: string) => void;
+	textareaRef: React.RefObject<HTMLTextAreaElement | null>;
 }) {
 	return (
 		<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
@@ -1046,6 +1085,8 @@ function ChatTranscript({
 					sessionId={sessionId}
 					onFeedback={onFeedback}
 					onFeedbackComment={onFeedbackComment}
+					onChoiceSelect={onChoiceSelect}
+					textareaRef={textareaRef}
 				/>
 			))}
 			<div ref={bottomRef} />
@@ -1120,11 +1161,16 @@ export default function ChatPage() {
 		return rs.startPolling(session.sessionId);
 	}, [rs.finalizingStatus, session.sessionId]);
 
-	async function handleSend() {
-		const text = input.trim();
+	function handleChoiceSelect(msgId: string, choice: string) {
+		msgs.clearMessageChoices(msgId);
+		if (choice) void handleSend(choice);
+	}
+
+	async function handleSend(overrideText?: string) {
+		const text = (overrideText ?? input).trim();
 		if (!text || isStreaming || session.sessionEnded) return;
 
-		setInput("");
+		if (!overrideText) setInput("");
 		setError(null);
 		const currentValues = Object.fromEntries(
 			Object.entries(rsState.state.fields)
@@ -1189,6 +1235,8 @@ export default function ChatPage() {
 			deferredForRequest,
 			(key) => setActiveWorkflowField(key),
 			(messageId) => msgs.setMessageBackendId(assistantId, messageId),
+			(choices) => msgs.setMessageChoices(assistantId, choices),
+			(cleanText) => msgs.replaceMessageText(assistantId, cleanText),
 		);
 	}
 
@@ -1308,6 +1356,8 @@ export default function ChatPage() {
 					onFeedbackComment={(id, comment) =>
 						msgs.handleFeedbackComment(id, comment, session.sessionId, setError)
 					}
+					onChoiceSelect={handleChoiceSelect}
+					textareaRef={textareaRef}
 				/>
 
 				<ChatInput

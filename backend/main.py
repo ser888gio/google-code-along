@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 import uuid
 import weakref
@@ -909,6 +910,9 @@ class StreamReplyState:
     ttft_recorded: bool = False
 
 
+_CHOICES_PATTERN = re.compile(r"\s*<choices>(\[.*?])</choices>\s*", re.DOTALL)
+
+
 def _sse_event(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
@@ -1103,6 +1107,19 @@ async def _chat_stream_event_generator(
     if is_finalizing:
         logger.info(f"[FINALIZING] detected for session_id={session_id} launching finalizer pipeline")
         yield _sse_event({"event": "finalizing"})
+
+    choices_match = _CHOICES_PATTERN.search(full_reply)
+    if choices_match:
+        try:
+            choices = json.loads(choices_match.group(1))
+            if isinstance(choices, list) and 2 <= len(choices) <= 4:
+                clean_text = _CHOICES_PATTERN.sub("", full_reply)
+                clean_text = clean_text.replace(FINALIZING_MARKER, "").strip()
+                yield _sse_event({"choices": choices})
+                yield _sse_event({"text_replace": clean_text})
+                logger.info(f"Choices emitted: session_id={session_id} count={len(choices)}")
+        except (json.JSONDecodeError, ValueError):
+            pass
 
     asyncio.create_task(
         _run_turn_postprocessing(
