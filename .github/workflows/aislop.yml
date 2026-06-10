@@ -12,7 +12,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
+      - uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-aislop-0.10.1
       # Quality gate: exits 1 when score < ci.failBelow in .aislop/config.yml
       # or when any error-severity diagnostic is present.
-      - run: npx aislop@latest ci .
+      - run: npx aislop@0.10.1 ci .

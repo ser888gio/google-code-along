@@ -124,6 +124,7 @@ def smoke_app():
     import importlib
 
     import main as main_module
+    import runtime
 
     importlib.reload(main_module)
 
@@ -154,8 +155,10 @@ def smoke_app():
     mock_runner = MagicMock()
     mock_runner.run_async = scripted_run_async
 
-    main_module.session_service = mock_svc
-    main_module.runner = mock_runner
+    # Singletons live in runtime.py; consumers resolve them via attribute
+    # lookup at call time, so patching the module attributes is sufficient.
+    runtime.session_service = mock_svc
+    runtime.runner = mock_runner
 
     return main_module.app, session_id
 
