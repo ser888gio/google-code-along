@@ -10,7 +10,7 @@ from functools import partial
 
 import runtime
 from agent.discovery_agent import extract_discovery_fields
-from api import admin, feedback
+from api import admin, feedback, sessions
 from audio_websocket import AudioWebsocketDeps, run_audio_websocket
 from bpmn import check_completeness, generate_bpmn_diagram
 from chat_classification import solution_type_value
@@ -28,10 +28,7 @@ from dataflow import check_dfd_completeness, generate_dataflow_diagram
 from direct_field_context import build_augmented_user_message, merge_direct_fields
 from fastapi import (
     FastAPI,
-    File,
-    Form,
     HTTPException,
-    UploadFile,
     WebSocket,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,17 +36,13 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from field_schema import FIELD_LABELS
 from firestore import (
     append_conversation_turn,
-    get_conversation_history,
     get_direct_fields,
     get_discovery_state,
-    get_final_analysis,
-    get_srs_fields,
-    list_sessions,
     upsert_direct_fields,
     upsert_discovery_state,
     upsert_srs_fields,
 )
-from gcs import get_bucket_name, list_files, write_file
+from gcs import get_bucket_name, write_file
 from generation import (
     compile_rs_from_session,
     compile_srs_json_from_session,
@@ -84,7 +77,7 @@ from observability.turns import (
 )
 from pydantic import BaseModel
 from starlette.requests import Request
-from utils import extract_conversation_text, sanitize_gcs_filename, sanitize_gcs_segment
+from utils import extract_conversation_text
 
 setup_logging()
 logger = get_logger(__name__)
@@ -174,92 +167,6 @@ class ChatResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-# --- File upload endpoint ---
-
-
-class UploadResponse(BaseModel):
-    gcs_path: str
-    filename: str
-
-
-class SessionUpload(BaseModel):
-    filename: str
-    gcs_path: str
-
-
-class SessionUploadsResponse(BaseModel):
-    session_id: str
-    files: list[SessionUpload]
-
-
-_MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
-
-
-@app.post("/upload", response_model=UploadResponse)
-async def upload_file(
-    file: UploadFile = File(...),
-    session_id: str = Form(...),
-):
-    """Upload a file to GCS under sessions/{session_id}/{filename}."""
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="Filename is missing")
-
-    try:
-        safe_session_id = sanitize_gcs_segment(session_id, field_name="session_id")
-        safe_filename = sanitize_gcs_filename(file.filename)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    destination = f"{GCS_PREFIX_SESSIONS}/{safe_session_id}/{safe_filename}"
-    contents = await file.read()
-    if len(contents) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=(f"File exceeds maximum allowed size of {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB."),
-        )
-    logger.info(f"Upload received: file={safe_filename} size={len(contents)}B session_id={safe_session_id}")
-    gcs_path = write_file(
-        path=destination,
-        data=contents,
-        content_type=file.content_type or "application/octet-stream",
-    )
-    logger.debug(f"File uploaded to GCS: {gcs_path}")
-    return UploadResponse(gcs_path=gcs_path, filename=safe_filename)
-
-
-@app.get("/uploads/{session_id}", response_model=SessionUploadsResponse)
-async def session_uploads(session_id: str):
-    """List files stored in GCS under sessions/{session_id}/."""
-    try:
-        safe_session_id = sanitize_gcs_segment(session_id, field_name="session_id")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    prefix = f"{GCS_PREFIX_SESSIONS}/{safe_session_id}/"
-    try:
-        paths = list_files(prefix=prefix)
-    except Exception as exc:
-        logger.error(
-            f"Failed to list session uploads: session_id={safe_session_id} error={exc}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail="Could not list uploaded files for this session.",
-        ) from exc
-
-    bucket_name = get_bucket_name()
-    files = [
-        SessionUpload(
-            filename=path.split("/")[-1],
-            gcs_path=f"gs://{bucket_name}/{path}",
-        )
-        for path in paths
-        if path.split("/")[-1]
-    ]
-    return SessionUploadsResponse(session_id=safe_session_id, files=files)
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -948,96 +855,6 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
         logger.warning(f"Firestore SRS upsert failed: session_id={session_id} error={exc}")
 
 
-# --- Firestore data retrieval ---
-
-
-class FirestoreDataResponse(BaseModel):
-    session_id: str
-    data: dict | None = None
-
-
-class SessionSummary(BaseModel):
-    session_id: str
-    updated_at: str | None = None
-    preview: str | None = None
-
-
-@app.get("/sessions", response_model=list[SessionSummary])
-async def sessions_list():
-    """Return a summary list of all stored sessions."""
-    loop = asyncio.get_running_loop()
-    items = await loop.run_in_executor(None, list_sessions)
-    return items
-
-
-class HistoryResponse(BaseModel):
-    session_id: str
-    messages: list[dict]
-
-
-@app.get("/history/{session_id}", response_model=HistoryResponse)
-async def get_history(session_id: str):
-    """Return the full conversation history for *session_id*."""
-    loop = asyncio.get_running_loop()
-    messages = await loop.run_in_executor(None, get_conversation_history, session_id)
-    return HistoryResponse(session_id=session_id, messages=messages)
-
-
-# --- Final analysis endpoint ---
-
-# TODO: add AnalysisResponse model once final_analysis schema is finalized
-#       (mirrors FINAL_ANALYSIS_SCHEMA in agent/finalizer_agent.py)
-
-
-@app.get("/analyses/{session_id}")
-async def get_analysis(session_id: str):
-    """Return the finalized analysis for a session, or status if still pending.
-
-    The frontend polls this endpoint every 5 s after receiving the
-    "finalizing" SSE event.
-
-    Returns:
-      {"status": "not_found"}                          — finalization never triggered
-      {"status": "pending"}                            — run_finalizer() still running
-      {"status": "error"}                              — pipeline failed
-      {"status": "complete", "analysis": {...}}        — done, full analysis included
-    """
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, get_final_analysis, session_id)
-
-    if result is None:
-        return {"status": "not_found"}
-
-    status = result.get("finalization_status", "not_found")
-
-    if status == "complete":
-        result.pop("finalization_status", None)
-        logger.info(f"Analysis ready: session_id={session_id}")
-        return {"status": "complete", "analysis": result}
-
-    logger.debug(f"Analysis poll: session_id={session_id} status={status}")
-    return {"status": status}
-
-
-@app.get("/firestore/data/{session_id}", response_model=FirestoreDataResponse)
-async def firestore_data(session_id: str):
-    """Return the latest SRS data stored in Firestore for *session_id*.
-
-    The frontend polls this endpoint after each turn to refresh the right panel.
-    Returns data=null if no document has been written yet.
-    """
-    try:
-        loop = asyncio.get_running_loop()
-        doc = await loop.run_in_executor(None, get_srs_fields, session_id)
-    except Exception as exc:
-        logger.error(
-            f"Firestore read failed: event=firestore_unavailable_total session_id={session_id} {exc}",
-            exc_info=True,
-        )
-        raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
-    return FirestoreDataResponse(session_id=session_id, data=doc)
-
-
 # --- Bidirectional audio WebSocket endpoint ---
 
 
@@ -1126,3 +943,4 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
 
 app.include_router(admin.router)
 app.include_router(feedback.router)
+app.include_router(sessions.router)
