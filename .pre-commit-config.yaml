@@ -43,6 +43,7 @@ repos:
       - id: biome-check
         additional_dependencies: ["@biomejs/biome@1.8.3"]
         files: ^frontend/.*\.(js|ts|jsx|tsx|json)$
+        exclude: ^frontend/app/generated/rsSchema\.ts$
 
   # ----------------------------------------------------
   # SCRIPTS: ShellCheck
