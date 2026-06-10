@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	type FieldSource,
 	type RsField,
 	type RsPartialData,
 	type RsState,
-	patchDirectFields,
+	patchRsFieldState,
 } from "../../lib/api";
 import { REQUIRED_FIELD_KEYS } from "../generated/rsSchema";
 import {
@@ -14,93 +15,63 @@ import {
 	resolveDirectChatAnswer,
 } from "../lib/directChatAnswer";
 
-// ─── Completeness ─────────────────────────────────────────────────────────────
+// â”€â”€â”€ Completeness â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function computeCompleteness(fields: Record<string, RsField>): number {
 	const filled = REQUIRED_FIELD_KEYS.filter((k) => fields[k]?.filled).length;
 	return Math.round((filled / REQUIRED_FIELD_KEYS.length) * 100);
 }
 
-// ─── Value normalisation (for suggestion dedup) ───────────────────────────────
+// â”€â”€â”€ Value normalisation (for suggestion dedup) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function normalizeValue(v: string): string {
-	return v.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-// ─── Server partial → RsField conversion ─────────────────────────────────────
+// â”€â”€â”€ Server partial â†’ RsField conversion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function toRsField(
 	entry: RsPartialData["fields"][string],
 	now: number,
 ): RsField {
+	const accepted = entry.accepted;
+	const suggestion = entry.suggestion;
 	return {
-		value: entry.value ?? "",
-		filled: entry.filled,
-		source:
-			(entry.source as FieldSource | null) ?? (entry.filled ? "ai" : null),
+		value: accepted?.value ?? "",
+		filled: Boolean(accepted?.value),
+		source: (accepted?.source as FieldSource | null) ?? null,
+		acceptedAt: accepted?.accepted_at ?? null,
 		updatedAt: now,
+		pendingSuggestion: suggestion
+			? { value: suggestion.value, receivedAt: now }
+			: undefined,
+		dismissedSuggestions: entry.dismissed_suggestions ?? [],
 	};
 }
 
-// ─── Merge rule ───────────────────────────────────────────────────────────────
+function applyPendingManualOverride(
+	current: RsField | undefined,
+	pendingValue: string,
+	now: number,
+): RsField {
+	return {
+		value: pendingValue,
+		filled: pendingValue.trim() !== "",
+		source: pendingValue.trim() !== "" ? "user_manual" : null,
+		acceptedAt: null,
+		updatedAt: now,
+		pendingSuggestion: undefined,
+		dismissedSuggestions: current?.dismissedSuggestions ?? [],
+	};
+}
+
+// â”€â”€â”€ Merge rule â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
 // Applied when AI extraction (or a PATCH response) arrives.
 // Rules:
-//   - incoming not filled  → never erase an existing value; no-op
-//   - local not filled     → overwrite freely with source='ai'
-//   - local filled, values equal (normalised) → clear stale suggestion; no-op
-//   - local filled, values differ, not previously dismissed → set pendingSuggestion
-//   - local filled, values differ, previously dismissed → no-op
+//   - incoming not filled  â†’ never erase an existing value; no-op
+//   - local not filled     â†’ overwrite freely with source='ai'
+//   - local filled, values equal (normalised) â†’ clear stale suggestion; no-op
+//   - local filled, values differ, not previously dismissed â†’ set pendingSuggestion
+//   - local filled, values differ, previously dismissed â†’ no-op
 
-function applyMergeRule(
-	prev: RsField | undefined,
-	incomingEntry: RsPartialData["fields"][string],
-	now: number,
-): RsField | undefined {
-	if (!incomingEntry.filled) return undefined; // no-op signal
-
-	const incomingValue = incomingEntry.value ?? "";
-
-	if (!prev?.filled) {
-		// Field was empty — still show as a suggestion; user must accept
-		const dismissed = prev?.dismissedSuggestions ?? [];
-		if (
-			dismissed.some((d) => normalizeValue(d) === normalizeValue(incomingValue))
-		) {
-			return undefined; // already rejected this exact value
-		}
-		return {
-			value: "",
-			filled: false,
-			source: null,
-			updatedAt: now,
-			pendingSuggestion: { value: incomingValue, receivedAt: now },
-		};
-	}
-
-	// Field already has a value
-	if (normalizeValue(incomingValue) === normalizeValue(prev.value)) {
-		// Same value — clear any stale suggestion, no other change
-		if (!prev.pendingSuggestion) return undefined; // truly no-op
-		return { ...prev, pendingSuggestion: undefined };
-	}
-
-	// Different value — check dismissed list
-	const dismissed = prev.dismissedSuggestions ?? [];
-	if (
-		dismissed.some((d) => normalizeValue(d) === normalizeValue(incomingValue))
-	) {
-		return undefined; // user already rejected this exact value
-	}
-
-	// Set suggestion
-	return {
-		...prev,
-		pendingSuggestion: { value: incomingValue, receivedAt: now },
-	};
-}
-
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+// ---- Hook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function useRsState(sessionId: string | null) {
 	const [fields, setFields] = useState<Record<string, RsField>>({});
@@ -109,10 +80,11 @@ export function useRsState(sessionId: string | null) {
 		new Set(),
 	);
 
-	// Mirrors `fields` synchronously so applyExtraction can diff without a functional updater.
-	// Safe because applyExtraction is always called from async (network) contexts.
+	// Mirrors `fields` so applyExtraction can diff against the latest network-visible state.
 	const latestFieldsRef = useRef<Record<string, RsField>>({});
-	latestFieldsRef.current = fields;
+	useEffect(() => {
+		latestFieldsRef.current = fields;
+	}, [fields]);
 
 	// Per-key debounce timers
 	const debounceRefs = useRef<Map<string, ReturnType<typeof setTimeout>>>(
@@ -128,19 +100,24 @@ export function useRsState(sessionId: string | null) {
 		[fields, completeness],
 	);
 
-	// ── applyExtraction ──────────────────────────────────────────────────────────
+	// â”€â”€ applyExtraction â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// Called after every AI extraction and after every PATCH response.
 
 	const applyExtraction = useCallback((partial: RsPartialData) => {
 		const now = Date.now();
 		const prev = latestFieldsRef.current;
 		const next = { ...prev };
+		for (const [key, entry] of Object.entries(partial.fields)) {
+			next[key] = toRsField(entry, now);
+		}
+		for (const [key, pendingValue] of pendingPatchValuesRef.current.entries()) {
+			next[key] = applyPendingManualOverride(next[key], pendingValue, now);
+		}
+
 		const newlyChanged: string[] = [];
 		let changed = false;
-		for (const [key, entry] of Object.entries(partial.fields)) {
-			const result = applyMergeRule(prev[key], entry, now);
-			if (result !== undefined) {
-				next[key] = result;
+		for (const [key, result] of Object.entries(next)) {
+			if (JSON.stringify(prev[key]) !== JSON.stringify(result)) {
 				changed = true;
 				newlyChanged.push(key);
 			}
@@ -158,7 +135,7 @@ export function useRsState(sessionId: string | null) {
 		}
 	}, []);
 
-	// ── setUserField ─────────────────────────────────────────────────────────────
+	// â”€â”€ setUserField â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// Immediate optimistic update; debounced PATCH after 600ms.
 
 	const setUserField = useCallback(
@@ -166,14 +143,7 @@ export function useRsState(sessionId: string | null) {
 			const now = Date.now();
 			setFields((prev) => ({
 				...prev,
-				[key]: {
-					value,
-					filled: value.trim() !== "",
-					source: value.trim() !== "" ? "user" : null,
-					updatedAt: now,
-					pendingSuggestion: undefined, // typing clears any pending suggestion
-					dismissedSuggestions: prev[key]?.dismissedSuggestions,
-				},
+				[key]: applyPendingManualOverride(prev[key], value, now),
 			}));
 
 			const existing = debounceRefs.current.get(key);
@@ -185,7 +155,16 @@ export function useRsState(sessionId: string | null) {
 					debounceRefs.current.delete(key);
 					pendingPatchValuesRef.current.delete(key);
 					if (!sessionId) return;
-					const merged = await patchDirectFields(sessionId, { [key]: value });
+					const merged = await patchRsFieldState(
+						sessionId,
+						value.trim()
+							? {
+									action: "accept",
+									source: "user_manual",
+									fields: { [key]: value },
+								}
+							: { action: "clear", keys: [key] },
+					);
 					if (merged) applyExtraction(merged);
 				}, 600),
 			);
@@ -193,7 +172,7 @@ export function useRsState(sessionId: string | null) {
 		[sessionId, applyExtraction],
 	);
 
-	// ── acceptSuggestion ─────────────────────────────────────────────────────────
+	// â”€â”€ acceptSuggestion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 	const acceptSuggestion = useCallback(
 		(key: string) => {
@@ -208,33 +187,35 @@ export function useRsState(sessionId: string | null) {
 						...field,
 						value: accepted,
 						filled: accepted.trim() !== "",
-						source: "user" as FieldSource,
+						source: "user_accept_suggestion" as FieldSource,
 						updatedAt: Date.now(),
 						pendingSuggestion: undefined,
 					},
 				};
 			});
-			// Persist immediately (no debounce — explicit user action)
+			// Persist immediately (no debounce â€” explicit user action)
 			if (sessionId && accepted) {
-				void patchDirectFields(sessionId, { [key]: accepted }).then(
-					(merged) => {
-						if (merged) applyExtraction(merged);
-					},
-				);
+				void patchRsFieldState(sessionId, {
+					action: "accept",
+					source: "user_accept_suggestion",
+					fields: { [key]: accepted },
+				}).then((merged) => {
+					if (merged) applyExtraction(merged);
+				});
 			}
 		},
 		[sessionId, applyExtraction],
 	);
 
-	// ── dismissSuggestion ────────────────────────────────────────────────────────
+	// â”€â”€ dismissSuggestion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 	const dismissSuggestion = useCallback(
 		(key: string) => {
-			let keptValue = "";
+			let dismissedValue = "";
 			setFields((prev) => {
 				const field = prev[key];
 				if (!field?.pendingSuggestion) return prev;
-				keptValue = field.value;
+				dismissedValue = field.pendingSuggestion.value;
 				const dismissed = field.dismissedSuggestions ?? [];
 				return {
 					...prev,
@@ -245,20 +226,19 @@ export function useRsState(sessionId: string | null) {
 					},
 				};
 			});
-			// Always PATCH — empty string explicitly clears the field on the backend,
-			// preventing the AI-extracted value from winning at export time.
-			if (sessionId) {
-				void patchDirectFields(sessionId, { [key]: keptValue }).then(
-					(merged) => {
-						if (merged) applyExtraction(merged);
-					},
-				);
+			if (sessionId && dismissedValue) {
+				void patchRsFieldState(sessionId, {
+					action: "dismiss",
+					fields: { [key]: dismissedValue },
+				}).then((merged) => {
+					if (merged) applyExtraction(merged);
+				});
 			}
 		},
 		[sessionId, applyExtraction],
 	);
 
-	// ── clearChangedKey / clearAllChangedKeys ────────────────────────────────────
+	// â”€â”€ clearChangedKey / clearAllChangedKeys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 	const clearChangedKey = useCallback((key: string) => {
 		setRecentlyChangedKeys((prev) => {
@@ -273,13 +253,13 @@ export function useRsState(sessionId: string | null) {
 		setRecentlyChangedKeys((prev) => (prev.size === 0 ? prev : new Set()));
 	}, []);
 
-	// ── applyDirectChatAnswer ────────────────────────────────────────────────────
+	// â”€â”€ applyDirectChatAnswer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// Called when user sends a message that answers an explicitly-asked direct field.
 
 	const applyDirectChatAnswer = useCallback(
 		(
 			text: string,
-			pendingRef: React.RefObject<DirectChatFieldKey | null>,
+			pendingRef: RefObject<DirectChatFieldKey | null>,
 			currentValues: Record<string, string>,
 		): {
 			valuesForRequest: Record<string, string>;
@@ -313,15 +293,17 @@ export function useRsState(sessionId: string | null) {
 				[pendingKey]: {
 					value: resolution.value,
 					filled: true,
-					source: "user" as FieldSource,
+					source: "user_direct_chat" as FieldSource,
 					updatedAt: now,
 					pendingSuggestion: undefined,
 					dismissedSuggestions: prev[pendingKey]?.dismissedSuggestions,
 				},
 			}));
 			if (sessionId) {
-				void patchDirectFields(sessionId, {
-					[pendingKey]: resolution.value,
+				void patchRsFieldState(sessionId, {
+					action: "accept",
+					source: "user_direct_chat",
+					fields: { [pendingKey]: resolution.value },
 				}).then((merged) => {
 					if (merged) applyExtraction(merged);
 				});
@@ -334,7 +316,7 @@ export function useRsState(sessionId: string | null) {
 		[fields, deferredKeys, sessionId, applyExtraction],
 	);
 
-	// ── applyUploadAttachments ───────────────────────────────────────────────────
+	// â”€â”€ applyUploadAttachments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 	const applyUploadAttachments = useCallback(
 		(filenames: string) => {
@@ -344,36 +326,39 @@ export function useRsState(sessionId: string | null) {
 				attachments: {
 					value: filenames,
 					filled: filenames.trim() !== "",
-					source: "upload" as FieldSource,
+					source: "user_upload" as FieldSource,
 					updatedAt: now,
 					pendingSuggestion: undefined,
 					dismissedSuggestions: prev.attachments?.dismissedSuggestions,
 				},
 			}));
 			if (sessionId) {
-				void patchDirectFields(sessionId, { attachments: filenames }).then(
-					(merged) => {
-						if (merged) applyExtraction(merged);
-					},
-				);
+				void patchRsFieldState(sessionId, {
+					action: "accept",
+					source: "user_upload",
+					fields: { attachments: filenames },
+				}).then((merged) => {
+					if (merged) applyExtraction(merged);
+				});
 			}
 		},
 		[sessionId, applyExtraction],
 	);
 
-	// ── hydrateFromSession ───────────────────────────────────────────────────────
+	// â”€â”€ hydrateFromSession â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 	const hydrateFromSession = useCallback((partial: RsPartialData) => {
 		const now = Date.now();
 		const hydrated: Record<string, RsField> = {};
 		for (const [key, entry] of Object.entries(partial.fields)) {
-			if (entry.filled) hydrated[key] = toRsField(entry, now);
+			hydrated[key] = toRsField(entry, now);
 		}
+		latestFieldsRef.current = hydrated;
 		setFields(hydrated);
 		setDeferredKeys([]);
 	}, []);
 
-	// ── flushPendingPatches ──────────────────────────────────────────────────────
+	// â”€â”€ flushPendingPatches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// Cancels all pending debounce timers and immediately PATCHes their values.
 	// Call before any action that reads the backend state (e.g. document download).
 
@@ -389,11 +374,30 @@ export function useRsState(sessionId: string | null) {
 			pendingPatchValuesRef.current.delete(key);
 		}
 		const patch = Object.fromEntries(pending);
-		const merged = await patchDirectFields(sessionId, patch);
+		const acceptFields = Object.fromEntries(
+			Object.entries(patch).filter(([, value]) => String(value).trim()),
+		);
+		const clearKeys = Object.entries(patch)
+			.filter(([, value]) => !String(value).trim())
+			.map(([key]) => key);
+		let merged: RsPartialData | null = null;
+		if (Object.keys(acceptFields).length) {
+			merged = await patchRsFieldState(sessionId, {
+				action: "accept",
+				source: "user_manual",
+				fields: acceptFields,
+			});
+		}
+		if (clearKeys.length) {
+			merged = await patchRsFieldState(sessionId, {
+				action: "clear",
+				keys: clearKeys,
+			});
+		}
 		if (merged) applyExtraction(merged);
 	}, [sessionId, applyExtraction]);
 
-	// ── reset ────────────────────────────────────────────────────────────────────
+	// â”€â”€ reset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 	const reset = useCallback(() => {
 		for (const t of debounceRefs.current.values()) clearTimeout(t);

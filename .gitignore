@@ -16,3 +16,10 @@ frontend/.env.local
 **/__pycache__/
 **/.pytest_cache/
 **/.venv/
+
+.aislop/
+!.aislop/config.yml
+.github/
+.uv-cache/
+.venv/
+.vscode/

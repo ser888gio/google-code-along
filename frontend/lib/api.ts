@@ -301,12 +301,20 @@ export async function downloadPdf(sessionId: string): Promise<void> {
 
 // ─── Live RS context extraction ───────────────────────────────────────────────
 
-export type FieldSource = "user" | "ai" | "upload";
+type AcceptedSource =
+	| "user_manual"
+	| "user_direct_chat"
+	| "user_accept_suggestion"
+	| "user_upload"
+	| "system_import";
+
+export type FieldSource = AcceptedSource | "ai";
 
 export interface RsField {
 	value: string;
 	filled: boolean;
 	source: FieldSource | null;
+	acceptedAt?: string | null;
 	updatedAt: number;
 	pendingSuggestion?: { value: string; receivedAt: number };
 	dismissedSuggestions?: string[];
@@ -317,8 +325,27 @@ export interface RsState {
 	completeness: number;
 }
 
-// Legacy shape returned directly from the backend (before client-side RsField enrichment).
+interface RsAcceptedData {
+	value: string;
+	source: AcceptedSource;
+	accepted_at?: string | null;
+}
+
+interface RsSuggestionData {
+	value: string;
+	source: "ai";
+}
+
 interface RsSectionData {
+	status:
+		| "empty"
+		| "suggested"
+		| "accepted"
+		| "accepted_with_suggestion"
+		| "deferred";
+	accepted: RsAcceptedData | null;
+	suggestion: RsSuggestionData | null;
+	dismissed_suggestions?: string[];
 	filled: boolean;
 	value: string | null;
 	source?: FieldSource | null;
@@ -326,7 +353,16 @@ interface RsSectionData {
 
 export interface RsPartialData {
 	completeness: number;
+	accepted_completeness: number;
+	discovery_completeness: number;
 	fields: Record<string, RsSectionData>;
+}
+
+interface RsFieldStatePatch {
+	action: "accept" | "dismiss" | "clear";
+	fields?: Record<string, string>;
+	keys?: string[];
+	source?: AcceptedSource;
 }
 
 /**
@@ -345,6 +381,26 @@ export async function patchDirectFields(
 				method: "PATCH",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify({ fields }),
+			},
+		);
+		if (!res.ok) return null;
+		return res.json();
+	} catch {
+		return null;
+	}
+}
+
+export async function patchRsFieldState(
+	sessionId: string,
+	patch: RsFieldStatePatch,
+): Promise<RsPartialData | null> {
+	try {
+		const res = await fetch(
+			`${API_URL}/discovery/${encodeURIComponent(sessionId)}/rs-field-state`,
+			{
+				method: "PATCH",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(patch),
 			},
 		);
 		if (!res.ok) return null;

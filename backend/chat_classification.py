@@ -20,9 +20,9 @@ from answer_classifier import (
 from answer_quality import rate_answer
 from field_schema import FIELD_SCHEMA, REQUIRED_FIELDS
 from firestore import (
+    accept_rs_fields,
     remove_deferred_fields,
     upsert_deferred_fields,
-    upsert_direct_fields,
     upsert_discovery_state,
 )
 from workflow_state import FieldStatus, WorkflowState
@@ -54,6 +54,14 @@ def empty_discovery_state() -> dict:
     return {"completeness": 0, "fields": {}, "missing_priority": []}
 
 
+def _auto_accept_source(field_key: str) -> str | None:
+    field_def = FIELD_SCHEMA.get(field_key)
+    mode = field_def.get("acceptance_mode", "ai_suggestion_only") if field_def else "ai_suggestion_only"
+    if mode in {"direct_answer", "literal_value"}:
+        return "user_direct_chat"
+    return None
+
+
 async def _apply_answered(
     *,
     loop: asyncio.AbstractEventLoop,
@@ -73,9 +81,9 @@ async def _apply_answered(
     discovery_state.setdefault("fields", {})[field_key] = field_entry(value)
     recompute_discovery_completeness(discovery_state)
     await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
-    if field_key in DIRECT_FIELD_KEYS:
+    if field_key in DIRECT_FIELD_KEYS and (source := _auto_accept_source(field_key)):
         direct_fields[field_key] = value
-        await loop.run_in_executor(None, upsert_direct_fields, session_id, {field_key: value})
+        await loop.run_in_executor(None, accept_rs_fields, session_id, {field_key: value}, source)
     if field_key in deferred_fields:
         deferred_fields.pop(field_key, None)
         await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])

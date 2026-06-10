@@ -11,8 +11,12 @@ from chat_classification import solution_type_value
 from config import APP_NAME
 from fastapi import APIRouter, HTTPException
 from firestore import (
+    accept_rs_fields,
+    clear_accepted_rs_fields,
+    compose_rs_field_view,
+    dismiss_rs_field_suggestions,
     get_discovery_state,
-    upsert_direct_fields,
+    get_rs_field_state,
     upsert_discovery_state,
     upsert_srs_fields,
 )
@@ -40,15 +44,32 @@ class FieldData(BaseModel):
     filled: bool
     value: str | None
     source: str | None = None  # "user" | "ai" | "upload" | null
+    status: str | None = None
+    accepted: dict | None = None
+    suggestion: dict | None = None
+    dismissed_suggestions: list[str] = []
 
 
 class ContextResponse(BaseModel):
     completeness: int
+    accepted_completeness: int = 0
+    discovery_completeness: int = 0
     fields: dict[str, FieldData]
 
 
 class DirectFieldsPatch(BaseModel):
     fields: dict[str, str]
+
+
+class RsFieldStatePatch(BaseModel):
+    action: str
+    fields: dict[str, str] | None = None
+    keys: list[str] | None = None
+    source: str | None = None
+
+
+def _response_from_state(discovery: dict | None, rs_field_state: dict | None) -> dict:
+    return compose_rs_field_view(discovery, rs_field_state)
 
 
 # Per-session dedup lock for /context/extract.
@@ -126,14 +147,18 @@ async def context_extract(req: ContextRequest):
             logger.error(f"Firestore fallback failed for session_id={sid}: {exc}", exc_info=True)
             raise HTTPException(status_code=502, detail=f"Firestore unavailable: {type(exc).__name__}")
         if saved:
+            rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
             logger.info(
                 "ADK session missing, returning saved discovery state: "
                 f"session_id={sid} "
                 f"completeness={saved.get('completeness')}%"
             )
-            return {"completeness": saved["completeness"], "fields": saved["fields"]}
+            return _response_from_state(saved, rs_field_state)
+        rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
+        if rs_field_state:
+            return _response_from_state(None, rs_field_state)
         logger.info(f"No ADK session and no saved state for session_id={sid}")
-        return {"completeness": 0, "fields": {}}
+        return _response_from_state(None, None)
 
     # --- Per-session dedup lock ---
     # Ensure only one Gemini extraction runs per session at a time.
@@ -157,14 +182,12 @@ async def context_extract(req: ContextRequest):
                 logger.warning(f"Firestore get_discovery_state (coalesced) failed: session_id={sid} {exc}")
                 saved = None
             if saved:
+                rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
                 logger.info(
                     f"Returning coalesced extraction result: session_id={sid} completeness={saved.get('completeness')}%"
                 )
-                return {
-                    "completeness": saved["completeness"],
-                    "fields": saved["fields"],
-                }
-            return {"completeness": 0, "fields": {}}
+                return _response_from_state(saved, rs_field_state)
+            return _response_from_state(None, None)
 
     async with lock:
         # Re-fetch session inside the lock to pick up events that were
@@ -177,7 +200,7 @@ async def context_extract(req: ContextRequest):
         )
         if session is None:
             logger.warning(f"Session disappeared during extraction: session_id={sid}")
-            return {"completeness": 0, "fields": {}}
+            return _response_from_state(None, None)
 
         conversation_text = extract_conversation_text(session)
         logger.info(
@@ -215,8 +238,10 @@ async def context_extract(req: ContextRequest):
             logger.warning(f"Firestore get_discovery_state failed: session_id={sid} {exc}")
             merged = None
         if merged:
-            return {"completeness": merged["completeness"], "fields": merged["fields"]}
-        return {"completeness": result["completeness"], "fields": result["fields"]}
+            rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
+            return _response_from_state(merged, rs_field_state)
+        rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
+        return _response_from_state(result, rs_field_state)
 
 
 @router.get("/discovery/{session_id}", response_model=ContextResponse)
@@ -231,24 +256,52 @@ async def discovery_state(session_id: str):
     saved = await loop.run_in_executor(None, get_discovery_state, session_id)
     if saved:
         logger.debug(f"Discovery state retrieved: session_id={session_id} completeness={saved.get('completeness')}%")
-        return {"completeness": saved["completeness"], "fields": saved["fields"]}
+    rs_field_state = await loop.run_in_executor(None, get_rs_field_state, session_id)
+    if saved or rs_field_state:
+        return _response_from_state(saved, rs_field_state)
     logger.debug(f"No saved discovery state for session_id={session_id}")
-    return {"completeness": 0, "fields": {}}
+    return _response_from_state(None, None)
+
+
+@router.patch("/discovery/{session_id}/rs-field-state", response_model=ContextResponse)
+async def patch_rs_field_state(session_id: str, body: RsFieldStatePatch):
+    """Accept, dismiss, or clear user decisions for RS fields."""
+    loop = asyncio.get_running_loop()
+    try:
+        if body.action == "accept":
+            await loop.run_in_executor(
+                None,
+                accept_rs_fields,
+                session_id,
+                body.fields or {},
+                body.source or "user_manual",
+            )
+        elif body.action == "dismiss":
+            await loop.run_in_executor(None, dismiss_rs_field_suggestions, session_id, body.fields or {})
+        elif body.action == "clear":
+            await loop.run_in_executor(None, clear_accepted_rs_fields, session_id, body.keys or [])
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported RS field state action.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    discovery = await loop.run_in_executor(None, get_discovery_state, session_id)
+    rs_field_state = await loop.run_in_executor(None, get_rs_field_state, session_id)
+    return _response_from_state(discovery, rs_field_state)
 
 
 @router.patch("/discovery/{session_id}/fields", response_model=ContextResponse)
 async def patch_direct_fields(session_id: str, body: DirectFieldsPatch):
     """Directly set field values, bypassing AI extraction.
 
-    These values are stored in a separate Firestore key (direct_fields_json)
-    so subsequent AI extraction runs never erase them.  The merged state
-    (direct + AI) is returned so the frontend can update completeness
-    immediately without a separate polling call.
+    Compatibility route for older callers. Values are now stored as accepted
+    RS field state so subsequent AI extraction runs never erase them.
     """
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, upsert_direct_fields, session_id, body.fields)
-    logger.info(f"Direct fields patched: session_id={session_id} keys={list(body.fields.keys())}")
-    merged = await loop.run_in_executor(None, get_discovery_state, session_id)
-    if merged:
-        return {"completeness": merged["completeness"], "fields": merged["fields"]}
-    return {"completeness": 0, "fields": {}}
+    await loop.run_in_executor(None, accept_rs_fields, session_id, body.fields, "user_manual")
+    logger.info(
+        f"RS field state patched via legacy direct route: session_id={session_id} keys={list(body.fields.keys())}"
+    )
+    discovery = await loop.run_in_executor(None, get_discovery_state, session_id)
+    rs_field_state = await loop.run_in_executor(None, get_rs_field_state, session_id)
+    return _response_from_state(discovery, rs_field_state)

@@ -22,9 +22,9 @@ from fastapi import APIRouter, HTTPException, WebSocket
 from fastapi.responses import StreamingResponse
 from field_schema import FIELD_LABELS
 from firestore import (
+    accept_rs_fields,
     append_conversation_turn,
-    get_direct_fields,
-    upsert_direct_fields,
+    get_accepted_rs_fields,
 )
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.genai import types
@@ -121,10 +121,10 @@ async def _prepare_turn(req: ChatRequest, session_id: str):
     """Load direct fields, merge, persist, and build the workflow turn."""
     loop = asyncio.get_running_loop()
     session = await _resolve_session(req.user_id, session_id)
-    stored_direct_fields = await loop.run_in_executor(None, get_direct_fields, session_id)
+    stored_direct_fields = await loop.run_in_executor(None, get_accepted_rs_fields, session_id)
     direct_fields = merge_direct_fields(stored_direct_fields, req.direct_fields)
     if req.direct_fields:
-        await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
+        await loop.run_in_executor(None, accept_rs_fields, session_id, req.direct_fields, "user_manual")
     workflow_turn = await prepare_workflow_turn(
         session_id=session_id,
         message=req.message,

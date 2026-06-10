@@ -23,7 +23,7 @@ from config import (
     GCP_PROJECT,
     require_config_value,
 )
-from field_schema import REQUIRED_FIELDS
+from field_schema import FIELD_SCHEMA, REQUIRED_FIELDS
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_document import DocumentSnapshot
 from privacy import hash_text, redact_text
@@ -45,6 +45,13 @@ _COLLECTION = FIRESTORE_COLLECTION
 _FEEDBACK_COLLECTION = "feedback"
 _VALID_FEEDBACK_VOTES = {"up", "down"}
 _VALID_SESSION_RATINGS = {1, 2, 3, 4, 5}
+_VALID_ACCEPTED_SOURCES = {
+    "user_manual",
+    "user_direct_chat",
+    "user_accept_suggestion",
+    "user_upload",
+    "system_import",
+}
 
 _firestore_client: firestore.Client | None = None
 
@@ -391,6 +398,8 @@ def upsert_session_feedback(
 def _json_object(value: Any) -> dict[str, Any]:
     if not value:
         return {}
+    if isinstance(value, dict):
+        return value
     try:
         parsed = json.loads(value)
         return parsed if isinstance(parsed, dict) else {}
@@ -398,9 +407,227 @@ def _json_object(value: Any) -> dict[str, Any]:
         return {}
 
 
-def _preview_from_direct_fields(data: dict[str, Any]) -> str | None:
-    direct = _json_object(data.get("direct_fields_json"))
-    return direct.get("use_case_title") or None
+def _normalize_suggestion(value: object) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _empty_rs_view() -> dict[str, Any]:
+    return {
+        "completeness": 0,
+        "accepted_completeness": 0,
+        "discovery_completeness": 0,
+        "fields": {},
+    }
+
+
+def _valid_field_values(fields: dict[str, str]) -> dict[str, str]:
+    return {
+        key: str(value).strip()
+        for key, value in fields.items()
+        if key in FIELD_SCHEMA and value is not None and str(value).strip()
+    }
+
+
+def _rs_field_state_from_doc(data: dict[str, Any]) -> dict[str, Any]:
+    parsed = _json_object(data.get("rs_field_state_json"))
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _write_rs_field_state(session_id: str, state: dict[str, Any]) -> None:
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    ref.set(
+        {
+            "session_id": session_id,
+            "updated_at": _now_iso(),
+            "rs_field_state_json": json.dumps(state, ensure_ascii=False),
+        },
+        merge=True,
+    )
+
+
+def get_rs_field_state(session_id: str) -> dict[str, Any]:
+    """Return the persisted accepted RS field state for *session_id*."""
+    client = _client()
+    ref = client.collection(_COLLECTION).document(session_id)
+    snap = _snap(ref)
+    if not snap.exists:
+        return {}
+    return _rs_field_state_from_doc(snap.to_dict() or {})
+
+
+def get_accepted_rs_fields(session_id: str) -> dict[str, str]:
+    """Return accepted RS values only, keyed by field."""
+    accepted: dict[str, str] = {}
+    for key, entry in get_rs_field_state(session_id).items():
+        if key not in FIELD_SCHEMA or not isinstance(entry, dict):
+            continue
+        accepted_entry = entry.get("accepted")
+        if not isinstance(accepted_entry, dict):
+            continue
+        value = str(accepted_entry.get("value") or "").strip()
+        if value:
+            accepted[key] = value
+    return accepted
+
+
+def accept_rs_fields(session_id: str, fields: dict[str, str], source: str) -> dict[str, Any]:
+    """Persist accepted user decisions for RS fields."""
+    if source not in _VALID_ACCEPTED_SOURCES:
+        raise ValueError(f"Invalid accepted field source: {source}")
+
+    values = _valid_field_values(fields)
+    state = get_rs_field_state(session_id)
+    now = _now_iso()
+    for key, value in values.items():
+        entry = state.setdefault(key, {})
+        if not isinstance(entry, dict):
+            entry = {}
+            state[key] = entry
+        entry["accepted"] = {
+            "value": value,
+            "source": source,
+            "accepted_at": now,
+        }
+    _write_rs_field_state(session_id, state)
+    return state
+
+
+def dismiss_rs_field_suggestions(session_id: str, fields: dict[str, str]) -> dict[str, Any]:
+    """Persist dismissed AI suggestion values for RS fields."""
+    values = _valid_field_values(fields)
+    state = get_rs_field_state(session_id)
+    for key, value in values.items():
+        entry = state.setdefault(key, {})
+        if not isinstance(entry, dict):
+            entry = {}
+            state[key] = entry
+        dismissed = entry.setdefault("dismissed_suggestions", [])
+        if not isinstance(dismissed, list):
+            dismissed = []
+            entry["dismissed_suggestions"] = dismissed
+        normalized_existing = {_normalize_suggestion(item) for item in dismissed}
+        if _normalize_suggestion(value) not in normalized_existing:
+            dismissed.append(value)
+    _write_rs_field_state(session_id, state)
+    return state
+
+
+def clear_accepted_rs_fields(session_id: str, field_keys: list[str]) -> dict[str, Any]:
+    """Clear accepted values while preserving dismissed suggestion history."""
+    state = get_rs_field_state(session_id)
+    for key in field_keys:
+        if key not in FIELD_SCHEMA:
+            continue
+        entry = state.setdefault(key, {})
+        if isinstance(entry, dict):
+            entry.pop("accepted", None)
+    _write_rs_field_state(session_id, state)
+    return state
+
+
+def _accepted_completeness(rs_field_state: dict[str, Any]) -> int:
+    filled_required = 0
+    for key in REQUIRED_FIELDS:
+        entry = rs_field_state.get(key)
+        accepted = entry.get("accepted") if isinstance(entry, dict) else None
+        if isinstance(accepted, dict) and str(accepted.get("value") or "").strip():
+            filled_required += 1
+    return round((filled_required / len(REQUIRED_FIELDS)) * 100)
+
+
+def _discovery_completeness(discovery_state: dict[str, Any] | None) -> int:
+    if not discovery_state:
+        return 0
+    try:
+        return max(0, min(100, int(discovery_state.get("completeness", 0))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def compose_rs_field_view(
+    discovery_state: dict[str, Any] | None,
+    rs_field_state: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Combine AI discovery suggestions with user-accepted field state."""
+    user_state = rs_field_state or {}
+    discovery_fields = (discovery_state or {}).get("fields") or {}
+    fields: dict[str, Any] = {}
+
+    for key in FIELD_SCHEMA:
+        user_entry = user_state.get(key)
+        if not isinstance(user_entry, dict):
+            user_entry = {}
+
+        accepted = user_entry.get("accepted")
+        accepted_value = ""
+        accepted_payload = None
+        if isinstance(accepted, dict):
+            accepted_value = str(accepted.get("value") or "").strip()
+            if accepted_value:
+                accepted_payload = {
+                    "value": accepted_value,
+                    "source": accepted.get("source") or "user_manual",
+                    "accepted_at": accepted.get("accepted_at"),
+                }
+
+        dismissed = user_entry.get("dismissed_suggestions")
+        dismissed_values = dismissed if isinstance(dismissed, list) else []
+        dismissed_normalized = {_normalize_suggestion(item) for item in dismissed_values}
+
+        suggestion_payload = None
+        discovery_entry = discovery_fields.get(key)
+        if isinstance(discovery_entry, dict) and discovery_entry.get("filled"):
+            suggestion_value = str(discovery_entry.get("value") or "").strip()
+            if (
+                suggestion_value
+                and _normalize_suggestion(suggestion_value) not in dismissed_normalized
+                and _normalize_suggestion(suggestion_value) != _normalize_suggestion(accepted_value)
+            ):
+                suggestion_payload = {"value": suggestion_value, "source": "ai"}
+
+        if accepted_payload and suggestion_payload:
+            status = "accepted_with_suggestion"
+        elif accepted_payload:
+            status = "accepted"
+        elif suggestion_payload:
+            status = "suggested"
+        else:
+            status = "empty"
+
+        fields[key] = {
+            "status": status,
+            "accepted": accepted_payload,
+            "suggestion": suggestion_payload,
+            "dismissed_suggestions": list(dismissed_values),
+            # Backwards-compatible view fields for callers during the refactor.
+            "filled": bool(accepted_payload),
+            "value": accepted_payload["value"] if accepted_payload else None,
+            "source": accepted_payload["source"] if accepted_payload else None,
+        }
+
+    accepted_completeness = _accepted_completeness(user_state)
+    return {
+        "completeness": accepted_completeness,
+        "accepted_completeness": accepted_completeness,
+        "discovery_completeness": _discovery_completeness(discovery_state),
+        "fields": fields,
+    }
+
+
+def _preview_from_rs_field_state(data: dict[str, Any]) -> str | None:
+    state = _rs_field_state_from_doc(data)
+    title_entry = state.get("use_case_title")
+    accepted = title_entry.get("accepted") if isinstance(title_entry, dict) else None
+    if isinstance(accepted, dict):
+        value = str(accepted.get("value") or "").strip()
+        if value:
+            return value
+    return None
 
 
 def _preview_from_discovery_state(data: dict[str, Any]) -> str | None:
@@ -428,7 +655,7 @@ def _preview_from_first_user_message(data: dict[str, Any]) -> str | None:
 def _session_preview(data: dict[str, Any]) -> str | None:
     # Prefer the project name, then extracted state, then the first user message.
     return (
-        _preview_from_direct_fields(data)
+        _preview_from_rs_field_state(data)
         or _preview_from_discovery_state(data)
         or _preview_from_first_user_message(data)
     )
@@ -714,9 +941,6 @@ def upsert_workflow_state(session_id: str, state: dict) -> None:
 def get_discovery_state(session_id: str) -> dict | None:
     """Return the last saved discovery state for *session_id*, or None.
 
-    Merges directly-set fields on top of AI-extracted fields so the caller
-    always gets a unified view.  Direct fields are never overwritten by AI.
-
     Returns the parsed dict: {completeness, fields, missing_priority},
     or None if nothing has been saved yet.
     """
@@ -727,13 +951,12 @@ def get_discovery_state(session_id: str) -> dict | None:
         return None
     data = snap.to_dict() or {}
     ai_json = data.get("discovery_state_json")
-    direct_json = data.get("direct_fields_json")
 
-    if not ai_json and not direct_json:
+    if not ai_json:
         return None
 
     try:
-        state: dict = json.loads(ai_json) if ai_json else {"completeness": 0, "fields": {}, "missing_priority": []}
+        state: dict = json.loads(ai_json)
     except Exception:
         state = {"completeness": 0, "fields": {}, "missing_priority": []}
 
@@ -741,13 +964,6 @@ def get_discovery_state(session_id: str) -> dict | None:
     for entry in state.get("fields", {}).values():
         if isinstance(entry, dict):
             entry.setdefault("source", "ai" if entry.get("filled") else None)
-
-    if direct_json:
-        try:
-            direct: dict[str, str] = json.loads(direct_json)
-            _merge_direct_fields(state, direct)
-        except Exception as exc:
-            logger.warning(f"[Firestore] Failed to merge direct_input fields from JSON: {exc}")
 
     return state
 
