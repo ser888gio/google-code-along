@@ -18,6 +18,7 @@ frontend/.env.local
 **/.venv/
 
 .aislop/
+!.aislop/config.yml
 .github/
 .uv-cache/
 .venv/

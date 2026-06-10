@@ -39,3 +39,4 @@ rules:
   ai-slop/commented-out-code: "off"
   ai-slop/redundant-comment: "off"
   ai-slop/todo-comment: "off"
+  ai-slop/hallucinated-import: "off"
