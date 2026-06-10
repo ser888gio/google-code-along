@@ -1,0 +1,7 @@
+node_modules/
+.next/
+.env*
+coverage/
+__tests__/
+*.tsbuildinfo
+.git/
