@@ -16,3 +16,9 @@ frontend/.env.local
 **/__pycache__/
 **/.pytest_cache/
 **/.venv/
+
+.aislop/
+.github/
+.uv-cache/
+.venv/
+.vscode/
