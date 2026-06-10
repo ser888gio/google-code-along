@@ -36,8 +36,8 @@ from direct_field_context import build_augmented_user_message, clean_direct_fiel
 from field_schema import FIELD_LABELS, FIELD_SCHEMA
 from firestore import (
     append_conversation_turn,
+    get_accepted_rs_fields,
     get_deferred_fields,
-    get_direct_fields,
     get_discovery_state,
     get_workflow_state,
     remove_deferred_fields,
@@ -265,7 +265,7 @@ def load_voice_priming(session_id: str) -> str | None:
     Returns None for a session with no prior progress (nothing answered, no
     active field, nothing deferred) so brand-new voice sessions are unaffected.
     """
-    direct_fields = get_direct_fields(session_id)
+    direct_fields = get_accepted_rs_fields(session_id)
     workflow_context, _deferred = build_workflow_context_snapshot(session_id, direct_fields)
 
     has_direct = bool(clean_direct_fields(direct_fields))

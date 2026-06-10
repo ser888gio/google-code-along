@@ -9,7 +9,7 @@ import runtime
 from config import APP_NAME, GCS_PREFIX_SESSIONS
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
-from firestore import get_direct_fields
+from firestore import get_accepted_rs_fields
 from gcs import get_bucket_name, write_file
 from generation import (
     compile_rs_from_session,
@@ -162,10 +162,10 @@ async def download_rs_template_docx(req: SessionRef):
     """
     t0 = time.perf_counter()
     loop = asyncio.get_running_loop()
-    # Use only user-confirmed direct fields as the source of truth.
+    # Use only user-accepted RS fields as the source of truth.
     # AI-extracted values are never written to the document unless the user
-    # explicitly accepted them in the Preview.
-    direct = await loop.run_in_executor(None, get_direct_fields, req.session_id)
+    # explicitly accepted them in the Preview or direct chat.
+    direct = await loop.run_in_executor(None, get_accepted_rs_fields, req.session_id)
     fields: dict = {
         key: {"filled": True, "value": value, "source": "user"}
         for key, value in direct.items()

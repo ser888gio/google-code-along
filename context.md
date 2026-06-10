@@ -44,6 +44,7 @@ Important implementation docs:
 - `frontend/lib/api.ts` is the central browser API client for backend HTTP, SSE, upload, document, diagram, feedback, and admin calls.
 - `frontend/app/page.tsx` is the main chat workspace and session lifecycle surface.
 - `backend/main.py` wires the FastAPI app and routers. The route implementations live under `backend/api/`.
+- Accepted RS field state distinguishes user-accepted values from AI-extracted suggestions. DOCX export should use accepted values only. The acceptance policy belongs in `backend/field_schema.py` as an `acceptance_mode` field and is generated to the frontend with the rest of the RS schema. Persist user decisions in one rich `rs_field_state_json` Firestore field containing accepted values and dismissed suggestions, with no read-through fallback from legacy `direct_fields_json`. AI suggestions require individual user acceptance; do not add bulk accept.
 
 ## Backend Summary
 

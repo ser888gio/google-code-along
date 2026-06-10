@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { forwardRef, useCallback, useEffect, useRef } from "react";
 import type { RsField } from "../../lib/api";
@@ -67,18 +67,20 @@ const FieldCard = forwardRef<HTMLDivElement, FieldCardProps>(function FieldCard(
 	const source = field?.source ?? null;
 	const suggestion = field?.pendingSuggestion;
 
+	const sourceLabel =
+		source === "user_manual"
+			? "User"
+			: source === "user_direct_chat"
+				? "Chat"
+				: source === "user_accept_suggestion"
+					? "Accepted AI"
+					: source === "user_upload"
+						? t("rs.badge.upload") ?? "Upload"
+						: null;
 	const badge =
-		filled && source === "ai" ? (
-			<span className="ml-auto shrink-0 rounded bg-[#e8f5e9] px-1.5 py-0.5 text-[10px] font-bold text-[#2e7d32]">
-				AI
-			</span>
-		) : filled && source === "user" ? (
+		filled && sourceLabel ? (
 			<span className="ml-auto shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
-				{t("rs.badge.direct")}
-			</span>
-		) : filled && source === "upload" ? (
-			<span className="ml-auto shrink-0 rounded bg-purple-50 px-1.5 py-0.5 text-[10px] font-bold text-purple-600">
-				{t("rs.badge.upload") ?? "↑"}
+				{sourceLabel}
 			</span>
 		) : null;
 

@@ -1183,7 +1183,7 @@ export default function ChatPage() {
 		setError(null);
 		const currentValues = Object.fromEntries(
 			Object.entries(rsState.state.fields)
-				.filter(([, f]) => f.filled && f.source === "user")
+				.filter(([, f]) => f.filled && f.source !== "ai")
 				.map(([k, f]) => [k, f.value]),
 		);
 		const { valuesForRequest, deferredForRequest } =
@@ -1237,7 +1237,18 @@ export default function ChatPage() {
 			(key, value) => {
 				rsState.applyExtraction({
 					completeness: 0,
-					fields: { [key]: { filled: true, value } },
+					accepted_completeness: rsState.completeness,
+					discovery_completeness: 0,
+					fields: {
+						[key]: {
+							status: "suggested",
+							accepted: null,
+							suggestion: { value, source: "ai" },
+							filled: false,
+							value: null,
+							source: null,
+						},
+					},
 				});
 			},
 			valuesForRequest,

@@ -21,6 +21,7 @@ class FieldDef(TypedDict):
     match_terms: NotRequired[list[str]]
     direct_chat_patterns: NotRequired[list[str]]
     validation_mode: NotRequired[str]
+    acceptance_mode: NotRequired[str]
     expected_shape: NotRequired[str]
     example_good: NotRequired[str]
     rubric: NotRequired[list[str]]
@@ -50,6 +51,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
             r"\bnazev\b.*\bpripad\b",
         ],
         "validation_mode": "soft",
+        "acceptance_mode": "direct_answer",
         "expected_shape": ("Short English noun phrase naming the deliverable (2-6 words)."),
         "example_good": "Patents reporting",
         "rubric": [
@@ -73,6 +75,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
             r"\bbusiness\s+unit\b",
         ],
         "validation_mode": "strict",
+        "acceptance_mode": "direct_answer",
         "expected_shape": "Specific department / business unit name or code.",
         "example_good": "Finance department",
         "rubric": [
@@ -80,20 +83,21 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
             "Includes code or hierarchy level if relevant",
         ],
     },
-    "requestor": {
-        "label": "Requestor",
+    "requester": {
+        "label": "Requester",
         "required": True,
         "section": 1,
         "direct_input": True,
         "ai_extractable": True,
         "direct_chat": True,
-        "match_terms": ["requestor", "zadatel", "zadavatel"],
+        "match_terms": ["requester", "zadatel", "zadavatel"],
         "direct_chat_patterns": [
             r"\brequestor\b",
             r"\bzadatel\b",
             r"\bzadavatel\b",
         ],
         "validation_mode": "strict",
+        "acceptance_mode": "direct_answer",
         "expected_shape": ("Name, email, or department-code of the person making the request."),
         "example_good": "Jane Novak, Finance department",
         "rubric": [
@@ -120,6 +124,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
             r"\bvlastnik\s+produktu\b",
         ],
         "validation_mode": "strict",
+        "acceptance_mode": "direct_answer",
         "expected_shape": "Named individual designated as product owner.",
         "example_good": "John Smith (Finance team lead)",
         "rubric": [
@@ -254,6 +259,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "ai_extractable": False,
         "match_terms": ["saved time", "uspora casu", "hours"],
         "validation_mode": "strict",
+        "acceptance_mode": "literal_value",
         "expected_shape": ("Numeric estimate of hours saved per year (approximate is OK)."),
         "example_good": "~80 hours/year across the reporting team",
         "rubric": [
@@ -269,6 +275,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "ai_extractable": False,
         "match_terms": ["cost saving", "naklady", "uspora nakladu"],
         "validation_mode": "strict",
+        "acceptance_mode": "literal_value",
         "expected_shape": ("Estimated cost reduction in money terms (approximate is OK)."),
         "example_good": "~EUR 8,000 / year in analyst time",
         "rubric": [
@@ -284,6 +291,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "ai_extractable": False,
         "match_terms": ["revenue", "vynos", "trzby"],
         "validation_mode": "strict",
+        "acceptance_mode": "literal_value",
         "expected_shape": ("Estimated incremental revenue (approximate or explicit 'unknown' is OK)."),
         "example_good": "N/A - internal reporting use case",
         "rubric": [
@@ -456,6 +464,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "multiline": True,
         "match_terms": ["comment", "poznamka"],
         "validation_mode": "soft",
+        "acceptance_mode": "literal_value",
         "expected_shape": ("Any additional useful information not covered elsewhere."),
         "example_good": ("Patent titles must be excluded for confidentiality during the first months."),
         "rubric": [
@@ -471,6 +480,7 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "multiline": True,
         "match_terms": ["attachment", "priloha"],
         "validation_mode": "soft",
+        "acceptance_mode": "manual_only",
         "expected_shape": "List of attached files (GCS paths or filenames).",
         "example_good": "gs://uploads/patents_template.xlsx",
         "rubric": [
@@ -533,6 +543,7 @@ def build_sections() -> list[dict[str, Any]]:
                     "directInput": bool(field.get("direct_input")),
                     "multiline": bool(field.get("multiline")),
                     "validationMode": field.get("validation_mode", "soft"),
+                    "acceptanceMode": field.get("acceptance_mode", "ai_suggestion_only"),
                     "expectedShape": field.get("expected_shape", ""),
                     "exampleGood": field.get("example_good", ""),
                     "rubric": list(field.get("rubric", [])),
