@@ -81,6 +81,14 @@ def setup_telemetry(app=None) -> None:  # noqa: ANN001
         FastAPIInstrumentor.instrument_app(app)
 
 
+def current_trace_ids() -> tuple[str | None, str | None]:
+    """Return current OTel trace/span IDs as hex strings, if a span is active."""
+    span_context = trace.get_current_span().get_span_context()
+    if not span_context or not span_context.is_valid:
+        return None, None
+    return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
+
+
 def get_tracer(name: str = "rs-generator") -> trace.Tracer:
     return trace.get_tracer(name)
 

@@ -3,40 +3,25 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import re
 import time
 import uuid
 import weakref
-from contextlib import suppress
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from functools import partial
-from typing import AsyncIterator, Literal
+from typing import Literal
 
+import runtime
 from admin_sessions import (
     get_admin_metrics,
     get_admin_session,
     list_admin_sessions,
     require_admin,
 )
-from agent import audio_agent, rs_agent
-from agent.discovery_agent import (
-    extract_discovery_fields,
-    is_not_applicable_allowed,
-    pick_next_active_field,
-    sync_workflow_with_discovery_state,
-)
-from agent.finalizer_agent import run_finalizer
-from answer_classifier import (
-    DIRECT_FIELD_KEYS,
-    ClassifierResult,
-    classify_user_turn,
-    is_deferred_answer,
-    normalize_for_match,
-)
-from answer_quality import rate_answer
+from agent.discovery_agent import extract_discovery_fields
 from audio_websocket import AudioWebsocketDeps, run_audio_websocket
 from bpmn import check_completeness, generate_bpmn_diagram
+from chat_classification import solution_type_value
+from chat_streaming import chat_stream_event_generator
+from chat_turn import load_voice_priming, prepare_workflow_turn, run_turn_postprocessing
 from config import (
     APP_NAME,
     FINALIZING_MARKER,
@@ -46,11 +31,7 @@ from config import (
     validate_config,
 )
 from dataflow import check_dfd_completeness, generate_dataflow_diagram
-from direct_field_context import (
-    build_augmented_user_message,
-    clean_direct_fields,
-    merge_direct_fields,
-)
+from direct_field_context import build_augmented_user_message, merge_direct_fields
 from fastapi import (
     Depends,
     FastAPI,
@@ -63,28 +44,21 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from field_schema import FIELD_LABELS, FIELD_SCHEMA, REQUIRED_FIELDS
+from field_schema import FIELD_LABELS
 from firestore import (
     append_conversation_turn,
     get_conversation_history,
-    get_deferred_fields,
     get_direct_fields,
     get_discovery_state,
     get_final_analysis,
     get_srs_fields,
-    get_workflow_state,
     list_sessions,
-    remove_deferred_fields,
-    set_finalization_error,
-    set_finalization_pending,
     update_feedback_comment,
-    upsert_deferred_fields,
     upsert_direct_fields,
     upsert_discovery_state,
     upsert_message_feedback,
     upsert_session_feedback,
     upsert_srs_fields,
-    upsert_workflow_state,
 )
 from gcs import get_bucket_name, list_files, write_file
 from generation import (
@@ -95,8 +69,6 @@ from generation import (
     srs_json_to_docx,
 )
 from google.adk.agents.run_config import RunConfig, StreamingMode
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from google.genai.types import (
     AudioTranscriptionConfig,
@@ -104,14 +76,7 @@ from google.genai.types import (
     VoiceConfig,
 )
 from logger import get_logger, setup_logging
-from observability.metrics import (
-    record_feedback_vote,
-    record_itl,
-    record_operation_duration,
-    record_session_completion,
-    record_session_duration,
-    record_ttft,
-)
+from observability.metrics import record_feedback_vote, record_operation_duration
 from observability.safety import (
     FRIENDLY_COST_ERROR,
     FRIENDLY_PROMPT_ERROR,
@@ -120,7 +85,7 @@ from observability.safety import (
     assert_session_within_budget,
     check_user_prompt_or_raise,
 )
-from observability.tracing import setup_telemetry
+from observability.tracing import current_trace_ids, setup_telemetry
 from observability.turns import (
     current_turn,
     reset_turn,
@@ -128,12 +93,9 @@ from observability.turns import (
     start_turn,
     summarize_turn,
 )
-from opentelemetry import trace
 from pydantic import BaseModel
-from session_bridge import SessionBridge
 from starlette.requests import Request
 from utils import extract_conversation_text, sanitize_gcs_filename, sanitize_gcs_segment
-from workflow_state import AgentContext, FieldStatus, Phase, WorkflowEvent, WorkflowState
 
 setup_logging()
 logger = get_logger(__name__)
@@ -179,76 +141,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# --- ADK runner setup ---
-
-# NOTE: ADK sessions are in-memory only. A backend restart drops all live sessions.
-# Firestore persists conversation history and discovery state, so /context/extract
-# can reconstruct context after a restart, but any in-flight [FINALIZING] trigger
-# will be lost. Migrate to a persistent ADK session store before production.
-session_service = InMemorySessionService()
-
-runner = Runner(
-    app_name=APP_NAME,
-    agent=rs_agent,
-    session_service=session_service,
-)
-
-# Audio runner for bidi voice streaming (uses native-audio model).
-# Intentionally shares session_service with the text runner so SessionBridge
-# can inject voice transcripts into the orchestrator's ADK session. The shared
-# service is by design — see SessionBridge below.
-audio_runner = Runner(
-    app_name=APP_NAME,
-    agent=audio_agent,
-    session_service=session_service,
-)
-
-# Bridge: injects voice transcripts into the text orchestrator's ADK session
-# so the orchestrator has full context when the user switches back to text.
-session_bridge = SessionBridge(
-    session_service=session_service,
-    app_name=APP_NAME,
-    orchestrator_agent_name=rs_agent.name,
-)
-
-# Per-session dedup lock for /context/extract.
-# Prevents multiple parallel Gemini extraction calls for the same session
-# (common in voice mode where turn_complete events arrive faster than
-# the ~40s extraction call can finish).
-# WeakValueDictionary so entries are evicted automatically once no request
-# holds a reference to the lock — no unbounded growth across sessions.
-_extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
-_session_started_at: dict[str, float] = {}
-_session_outcomes_recorded: set[str] = set()
-
-
-def _mark_session_seen(session_id: str) -> None:
-    """Remember first-seen time for session duration metrics."""
-    _session_started_at.setdefault(session_id, time.monotonic())
-
-
-def _record_session_outcome(
-    session_id: str,
-    outcome: Literal["finalized", "abandoned"],
-) -> None:
-    """Record session completion once per backend process."""
-    if session_id in _session_outcomes_recorded:
-        return
-    _session_outcomes_recorded.add(session_id)
-    started_at = _session_started_at.pop(session_id, None)
-    if started_at is not None:
-        record_session_duration(time.monotonic() - started_at, outcome=outcome)
-    record_session_completion(outcome=outcome)
-
-
-def _current_trace_ids() -> tuple[str | None, str | None]:
-    """Return current OTel trace/span IDs as hex strings, if a span is active."""
-    span_context = trace.get_current_span().get_span_context()
-    if not span_context or not span_context.is_valid:
-        return None, None
-    return f"{span_context.trace_id:032x}", f"{span_context.span_id:016x}"
-
-
 def _run_safety_preflight(message: str, session_id: str) -> None:
     assert_session_within_budget(session_id)
     check_user_prompt_or_raise(message, session_id=session_id)
@@ -268,441 +160,6 @@ def _safety_error_stream(session_id: str, detail: str) -> StreamingResponse:
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(generator(), media_type="text/event-stream")
-
-
-def _conversation_event_line(event) -> str | None:
-    if not event.content or not event.content.parts:
-        return None
-
-    text = "".join(p.text for p in event.content.parts if p.text).strip()
-    if not text:
-        return None
-
-    label = "User" if event.content.role == "user" else "Consultant"
-    return f"{label}: {text}"
-
-
-def _build_conversation_tail(session, latest_user_message: str, limit: int = 12) -> str:
-    """Build a compact transcript tail for classifiers/extractors."""
-    events = getattr(session, "events", None) if session else None
-    tail_lines = [line for event in (events or [])[-limit:] if (line := _conversation_event_line(event))]
-    tail_lines.append(f"User: {latest_user_message}")
-    return "\n".join(tail_lines)
-
-
-def _answered_field_values(
-    discovery_state: dict | None,
-    direct_fields: dict[str, str],
-) -> dict[str, str]:
-    """Return answered field values for hidden workflow context."""
-    values: dict[str, str] = {}
-    for key, entry in ((discovery_state or {}).get("fields") or {}).items():
-        if isinstance(entry, dict) and entry.get("filled") and entry.get("value"):
-            values[key] = str(entry["value"])
-    for key, value in direct_fields.items():
-        if str(value or "").strip():
-            values[key] = str(value).strip()
-    return values
-
-
-def _is_finalize_choice(message: str) -> bool:
-    """Detect a wrap-up user choice to finalize with open questions."""
-    text = normalize_for_match(message)
-    return any(
-        phrase in text
-        for phrase in [
-            "finalize",
-            "finalise",
-            "generate",
-            "vygeneruj",
-            "finalizuj",
-            "dokoncit",
-            "nechat",
-            "pozdeji",
-        ]
-    )
-
-
-async def _reopen_first_deferred_field(
-    *,
-    session_id: str,
-    state: WorkflowState,
-    deferred_fields: dict,
-) -> None:
-    """Move wrap-up back to discovery for the first deferred field."""
-    if not deferred_fields:
-        return
-
-    field_key = next(iter(deferred_fields))
-    deferred_fields.pop(field_key, None)
-    state.transition(WorkflowEvent.REOPEN_DEFERRED, active_field=field_key)
-
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
-
-
-def _field_entry(value: str) -> dict:
-    return {"filled": True, "value": value}
-
-
-def _solution_type_value(discovery_state: dict | None) -> str | None:
-    if not discovery_state:
-        return None
-    fields = discovery_state.get("fields")
-    if not isinstance(fields, dict):
-        return None
-    entry = fields.get("solution_type")
-    if not isinstance(entry, dict):
-        return None
-    return entry.get("value")
-
-
-def _recompute_discovery_completeness(state: dict) -> None:
-    fields = state.setdefault("fields", {})
-    filled = sum(1 for key in REQUIRED_FIELDS if isinstance(fields.get(key), dict) and fields[key].get("filled"))
-    state["completeness"] = round((filled / len(REQUIRED_FIELDS)) * 100)
-
-
-def _empty_discovery_state() -> dict:
-    return {"completeness": 0, "fields": {}, "missing_priority": []}
-
-
-async def _apply_answered(
-    *,
-    loop: asyncio.AbstractEventLoop,
-    session_id: str,
-    field_key: str,
-    value: str,
-    statuses: dict,
-    miss_counts: dict,
-    discovery_state: dict | None,
-    direct_fields: dict[str, str],
-    deferred_fields: dict,
-) -> dict | None:
-    statuses[field_key] = "answered"
-    miss_counts[field_key] = 0
-    if discovery_state is None:
-        discovery_state = _empty_discovery_state()
-    discovery_state.setdefault("fields", {})[field_key] = _field_entry(value)
-    _recompute_discovery_completeness(discovery_state)
-    await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
-    if field_key in DIRECT_FIELD_KEYS:
-        direct_fields[field_key] = value
-        await loop.run_in_executor(None, upsert_direct_fields, session_id, {field_key: value})
-    if field_key in deferred_fields:
-        deferred_fields.pop(field_key, None)
-        await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
-    return discovery_state
-
-
-async def _apply_deferred(
-    *,
-    loop: asyncio.AbstractEventLoop,
-    session_id: str,
-    field_key: str,
-    statuses: dict,
-    miss_counts: dict,
-    deferred_fields: dict,
-) -> None:
-    statuses[field_key] = "deferred"
-    miss_counts[field_key] = 0
-    deferred_fields[field_key] = {"deferred_at": datetime.now(timezone.utc).isoformat()}
-    await loop.run_in_executor(None, upsert_deferred_fields, session_id, {field_key: deferred_fields[field_key]})
-
-
-async def _apply_classification_result(
-    *,
-    loop: asyncio.AbstractEventLoop,
-    session_id: str,
-    field_key: str,
-    message: str,
-    classification: "ClassifierResult",
-    statuses: dict,
-    miss_counts: dict,
-    clarification_counts: dict,
-    discovery_state: dict | None,
-    direct_fields: dict[str, str],
-    deferred_fields: dict,
-) -> dict | None:
-    clf = classification["classification"]
-    if clf == "answered":
-        value = classification.get("value")
-        if value:
-            discovery_state = await _apply_answered(
-                loop=loop,
-                session_id=session_id,
-                field_key=field_key,
-                value=value,
-                statuses=statuses,
-                miss_counts=miss_counts,
-                discovery_state=discovery_state,
-                direct_fields=direct_fields,
-                deferred_fields=deferred_fields,
-            )
-        else:
-            statuses[field_key] = "missing"
-    elif clf == "deferred":
-        await _apply_deferred(
-            loop=loop,
-            session_id=session_id,
-            field_key=field_key,
-            statuses=statuses,
-            miss_counts=miss_counts,
-            deferred_fields=deferred_fields,
-        )
-    elif clf == "clarification_requested":
-        statuses[field_key] = "clarification_requested"
-        clarification_counts[field_key] = int(clarification_counts.get(field_key) or 0) + 1
-    elif is_deferred_answer(message):
-        await _apply_deferred(
-            loop=loop,
-            session_id=session_id,
-            field_key=field_key,
-            statuses=statuses,
-            miss_counts=miss_counts,
-            deferred_fields=deferred_fields,
-        )
-    else:
-        statuses[field_key] = "missing"
-        miss_counts[field_key] = int(miss_counts.get(field_key) or 0) + 1
-    return discovery_state
-
-
-async def _classify_and_update_active_field(
-    *,
-    session_id: str,
-    field_key: str,
-    message: str,
-    tail_text: str,
-    solution_type: str | None,
-    state: WorkflowState,
-    discovery_state: dict | None,
-    direct_fields: dict[str, str],
-    deferred_fields: dict,
-) -> tuple[ClassifierResult, dict | None]:
-    """Run the classifier for the active field and persist the resulting status changes."""
-    loop = asyncio.get_running_loop()
-
-    classification: ClassifierResult = await classify_user_turn(
-        field_key, message, tail_text, solution_type=solution_type
-    )
-    await rate_answer(
-        field_key,
-        str((state.last_question_by_field or {}).get(field_key, "")),
-        message,
-        classification["classification"],
-    )
-
-    latest_gaps = list(classification.get("coverage_gaps") or [])
-    if latest_gaps:
-        state.coverage_gaps[field_key] = latest_gaps
-    else:
-        state.coverage_gaps.pop(field_key, None)
-
-    discovery_state = await _apply_classification_result(
-        loop=loop,
-        session_id=session_id,
-        field_key=field_key,
-        message=message,
-        classification=classification,
-        statuses=state.field_status,
-        miss_counts=state.miss_counts,
-        clarification_counts=state.clarification_counts,
-        discovery_state=discovery_state,
-        direct_fields=direct_fields,
-        deferred_fields=deferred_fields,
-    )
-
-    return classification, discovery_state
-
-
-async def _apply_proactive_updates(
-    *,
-    session_id: str,
-    classification: ClassifierResult,
-    active_field: str,
-    state: WorkflowState,
-    discovery_state: dict | None,
-) -> dict | None:
-    """Persist any side-channel field values the classifier extracted proactively."""
-    loop = asyncio.get_running_loop()
-
-    proactive_updates: dict[str, str] = {}
-    for key, entry in (classification.get("proactive_fields") or {}).items():
-        if key not in FIELD_SCHEMA or key == active_field:
-            continue
-        value = str(entry.get("value") or "").strip()
-        if value:
-            state.field_status[key] = FieldStatus.ANSWERED
-            proactive_updates[key] = value
-
-    if not proactive_updates:
-        return discovery_state
-
-    if discovery_state is None:
-        discovery_state = _empty_discovery_state()
-    fields = discovery_state.setdefault("fields", {})
-    for key, value in proactive_updates.items():
-        fields[key] = _field_entry(value)
-    _recompute_discovery_completeness(discovery_state)
-    await loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_state)
-    return discovery_state
-
-
-async def _prepare_workflow_turn(
-    *,
-    session_id: str,
-    req: ChatRequest,
-    session,
-    direct_fields: dict[str, str],
-) -> dict:
-    """Advance backend-owned workflow state before the LLM turn starts."""
-    loop = asyncio.get_running_loop()
-
-    discovery_state = await loop.run_in_executor(None, get_discovery_state, session_id)
-    deferred_fields = await loop.run_in_executor(None, get_deferred_fields, session_id)
-    stored_workflow = await loop.run_in_executor(None, get_workflow_state, session_id)
-    state = WorkflowState.from_dict(stored_workflow)
-    state = sync_workflow_with_discovery_state(state, discovery_state, direct_fields, deferred_fields)
-
-    incoming_deferred = {
-        key: {"deferred_at": datetime.now(timezone.utc).isoformat()}
-        for key in (req.deferred_fields or [])
-        if key in FIELD_SCHEMA
-    }
-    if incoming_deferred:
-        deferred_fields.update(incoming_deferred)
-        await loop.run_in_executor(None, upsert_deferred_fields, session_id, incoming_deferred)
-
-    previous_active = state.active_field
-    classification: ClassifierResult = {
-        "classification": "not_answered",
-        "value": None,
-        "confidence": 0.0,
-        "proactive_fields": {},
-        "coverage_gaps": [],
-    }
-
-    solution_type_value = _solution_type_value(discovery_state)
-
-    tail_text = _build_conversation_tail(session, req.message)
-    if state.phase == Phase.WRAP_UP:
-        if _is_finalize_choice(req.message):
-            state.transition(WorkflowEvent.FINALIZE_CHOSEN)
-        else:
-            await _reopen_first_deferred_field(
-                session_id=session_id,
-                state=state,
-                deferred_fields=deferred_fields,
-            )
-    elif previous_active:
-        classification, discovery_state = await _classify_and_update_active_field(
-            session_id=session_id,
-            field_key=previous_active,
-            message=req.message,
-            tail_text=tail_text,
-            solution_type=solution_type_value,
-            state=state,
-            discovery_state=discovery_state,
-            direct_fields=direct_fields,
-            deferred_fields=deferred_fields,
-        )
-        discovery_state = await _apply_proactive_updates(
-            session_id=session_id,
-            classification=classification,
-            active_field=previous_active,
-            state=state,
-            discovery_state=discovery_state,
-        )
-
-    if state.phase != Phase.READY_TO_FINALIZE:
-        next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
-        if next_field is None:
-            state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
-        else:
-            state.transition(WorkflowEvent.FIELD_FOUND, active_field=next_field)
-
-    # Treat disallowed not-applicable statuses as deferred to avoid required-field skips.
-    for key, status in list(state.field_status.items()):
-        if status == FieldStatus.NOT_APPLICABLE and not is_not_applicable_allowed(key):
-            state.field_status[key] = FieldStatus.DEFERRED
-
-    await loop.run_in_executor(None, upsert_workflow_state, session_id, state.to_dict())
-
-    answered_values = _answered_field_values(discovery_state, direct_fields)
-    workflow_context = state.to_agent_context(
-        classification_result=classification["classification"],
-        answered_values=answered_values,
-        deferred_field_keys=list(deferred_fields.keys()),
-        previous_active=previous_active,
-    )
-
-    return {
-        "workflow": state.to_dict(),
-        "workflow_context": workflow_context,
-        "direct_fields": direct_fields,
-        "deferred_fields": list(deferred_fields.keys()),
-        "classification": classification,
-        "tail_text": tail_text,
-        "solution_type": solution_type_value,
-    }
-
-
-def build_workflow_context_snapshot(
-    session_id: str,
-    direct_fields: dict[str, str],
-) -> tuple[AgentContext, list[str]]:
-    """Compute the current workflow-context block without advancing state.
-
-    Unlike _prepare_workflow_turn, this performs no classification and persists
-    nothing — it is a pure read used to prime a voice session at connect time so
-    the audio agent sees the same hidden context the text path injects per turn.
-    """
-    discovery_state = get_discovery_state(session_id)
-    deferred_fields = get_deferred_fields(session_id)
-    stored_workflow = get_workflow_state(session_id)
-    state = WorkflowState.from_dict(stored_workflow)
-    state = sync_workflow_with_discovery_state(state, discovery_state, direct_fields, deferred_fields)
-
-    if state.phase != Phase.READY_TO_FINALIZE:
-        next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
-        if next_field is None:
-            state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
-        else:
-            state.transition(WorkflowEvent.FIELD_FOUND, active_field=next_field)
-
-    answered_values = _answered_field_values(discovery_state, direct_fields)
-    workflow_context = state.to_agent_context(
-        classification_result="not_answered",
-        answered_values=answered_values,
-        deferred_field_keys=list(deferred_fields.keys()),
-        previous_active=None,
-    )
-    return workflow_context, list(deferred_fields.keys())
-
-
-def load_voice_priming(session_id: str) -> str | None:
-    """Build the hidden workflow-context block to seed a voice session.
-
-    Returns None for a session with no prior progress (nothing answered, no
-    active field, nothing deferred) so brand-new voice sessions are unaffected.
-    """
-    direct_fields = get_direct_fields(session_id)
-    workflow_context, _deferred = build_workflow_context_snapshot(session_id, direct_fields)
-
-    has_direct = bool(clean_direct_fields(direct_fields))
-    has_answers = bool(workflow_context.get("answered_fields"))
-    has_deferred = bool(workflow_context.get("deferred_fields"))
-    if not (has_direct or has_answers or has_deferred):
-        return None
-
-    return build_augmented_user_message(
-        "",
-        direct_fields,
-        workflow_context["deferred_fields"],
-        workflow_context=workflow_context,
-        field_labels=FIELD_LABELS,
-    )
 
 
 # --- Request / response models ---
@@ -854,245 +311,6 @@ class AdminMetricsResponse(BaseModel):
     daily: list[AdminDailyMetric]
 
 
-@dataclass
-class StreamReplyState:
-    reply_parts: list[str] = field(default_factory=list)
-    chunk_times: list[float] = field(default_factory=list)
-    cost_aborted: bool = False
-    stream_started_at: float = field(default_factory=time.perf_counter)
-    ttft_recorded: bool = False
-
-
-_CHOICES_PATTERN = re.compile(r"\s*<choices>(\[.*?])</choices>\s*", re.DOTALL)
-
-
-def _sse_event(payload: dict) -> str:
-    return f"data: {json.dumps(payload)}\n\n"
-
-
-def _event_text_parts(event) -> list[str]:
-    if not event.content or not event.content.parts:
-        return []
-    return [part.text for part in event.content.parts if part.text]
-
-
-def _field_update_sse_events(prev_fields: dict, new_fields: dict) -> list[str]:
-    events: list[str] = []
-    for key, entry in new_fields.items():
-        if not entry or not entry.get("filled"):
-            continue
-        new_value = entry.get("value")
-        if new_value is None:
-            continue
-        prev_entry = prev_fields.get(key) or {}
-        prev_filled = bool(prev_entry.get("filled"))
-        prev_value = prev_entry.get("value")
-        if (not prev_filled) or (prev_value != new_value):
-            events.append(_sse_event({"field_update": {"key": key, "value": new_value}}))
-    return events
-
-
-def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
-    now = time.perf_counter()
-    if not state.ttft_recorded:
-        ttft = now - state.stream_started_at
-        record_ttft(ttft, model=MODEL_ORCHESTRATOR, phase="chat")
-        set_stream_timings(ttft_ms=int(ttft * 1000))
-        state.ttft_recorded = True
-    state.chunk_times.append(now)
-    state.reply_parts.append(text)
-
-    clean = text.replace(FINALIZING_MARKER, "").strip()
-    if not clean:
-        return None
-    return _sse_event({"text": clean})
-
-
-async def _pre_stream_field_update_events(session_id: str, workflow_turn: dict) -> list[str]:
-    try:
-        loop = asyncio.get_running_loop()
-        prev_state = await loop.run_in_executor(None, get_discovery_state, session_id)
-        new_state = await asyncio.wait_for(
-            extract_discovery_fields(
-                workflow_turn["tail_text"],
-                session_id=session_id,
-                solution_type=workflow_turn.get("solution_type"),
-            ),
-            timeout=4.0,
-        )
-        events = _field_update_sse_events(
-            (prev_state or {}).get("fields") or {},
-            new_state.get("fields") or {},
-        )
-        logger.info(f"Pre-stream field_update: session={session_id} emitted={len(events)}")
-        return events
-    except asyncio.TimeoutError:
-        logger.warning(
-            f"Pre-stream extract timed out (>4s): event=extract_timeout_total session_id={session_id} timeout_seconds=4"
-        )
-    except CostCircuitBreakerTripped:
-        raise
-    except Exception as exc:
-        logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
-    return []
-
-
-async def _agent_stream_events(
-    *,
-    req: ChatRequest,
-    user_content: types.Content,
-    session_id: str,
-    state: StreamReplyState,
-) -> AsyncIterator[str]:
-    try:
-        async for event in runner.run_async(
-            user_id=req.user_id,
-            session_id=session_id,
-            new_message=user_content,
-        ):
-            for text in _event_text_parts(event):
-                if stream_event := _record_agent_text_chunk(text, state):
-                    yield stream_event
-    except CostCircuitBreakerTripped as exc:
-        state.cost_aborted = True
-        logger.warning(f"Stream aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")
-        yield _sse_event({"error": FRIENDLY_COST_ERROR})
-    except Exception as exc:
-        logger.error(
-            f"Streaming error for session_id={session_id}: {exc}",
-            exc_info=True,
-        )
-        yield _sse_event({"error": "An internal error occurred. Please try again."})
-
-
-async def _keepalive_merged(
-    agent_gen: AsyncIterator[str],
-    interval: float = 20.0,
-) -> AsyncIterator[str]:
-    """Interleave SSE keepalive comments with agent events to prevent Cloud Run idle-stream timeouts."""
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    async def drain_agent() -> None:
-        async for event in agent_gen:
-            await queue.put(event)
-        await queue.put(None)
-
-    async def keepalive_ticker() -> None:
-        while True:
-            await asyncio.sleep(interval)
-            await queue.put(": keepalive\n\n")
-
-    agent_task = asyncio.create_task(drain_agent())
-    ticker_task = asyncio.create_task(keepalive_ticker())
-    try:
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield item
-    finally:
-        ticker_task.cancel()
-        agent_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await agent_task
-
-
-async def _chat_stream_event_generator(
-    *,
-    req: ChatRequest,
-    session_id: str,
-    workflow_turn: dict,
-    user_content: types.Content,
-) -> AsyncIterator[str]:
-    message_id = str(uuid.uuid4())
-    trace_id, span_id = _current_trace_ids()
-    turn_token = start_turn(
-        session_id=session_id,
-        message_id=message_id,
-        phase="chat",
-    )
-    turn_t0 = time.perf_counter()
-
-    yield _sse_event({"session_id": session_id, "message_id": message_id})
-    active_field = workflow_turn["workflow"].get("active_field")
-    if active_field:
-        yield _sse_event({"active_field": active_field})
-
-    try:
-        for update_event in await _pre_stream_field_update_events(session_id, workflow_turn):
-            yield update_event
-    except CostCircuitBreakerTripped as exc:
-        logger.warning(
-            f"Stream aborted by cost circuit during extraction: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
-        )
-        reset_turn(turn_token)
-        yield _sse_event({"error": FRIENDLY_COST_ERROR})
-        yield "data: [DONE]\n\n"
-        return
-
-    stream_state = StreamReplyState()
-    async for stream_event in _keepalive_merged(
-        _agent_stream_events(
-            req=req,
-            user_content=user_content,
-            session_id=session_id,
-            state=stream_state,
-        )
-    ):
-        yield stream_event
-
-    if stream_state.cost_aborted:
-        reset_turn(turn_token)
-        yield "data: [DONE]\n\n"
-        return
-
-    if len(stream_state.chunk_times) >= 2:
-        avg_itl = (stream_state.chunk_times[-1] - stream_state.chunk_times[0]) / (len(stream_state.chunk_times) - 1)
-        record_itl(avg_itl)
-        set_stream_timings(itl_ms=int(avg_itl * 1000))
-
-    full_reply = "".join(stream_state.reply_parts)
-    set_stream_timings(latency_ms=int((time.perf_counter() - turn_t0) * 1000))
-    turn_summary = summarize_turn(current_turn())
-    logger.info(f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}")
-
-    is_finalizing = FINALIZING_MARKER in full_reply
-    if is_finalizing:
-        logger.info(f"[FINALIZING] detected for session_id={session_id} launching finalizer pipeline")
-        yield _sse_event({"event": "finalizing"})
-
-    choices_match = _CHOICES_PATTERN.search(full_reply)
-    if choices_match:
-        try:
-            choices = json.loads(choices_match.group(1))
-            if isinstance(choices, list) and 2 <= len(choices) <= 4:
-                clean_text = _CHOICES_PATTERN.sub("", full_reply)
-                clean_text = clean_text.replace(FINALIZING_MARKER, "").strip()
-                yield _sse_event({"choices": choices})
-                yield _sse_event({"text_replace": clean_text})
-                logger.info(f"Choices emitted: session_id={session_id} count={len(choices)}")
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    asyncio.create_task(
-        _run_turn_postprocessing(
-            session_id=session_id,
-            user_id=req.user_id,
-            user_text=req.message,
-            assistant_text=full_reply,
-            is_finalizing=is_finalizing,
-            fallback_transcript=full_reply,
-            message_id=message_id,
-            trace_id=trace_id,
-            span_id=span_id,
-            turn_summary=turn_summary,
-        )
-    )
-
-    reset_turn(turn_token)
-    yield "data: [DONE]\n\n"
-
-
 # --- Endpoints ---
 
 
@@ -1192,7 +410,7 @@ async def chat(req: ChatRequest):
     """Send a message to the RS consultant agent and get a response."""
 
     session_id = req.session_id or str(uuid.uuid4())
-    _mark_session_seen(session_id)
+    runtime.mark_session_seen(session_id)
     try:
         _run_safety_preflight(req.message, session_id)
     except (CostCircuitBreakerTripped, UnsafePromptBlocked) as exc:
@@ -1201,13 +419,13 @@ async def chat(req: ChatRequest):
     loop = asyncio.get_running_loop()
 
     # Ensure session exists
-    session = await session_service.get_session(
+    session = await runtime.session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=session_id,
     )
     if session is None:
-        session = await session_service.create_session(
+        session = await runtime.session_service.create_session(
             app_name=APP_NAME,
             user_id=req.user_id,
             session_id=session_id,
@@ -1221,9 +439,10 @@ async def chat(req: ChatRequest):
     if req.direct_fields:
         await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
 
-    workflow_turn = await _prepare_workflow_turn(
+    workflow_turn = await prepare_workflow_turn(
         session_id=session_id,
-        req=req,
+        message=req.message,
+        incoming_deferred=req.deferred_fields,
         session=session,
         direct_fields=direct_fields,
     )
@@ -1245,13 +464,13 @@ async def chat(req: ChatRequest):
 
     # Collect the agent's final text response
     message_id = str(uuid.uuid4())
-    trace_id, span_id = _current_trace_ids()
+    trace_id, span_id = current_trace_ids()
     turn_token = start_turn(session_id=session_id, message_id=message_id, phase="chat")
     turn_t0 = time.perf_counter()
     reply_parts: list[str] = []
     turn_summary: dict = {}
     try:
-        async for event in runner.run_async(
+        async for event in runtime.runner.run_async(
             user_id=req.user_id,
             session_id=session_id,
             new_message=user_content,
@@ -1294,7 +513,7 @@ async def chat_stream(req: ChatRequest):
     """Stream the agent's response as Server-Sent Events."""
 
     session_id = req.session_id or str(uuid.uuid4())
-    _mark_session_seen(session_id)
+    runtime.mark_session_seen(session_id)
     try:
         _run_safety_preflight(req.message, session_id)
     except CostCircuitBreakerTripped:
@@ -1304,13 +523,13 @@ async def chat_stream(req: ChatRequest):
     logger.debug(f"Stream chat request: session_id={session_id} user_id={req.user_id}")
     loop = asyncio.get_running_loop()
 
-    session = await session_service.get_session(
+    session = await runtime.session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=session_id,
     )
     if session is None:
-        session = await session_service.create_session(
+        session = await runtime.session_service.create_session(
             app_name=APP_NAME,
             user_id=req.user_id,
             session_id=session_id,
@@ -1324,9 +543,10 @@ async def chat_stream(req: ChatRequest):
     if req.direct_fields:
         await loop.run_in_executor(None, upsert_direct_fields, session_id, req.direct_fields)
 
-    workflow_turn = await _prepare_workflow_turn(
+    workflow_turn = await prepare_workflow_turn(
         session_id=session_id,
-        req=req,
+        message=req.message,
+        incoming_deferred=req.deferred_fields,
         session=session,
         direct_fields=direct_fields,
     )
@@ -1347,9 +567,10 @@ async def chat_stream(req: ChatRequest):
     )
 
     return StreamingResponse(
-        _chat_stream_event_generator(
-            req=req,
+        chat_stream_event_generator(
             session_id=session_id,
+            user_id=req.user_id,
+            message=req.message,
             workflow_turn=workflow_turn,
             user_content=user_content,
         ),
@@ -1438,7 +659,7 @@ async def submit_session_feedback(req: SessionFeedbackRequest):
     if feedback is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    _record_session_outcome(req.session_id, "abandoned")
+    runtime.record_session_outcome(req.session_id, "abandoned")
     record_feedback_vote(vote=f"rating_{req.rating}", phase="session")
     logger.info(f"Session feedback recorded: event=session_feedback session_id={req.session_id} rating={req.rating}")
     return {"status": "ok"}
@@ -1466,7 +687,7 @@ async def get_document(req: SessionRef):
     """
     t0 = time.perf_counter()
     markdown = await compile_rs_from_session(
-        session_service=session_service,
+        session_service=runtime.session_service,
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=req.session_id,
@@ -1493,7 +714,7 @@ async def download_pdf(req: SessionRef):
     t0 = time.perf_counter()
     status = "ok"
     markdown = await compile_rs_from_session(
-        session_service=session_service,
+        session_service=runtime.session_service,
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=req.session_id,
@@ -1539,7 +760,7 @@ async def download_docx(req: SessionRef):
     t0 = time.perf_counter()
     status = "ok"
     srs_json = await compile_srs_json_from_session(
-        session_service=session_service,
+        session_service=runtime.session_service,
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=req.session_id,
@@ -1640,7 +861,7 @@ class BpmnResponse(BaseModel):
 async def bpmn_generate(req: BpmnRequest):
     """Check RS completeness and generate a Mermaid BPMN diagram if ≥ 90%."""
     t0 = time.perf_counter()
-    session = await session_service.get_session(
+    session = await runtime.session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=req.session_id,
@@ -1695,7 +916,7 @@ class DataflowResponse(BaseModel):
 async def dataflow_generate(req: DataflowRequest):
     """Check DFD readiness and generate a Mermaid Data Flow Diagram if score ≥ 70%."""
     t0 = time.perf_counter()
-    session = await session_service.get_session(
+    session = await runtime.session_service.get_session(
         app_name=APP_NAME,
         user_id=req.user_id,
         session_id=req.session_id,
@@ -1750,6 +971,15 @@ class ContextResponse(BaseModel):
     fields: dict[str, FieldData]
 
 
+# Per-session dedup lock for /context/extract.
+# Prevents multiple parallel Gemini extraction calls for the same session
+# (common in voice mode where turn_complete events arrive faster than
+# the ~40s extraction call can finish).
+# WeakValueDictionary so entries are evicted automatically once no request
+# holds a reference to the lock — no unbounded growth across sessions.
+_extract_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
 @app.post("/context/extract", response_model=ContextResponse)
 async def context_extract(req: ContextRequest):
     """Extract all 22 discovery form fields from the current conversation.
@@ -1775,7 +1005,7 @@ async def context_extract(req: ContextRequest):
         raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
 
     try:
-        session = await session_service.get_session(
+        session = await runtime.session_service.get_session(
             app_name=APP_NAME,
             user_id=req.user_id,
             session_id=sid,
@@ -1840,7 +1070,7 @@ async def context_extract(req: ContextRequest):
         # Re-fetch session inside the lock to pick up events that were
         # appended between the initial get_session() and acquiring the lock
         # (e.g. SessionBridge injections that run before turn_complete).
-        session = await session_service.get_session(
+        session = await runtime.session_service.get_session(
             app_name=APP_NAME,
             user_id=req.user_id,
             session_id=sid,
@@ -1858,7 +1088,7 @@ async def context_extract(req: ContextRequest):
         try:
             loop = asyncio.get_running_loop()
             _saved_state = await loop.run_in_executor(None, get_discovery_state, sid)
-            _sol_type = _solution_type_value(_saved_state)
+            _sol_type = solution_type_value(_saved_state)
             result = await extract_discovery_fields(conversation_text, session_id=sid, solution_type=_sol_type)
         except CostCircuitBreakerTripped as exc:
             raise HTTPException(status_code=429, detail=FRIENDLY_COST_ERROR) from exc
@@ -1935,7 +1165,7 @@ async def _persist_srs_to_firestore(session_id: str, user_id: str) -> None:
     """
     try:
         srs_json = await compile_srs_json_from_session(
-            session_service=session_service,
+            session_service=runtime.session_service,
             app_name=APP_NAME,
             user_id=user_id,
             session_id=session_id,
@@ -2102,110 +1332,6 @@ async def firestore_data(session_id: str):
 # --- Bidirectional audio WebSocket endpoint ---
 
 
-async def _run_turn_postprocessing(
-    session_id: str,
-    user_id: str,
-    user_text: str,
-    assistant_text: str,
-    is_finalizing: bool,
-    *,
-    fallback_transcript: str | None = None,
-    message_id: str | None = None,
-    trace_id: str | None = None,
-    span_id: str | None = None,
-    turn_summary: dict | None = None,
-) -> None:
-    """Shared post-processing pipeline for a completed conversation turn.
-
-    Called by both voice and text chat paths.  Executes these steps:
-
-      1. Persist conversation turn to Firestore (fire-and-forget)
-      2. Launch finalizer (if [FINALIZING] detected) — includes its own
-         discovery extraction so the heavy Gemini call only happens once
-
-    Discovery field extraction and SRS compilation are NOT done here — the
-    frontend triggers those via ``POST /context/extract`` after each turn.
-    This avoids duplicate Gemini calls (backend + frontend both extracting).
-
-    Parameters
-    ----------
-    fallback_transcript:
-        Used when the ADK session snapshot is unavailable.  Defaults to a
-        simple ``User: / Consultant:`` formatted string.
-    """
-    loop = asyncio.get_running_loop()
-
-    # 1. Persist conversation turn to Firestore
-    if user_text or assistant_text:
-        turn_summary = turn_summary or {}
-        loop.run_in_executor(
-            None,
-            partial(
-                append_conversation_turn,
-                session_id,
-                user_text or "(voice input)",
-                assistant_text,
-                message_id=message_id,
-                trace_id=trace_id,
-                span_id=span_id,
-                **turn_summary,
-            ),
-        )
-
-    # 2. If [FINALIZING] detected, launch the finalizer pipeline
-    #    The finalizer needs discovery fields + conversation transcript,
-    #    so we extract them here (only on finalization, not every turn).
-    if is_finalizing:
-        _record_session_outcome(session_id, "finalized")
-        logger.info(f"[FINALIZING] detected: session={session_id} — launching finalizer")
-        loop.run_in_executor(None, set_finalization_pending, session_id)
-
-        session_snap = await session_service.get_session(
-            app_name=APP_NAME,
-            user_id=user_id,
-            session_id=session_id,
-        )
-        conversation_text = (
-            extract_conversation_text(session_snap)
-            if session_snap
-            else (fallback_transcript or f"User: {user_text}\nConsultant: {assistant_text}")
-        )
-
-        try:
-            _fin_saved = await loop.run_in_executor(None, get_discovery_state, session_id)
-            _fin_sol_type = _solution_type_value(_fin_saved)
-            discovery_fields = await extract_discovery_fields(
-                conversation_text,
-                session_id=session_id,
-                solution_type=_fin_sol_type,
-            )
-            logger.debug(
-                f"Discovery fields for finalizer: session={session_id} "
-                f"completeness={discovery_fields.get('completeness')}%"
-            )
-            loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_fields)
-        except CostCircuitBreakerTripped as exc:
-            logger.warning(f"Finalizer skipped by cost circuit: session={session_id} cost_usd={exc.cost_usd:.6f}")
-            loop.run_in_executor(None, set_finalization_error, session_id)
-            return
-        except Exception as exc:
-            logger.warning(f"extract_discovery_fields failed: session={session_id} {exc}")
-            discovery_fields = {
-                "completeness": 0,
-                "fields": {},
-                "missing_priority": [],
-            }
-
-        asyncio.create_task(
-            run_finalizer(
-                session_id=session_id,
-                user_id=user_id,
-                conversation_text=conversation_text,
-                discovery_fields=discovery_fields,
-            )
-        )
-
-
 def _is_native_audio_model(model_name: str) -> bool:
     """Check if the model supports native audio input/output."""
     return "native-audio" in model_name
@@ -2261,7 +1387,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
       - Server sends binary PCM audio and JSON text/transcription events back
     """
     await websocket.accept()
-    _mark_session_seen(session_id)
+    runtime.mark_session_seen(session_id)
     logger.info(f"[WS] Connected: user={user_id} session={session_id}")
 
     try:
@@ -2273,10 +1399,10 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
             deps=AudioWebsocketDeps(
                 app_name=APP_NAME,
                 finalizing_marker=FINALIZING_MARKER,
-                session_service=session_service,
-                session_bridge=session_bridge,
-                audio_runner=audio_runner,
-                run_turn_postprocessing=_run_turn_postprocessing,
+                session_service=runtime.session_service,
+                session_bridge=runtime.session_bridge,
+                audio_runner=runtime.audio_runner,
+                run_turn_postprocessing=run_turn_postprocessing,
                 load_voice_priming=load_voice_priming,
                 logger=logger,
             ),

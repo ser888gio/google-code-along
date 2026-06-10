@@ -67,6 +67,7 @@ def app_with_mocks():
     import importlib
 
     import main as main_module  # noqa — imported after stubs installed
+    import runtime
 
     importlib.reload(main_module)  # re-evaluate module-level globals with stubs
 
@@ -80,8 +81,10 @@ def app_with_mocks():
     mock_runner = MagicMock()
     mock_runner.run_async = _fake_run_async_greeting
 
-    main_module.session_service = mock_svc
-    main_module.runner = mock_runner
+    # Singletons live in runtime.py; consumers resolve them via attribute
+    # lookup at call time, so patching the module attributes is sufficient.
+    runtime.session_service = mock_svc
+    runtime.runner = mock_runner
 
     return main_module.app, mock_runner, mock_svc, mock_session
 
