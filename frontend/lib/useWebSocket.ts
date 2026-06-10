@@ -42,7 +42,7 @@ interface UseWebSocketReturn {
 	/** Current connection state */
 	connectionState: ConnectionState;
 	/** Connect to the bidi WebSocket */
-	connect: (userId: string, sessionId: string) => void;
+	connect: (userId: string, sessionId: string, lang: string) => void;
 	/** Disconnect from the WebSocket */
 	disconnect: () => void;
 	/** Send raw PCM audio bytes to the server */
@@ -94,7 +94,7 @@ export function useWebSocket(options: {
 	}, []);
 
 	const connect = useCallback(
-		(userId: string, sessionId: string) => {
+		(userId: string, sessionId: string, lang: string) => {
 			// Close existing connection if any
 			if (wsRef.current) {
 				wsRef.current.close();
@@ -103,7 +103,7 @@ export function useWebSocket(options: {
 
 			updateState("connecting");
 
-			const url = `${WS_URL}/ws/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}`;
+			const url = `${WS_URL}/ws/${encodeURIComponent(userId)}/${encodeURIComponent(sessionId)}?lang=${encodeURIComponent(lang)}`;
 			const ws = new WebSocket(url);
 			ws.binaryType = "arraybuffer";
 			wsRef.current = ws;

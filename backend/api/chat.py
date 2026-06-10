@@ -18,7 +18,7 @@ from config import (
     MODEL_AUDIO,
 )
 from direct_field_context import build_augmented_user_message, merge_direct_fields
-from fastapi import APIRouter, HTTPException, WebSocket
+from fastapi import APIRouter, HTTPException, Query, WebSocket
 from fastapi.responses import StreamingResponse
 from field_schema import FIELD_LABELS
 from firestore import (
@@ -245,51 +245,90 @@ def _is_native_audio_model(model_name: str) -> bool:
     return "native-audio" in model_name
 
 
-def _build_run_config() -> RunConfig:
+# Maps the frontend UI locale to a BCP-47 speech language code. Czech-first
+# product: unknown or missing locales fall back to Czech.
+_VOICE_LANGUAGE_CODES = {"cs": "cs-CZ", "en": "en-US"}
+_DEFAULT_VOICE_LANG = "cs"
+
+_VOICE_LANGUAGE_HINTS = {
+    "cs": "The user's interface language is Czech; expect the user to speak Czech and respond in Czech.",
+    "en": "The user's interface language is English; expect the user to speak English and respond in English.",
+}
+
+
+def _resolve_voice_lang(lang: str | None) -> str:
+    return lang if lang in _VOICE_LANGUAGE_CODES else _DEFAULT_VOICE_LANG
+
+
+def _voice_priming_with_language(session_id: str, lang: str) -> str | None:
+    """Append the locale hint to the workflow priming block.
+
+    The hint is the only language steer that works on native-audio Live models
+    (they ignore SpeechConfig.language_code), so it is sent even for brand-new
+    sessions where the workflow priming itself is empty.
+    """
+    priming = load_voice_priming(session_id)
+    hint = _VOICE_LANGUAGE_HINTS[lang]
+    if priming:
+        return f"{priming}\n\n{hint}"
+    return hint
+
+
+def _build_run_config(lang: str) -> RunConfig:
     """Build a RunConfig for bidi audio streaming.
 
     Adapts response modalities and speech config depending on whether the
-    audio model is a native-audio model or a half-cascade model.
+    audio model is a native-audio model or a half-cascade model. The language
+    code is pinned on both branches; native-audio models ignore it and rely on
+    the priming hint instead.
     """
-    is_native = _is_native_audio_model(MODEL_AUDIO)
-    if is_native:
+    speech_config = SpeechConfig(
+        voice_config=VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede")),
+        language_code=_VOICE_LANGUAGE_CODES[lang],
+    )
+    if _is_native_audio_model(MODEL_AUDIO):
         return RunConfig(
             streaming_mode=StreamingMode.BIDI,
             response_modalities=["AUDIO"],
-            speech_config=SpeechConfig(
-                voice_config=VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede"))
-            ),
+            speech_config=speech_config,
             output_audio_transcription=AudioTranscriptionConfig(),
             input_audio_transcription=AudioTranscriptionConfig(),
         )
     return RunConfig(
         streaming_mode=StreamingMode.BIDI,
         response_modalities=["AUDIO"],
-        speech_config=SpeechConfig(
-            voice_config=VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede"))
-        ),
+        speech_config=speech_config,
     )
 
 
 @router.websocket("/ws/{user_id}/{session_id}")
-async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
+async def websocket_audio(
+    websocket: WebSocket,
+    user_id: str,
+    session_id: str,
+    lang: str | None = Query(default=None),
+):
     """Bidirectional audio streaming over WebSocket.
 
     Protocol:
       - Binary frames = raw PCM audio (16kHz, 16-bit, mono) from the client
       - Text frames   = JSON messages for text/audio/end-of-turn fallbacks
       - Server sends binary PCM audio and JSON text/transcription events back
+
+    ``lang`` is the frontend UI locale (``cs``/``en``); it pins the speech
+    recognition/synthesis language. Missing or unknown values fall back to Czech.
     """
     await websocket.accept()
     runtime.mark_session_seen(session_id)
-    logger.info(f"[WS] Connected: user={user_id} session={session_id}")
+    voice_lang = _resolve_voice_lang(lang)
+    logger.info(f"[WS] Connected: user={user_id} session={session_id} lang={voice_lang}")
 
     try:
         await run_audio_websocket(
             websocket,
             user_id=user_id,
             session_id=session_id,
-            run_config=_build_run_config(),
+            run_config=_build_run_config(voice_lang),
             deps=AudioWebsocketDeps(
                 app_name=APP_NAME,
                 finalizing_marker=FINALIZING_MARKER,
@@ -297,7 +336,7 @@ async def websocket_audio(websocket: WebSocket, user_id: str, session_id: str):
                 session_bridge=runtime.session_bridge,
                 audio_runner=runtime.audio_runner,
                 run_turn_postprocessing=run_turn_postprocessing,
-                load_voice_priming=load_voice_priming,
+                load_voice_priming=partial(_voice_priming_with_language, lang=voice_lang),
                 logger=logger,
             ),
         )

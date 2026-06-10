@@ -10,6 +10,7 @@ import {
 import { useAudioPlayer } from "../../lib/useAudioPlayer";
 import { useAudioRecorder } from "../../lib/useAudioRecorder";
 import { type WsServerMessage, useWebSocket } from "../../lib/useWebSocket";
+import { useLocale } from "../i18n/LocaleContext";
 import type { FinalizingStatus } from "./useChatSession";
 
 export type ChatMode = "text" | "voice";
@@ -35,6 +36,7 @@ interface VoiceModeHandlers {
 
 export function useVoiceMode(handlers: VoiceModeHandlers) {
 	const [chatMode, setChatMode] = useState<ChatMode>("text");
+	const { locale } = useLocale();
 
 	const audioPlayer = useAudioPlayer();
 
@@ -163,7 +165,7 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 		const sid = sessionId ?? crypto.randomUUID();
 		if (!sessionId) setSessionId(sid);
 		await audioPlayer.init();
-		ws.connect("default_user", sid);
+		ws.connect("default_user", sid, locale);
 	}
 
 	async function handleMicToggle() {
