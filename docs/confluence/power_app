@@ -1,0 +1,73 @@
+
+### File 3: `SPEC_PowerApp_Team.md`
+
+# SPEC: F&L Use Case Hub — Team Power App
+
+**Area:** Finance & Legal / F DDC / AI BP / DBP / BP / Developers
+**Target Platform:** Power Apps, SharePoint, Power Automate
+**Environment App:** [https://make.powerapps.com/e/026b8b99-5393-e5b2-a958-765adc6f370d/canvas/](https://www.google.com/search?q=https://make.powerapps.com/e/026b8b99-5393-e5b2-a958-765adc6f370d/canvas/)?...
+
+## 1. Context & Executive Summary
+
+Team Power App is building the **core foundation and structured frontend** of the F&L Use Case Hub. You are responsible for the Canvas App UI, the SharePoint List data architecture, role-based access logic, kanban workflows, and Power Automate notification triggers.
+
+## 2. Architecture & Data Model (SharePoint Lists)
+
+You must set up the business data layer to support the App, Power BI, and Copilot.
+**Main Entities / Lists:**
+
+* `UseCase` (Primary table: ID, Title, Dept, Requester, As-Is, To-Be, WSJF scores, Financials, Status, Delivery Team).
+* `Subtasks` & `Notes` (Linked to UseCase ID).
+* `StatusHistory` & `WSJFScoreHistory` (Audit logs).
+* `IntegrationDependencies` & `MLOpsTracking` (For specific tech requirements).
+
+## 3. Power App Functional Requirements
+
+### 3.1 Main Screens to Develop
+
+1. **Home/Landing:** Create button, search, "My items", blockers, BI/Copilot links.
+2. **Intake Form:** Structured form for new requests. Must generate UC-ID, handle attachments, and validate required fields (Title, Dept, As-is/To-be, Triggers, Systems, Impact).
+3. **Use Case Detail:** Tabs for Overview, Business description, Value/WSJF, Status history, Delivery/Kanban, Subtasks, Notes, Dependencies, MLOps.
+4. **Kanban Board:** Drag-and-drop status movement. Filters for department, owner, blockers.
+5. **Developer Workspace:** Subtasks, technical notes, JIRA links, dependencies.
+6. **Administration:** Reference data (Departments, Statuses, Solution types).
+
+### 3.2 Lifecycle Workflow & Routing
+
+* **Routing Logic:** Auto-suggest delivery teams based on Solution Type (e.g., *Power BI* routes to *F DDC / BI delivery lead*). Allow manual override.
+* **Kanban Statuses:** New Request -> Initial Review -> Assigned to Stream -> Running Business Analysis -> Running POC/POT -> Running Delivery -> Business Testing -> Production -> Done.
+* **Validations:** e.g., Moving to `Done` requires a closing note and business confirmation.
+
+## 4. Permissions & Logic
+
+* **Visibility:** Open by default, but attachments respect M365 data classifications.
+* **Edit Rights:**
+* *Initial Request:* Requester (pre-submission); DBP/BP (post-submission).
+* *Status/WSJF:* Delivery Leads, DDC, AI BP, DBP.
+* *Dev Notes:* Developers, Delivery Leads.
+
+
+
+## 5. Power Automate & Notifications
+
+You will build the flows supporting the app:
+
+* **Triggers:** New UC submitted, assigned to stream, status changes, blocked, monthly update due, marked done.
+* **Channels:** Teams notifications (operational), Email summaries (portfolio).
+* *Note:* Expose necessary endpoints/connectors so the Copilot Studio team can read/write data securely.
+
+## 6. User Stories
+
+* **MUST:** As a requester, I want to submit a request through a simple form.
+* **MUST:** As AI BP, I want to see all AI-related use cases and update status, priority, and next actions.
+* **MUST:** As a developer, I want a Kanban board to track subtasks, notes, and blockers.
+* **MUST:** As DBP, I want to validate strategic impact (WSJF).
+* **SHOULD:** As ML developer, I want MLOps fields to track model lifecycles.
+
+## 7. Definition of Done (Power App)
+
+* SharePoint data model is fully functional and supports relations.
+* Users can submit requests via Power App with proper validation and ID generation.
+* Kanban board, Subtasks, and Notes work seamlessly for developers.
+* Notifications fire correctly on status changes and monthly reviews.
+* Audit log captures changes reliably.
