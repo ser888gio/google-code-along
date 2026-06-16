@@ -23,3 +23,6 @@ frontend/.env.local
 .uv-cache/
 .venv/
 .vscode/
+
+# Diagram plugin ephemeral state
+.diagram/

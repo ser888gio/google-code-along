@@ -33,7 +33,7 @@ Return a JSON object with exactly this structure:
     "scope_in_out": "<In-scope: features, processes, reports, automations. "
                     "Out-of-scope: what we are consciously not doing now.>",
     "boundaries": "<Dependencies on other teams, ongoing projects, "
-                  "SME availability.>"
+                  "SOME availability.>"
   },
   "data_systems_integrations_access": {
     "data_systems": "<What data is needed, where does it come from, who "

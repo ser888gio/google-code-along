@@ -16,7 +16,7 @@
     "3. Scope — In/Out + Boundaries": {
       "questions": {
         "3.1 Scope — In/Out": "In-scope: features / processes / reports / automations. Out-of-scope (what we are consciously not doing now)",
-        "3.2 Boundaries": "Dependencies: other teams, ongoing projects, SME availability"
+        "3.2 Boundaries": "Dependencies: other teams, ongoing projects, SOME availability"
       }
     },
     "4. Data, Systems, Integrations & Access": {

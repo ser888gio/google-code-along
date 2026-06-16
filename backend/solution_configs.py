@@ -394,12 +394,12 @@ _MACHINE_LEARNING: SolutionConfig = {
     "kpis_and_metrics": {
         "expected_shape": ("Model performance metrics + business impact metrics."),
         "example_good": (
-            "Model accuracy: MAPE ≤ 15% on held-out test set. "
+            "Model accuracy: MAP ≤ 15% on held-out test set. "
             "Business impact: reduce overstock by 10%, stockouts by 15%. "
             "Retraining frequency: weekly."
         ),
         "rubric": [
-            "Names at least one model performance metric (MAPE, AUC, F1, RMSE)",
+            "Names at least one model performance metric (MAP, AUC, F1, RMSE)",
             "States the acceptance threshold for the metric",
             "Includes at least one business outcome metric",
         ],
@@ -450,12 +450,12 @@ _MACHINE_LEARNING: SolutionConfig = {
     },
     "acceptance_criteria": {
         "example_good": (
-            "MAPE ≤ 15% on 8-week holdout; no systematic bias by product category; "
+            "MAP ≤ 15% on 8-week holdout; no systematic bias by product category; "
             "model retrained and deployed weekly without manual intervention; "
             "planner override rate < 30%."
         ),
         "rubric": [
-            "States at least one quantitative acceptance threshold (MAPE, AUC, etc.)",
+            "States at least one quantitative acceptance threshold (MAP, AUC, etc.)",
             "States at least one operational condition (retraining, deployment, SLA)",
             "States at least one business acceptance condition",
         ],

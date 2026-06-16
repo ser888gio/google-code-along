@@ -98,7 +98,7 @@ def is_short_clarification_question(text: str) -> bool:
         "power",
         "department",
         "oddeleni",
-        "requestor",
+        "requester",
         "owner",
     ]
     return not any(term in normalized for term in fieldish_terms)
