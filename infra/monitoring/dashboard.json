@@ -14,29 +14,13 @@
             "dataSets": [
               {
                 "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/genai.client.ttft_seconds\"",
-                    "aggregation": {
-                      "alignmentPeriod": "60s",
-                      "perSeriesAligner": "ALIGN_PERCENTILE_50",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_50",
-                      "groupByFields": ["metric.label.model", "metric.label.phase"]
-                    }
-                  }
+                  "timeSeriesQueryLanguage": "fetch generic_task\n| metric 'workload.googleapis.com/genai.client.ttft_seconds'\n| align delta(1m)\n| every 1m\n| group_by [metric.model, metric.phase], [p50: percentile(value.genai_client_ttft_seconds, 50)]"
                 },
                 "plotType": "LINE"
               },
               {
                 "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/genai.client.ttft_seconds\"",
-                    "aggregation": {
-                      "alignmentPeriod": "60s",
-                      "perSeriesAligner": "ALIGN_PERCENTILE_95",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_95",
-                      "groupByFields": ["metric.label.model", "metric.label.phase"]
-                    }
-                  }
+                  "timeSeriesQueryLanguage": "fetch generic_task\n| metric 'workload.googleapis.com/genai.client.ttft_seconds'\n| align delta(1m)\n| every 1m\n| group_by [metric.model, metric.phase], [p95: percentile(value.genai_client_ttft_seconds, 95)]"
                 },
                 "plotType": "LINE"
               }
@@ -55,15 +39,7 @@
             "dataSets": [
               {
                 "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/genai.client.operation.duration_seconds\"",
-                    "aggregation": {
-                      "alignmentPeriod": "60s",
-                      "perSeriesAligner": "ALIGN_PERCENTILE_95",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_95",
-                      "groupByFields": ["metric.label.operation", "metric.label.status"]
-                    }
-                  }
+                  "timeSeriesQueryLanguage": "fetch generic_task\n| metric 'workload.googleapis.com/genai.client.operation.duration_seconds'\n| align delta(1m)\n| every 1m\n| group_by [metric.operation, metric.status], [p95: percentile(value.genai_client_operation_duration_seconds, 95)]"
                 },
                 "plotType": "LINE"
               }
@@ -108,15 +84,7 @@
             "dataSets": [
               {
                 "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/genai.client.token.usage\"",
-                    "aggregation": {
-                      "alignmentPeriod": "60s",
-                      "perSeriesAligner": "ALIGN_RATE",
-                      "crossSeriesReducer": "REDUCE_SUM",
-                      "groupByFields": ["metric.label.feature", "metric.label.type"]
-                    }
-                  }
+                  "timeSeriesQueryLanguage": "fetch generic_task\n| metric 'workload.googleapis.com/genai.client.token.usage'\n| align delta(1m)\n| every 1m\n| group_by [metric.feature, metric.type], [tokens: sum(value.genai_client_token_usage)]"
                 },
                 "plotType": "STACKED_BAR"
               }
@@ -184,24 +152,10 @@
         "width": 4,
         "height": 4,
         "widget": {
-          "title": "Cost - session duration",
-          "xyChart": {
-            "dataSets": [
-              {
-                "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/rs.session.duration_seconds\"",
-                    "aggregation": {
-                      "alignmentPeriod": "300s",
-                      "perSeriesAligner": "ALIGN_PERCENTILE_95",
-                      "crossSeriesReducer": "REDUCE_PERCENTILE_95",
-                      "groupByFields": ["metric.label.outcome"]
-                    }
-                  }
-                },
-                "plotType": "LINE"
-              }
-            ]
+          "title": "Operations - emitted on specific flows",
+          "text": {
+            "content": "Some product and safety metrics are created only after their flows run: feedback votes, session completion, safety finish reasons, cost circuit trips, injection attempts, and anomalous sessions. If a metric descriptor has not been created yet, chart widgets that query it show an error. Add those charts after the first data point exists.",
+            "format": "MARKDOWN"
           }
         }
       },
@@ -209,132 +163,12 @@
         "xPos": 0,
         "yPos": 12,
         "width": 12,
-        "height": 2,
+        "height": 4,
         "widget": {
-          "title": "Quality - roadmap",
+          "title": "Quality, UX, and safety roadmap",
           "text": {
-            "content": "Groundedness, hallucination rate, field completeness, and citation accuracy require evaluator metrics that are not emitted yet.",
+            "content": "Groundedness, hallucination rate, field completeness, and citation accuracy require evaluator metrics that are not emitted yet. Optional emitted-later metrics include `workload.googleapis.com/rs.feedback.vote`, `workload.googleapis.com/rs.session.completion_total`, `workload.googleapis.com/rs.safety.finish_reason_safety`, `workload.googleapis.com/rs.safety.cost_circuit_tripped`, and `workload.googleapis.com/rs.safety.injection_attempt_total`.",
             "format": "MARKDOWN"
-          }
-        }
-      },
-      {
-        "xPos": 0,
-        "yPos": 14,
-        "width": 6,
-        "height": 4,
-        "widget": {
-          "title": "UX - feedback votes",
-          "xyChart": {
-            "dataSets": [
-              {
-                "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/rs.feedback.vote\"",
-                    "aggregation": {
-                      "alignmentPeriod": "300s",
-                      "perSeriesAligner": "ALIGN_RATE",
-                      "crossSeriesReducer": "REDUCE_SUM",
-                      "groupByFields": ["metric.label.vote", "metric.label.phase"]
-                    }
-                  }
-                },
-                "plotType": "STACKED_BAR"
-              }
-            ]
-          }
-        }
-      },
-      {
-        "xPos": 6,
-        "yPos": 14,
-        "width": 6,
-        "height": 4,
-        "widget": {
-          "title": "UX - completion outcome",
-          "xyChart": {
-            "dataSets": [
-              {
-                "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/rs.session.completion_total\"",
-                    "aggregation": {
-                      "alignmentPeriod": "3600s",
-                      "perSeriesAligner": "ALIGN_RATE",
-                      "crossSeriesReducer": "REDUCE_SUM",
-                      "groupByFields": ["metric.label.outcome"]
-                    }
-                  }
-                },
-                "plotType": "STACKED_BAR"
-              }
-            ]
-          }
-        }
-      },
-      {
-        "xPos": 0,
-        "yPos": 18,
-        "width": 6,
-        "height": 4,
-        "widget": {
-          "title": "Safety - model safety finish reasons",
-          "xyChart": {
-            "dataSets": [
-              {
-                "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/rs.safety.finish_reason_safety\"",
-                    "aggregation": {
-                      "alignmentPeriod": "300s",
-                      "perSeriesAligner": "ALIGN_RATE",
-                      "crossSeriesReducer": "REDUCE_SUM",
-                      "groupByFields": ["metric.label.model"]
-                    }
-                  }
-                },
-                "plotType": "LINE"
-              }
-            ]
-          }
-        }
-      },
-      {
-        "xPos": 6,
-        "yPos": 18,
-        "width": 6,
-        "height": 4,
-        "widget": {
-          "title": "Safety - cost circuit trips and log failures",
-          "xyChart": {
-            "dataSets": [
-              {
-                "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"workload.googleapis.com/rs.safety.cost_circuit_tripped\"",
-                    "aggregation": {
-                      "alignmentPeriod": "300s",
-                      "perSeriesAligner": "ALIGN_RATE",
-                      "crossSeriesReducer": "REDUCE_SUM"
-                    }
-                  }
-                },
-                "plotType": "LINE"
-              },
-              {
-                "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"logging.googleapis.com/user/bridge_injection_failure_total\"",
-                    "aggregation": {
-                      "alignmentPeriod": "300s",
-                      "perSeriesAligner": "ALIGN_RATE",
-                      "crossSeriesReducer": "REDUCE_SUM"
-                    }
-                  }
-                },
-                "plotType": "LINE"
-              }
-            ]
           }
         }
       }

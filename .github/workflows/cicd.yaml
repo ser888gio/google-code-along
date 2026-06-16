@@ -41,9 +41,12 @@ jobs:
             frontend:
               - '.github/workflows/cicd.yaml'
               - 'frontend/**'
+            monitoring:
+              - '.github/workflows/cicd.yaml'
+              - 'infra/monitoring/dashboard.json'
 
       - name: Authenticate to Google Cloud
-        if: steps.changes.outputs.backend == 'true' || steps.changes.outputs.frontend == 'true'
+        if: steps.changes.outputs.backend == 'true' || steps.changes.outputs.frontend == 'true' || steps.changes.outputs.monitoring == 'true'
         id: auth
         uses: google-github-actions/auth@v3.0.0
         with:
@@ -51,7 +54,7 @@ jobs:
           service_account: '${{ secrets.SA_EMAIL }}'
 
       - name: Set up Cloud SDK
-        if: steps.changes.outputs.backend == 'true' || steps.changes.outputs.frontend == 'true'
+        if: steps.changes.outputs.backend == 'true' || steps.changes.outputs.frontend == 'true' || steps.changes.outputs.monitoring == 'true'
         uses: google-github-actions/setup-gcloud@v3.0.1
 
       - name: Configure Docker Auth for Artifact Registry
@@ -62,6 +65,31 @@ jobs:
       - name: Set up Docker Buildx
         if: steps.changes.outputs.backend == 'true' || steps.changes.outputs.frontend == 'true'
         uses: docker/setup-buildx-action@v3
+
+      # ==========================================
+      # 0. CLOUD MONITORING DASHBOARD
+      # ==========================================
+      - name: Create or Update Cloud Monitoring Dashboard
+        if: steps.changes.outputs.monitoring == 'true'
+        run: |-
+          tmp_dashboard="$(mktemp)"
+          sed 's/BACKEND_SERVICE_NAME/business-persona-ai-backend/g' infra/monitoring/dashboard.json > "$tmp_dashboard"
+
+          dashboard_id="$(gcloud monitoring dashboards list \
+            --project="${{ env.PROJECT_ID }}" \
+            --filter='displayName="RS Generator - Phase 6 SLIs"' \
+            --format='value(name)' \
+            | head -n 1)"
+
+          if [ -n "$dashboard_id" ]; then
+            gcloud monitoring dashboards update "$dashboard_id" \
+              --project="${{ env.PROJECT_ID }}" \
+              --config-from-file="$tmp_dashboard"
+          else
+            gcloud monitoring dashboards create \
+              --project="${{ env.PROJECT_ID }}" \
+              --config-from-file="$tmp_dashboard"
+          fi
 
       # ==========================================
       # 1. BACKEND SERVICE (europe-west4)
