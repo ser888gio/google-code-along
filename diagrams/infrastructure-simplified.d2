@@ -1,0 +1,43 @@
+direction: down
+
+# ---------------------------------------------------------------------------
+# RS Generator - Infrastructure Overview (Simplified)
+# Google Cloud, project vw-skda-fskoda-sandbox-jzf, europe-west4
+# ---------------------------------------------------------------------------
+
+user: User Browser {
+  class: users
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+}
+
+github: "CI/CD (GitHub Actions + Artifact Registry)" {
+  icon: https://icons.terrastruct.com/dev%2Fdocker.svg
+}
+
+gemini: "Gemini API (LLM, direct key)" {class: cloud}
+
+gcp: GCP - europe-west4 {
+  frontend: "Frontend Service (Cloud Run, Node.js)" {
+    icon: https://icons.terrastruct.com/dev%2Fnodejs.svg
+  }
+  backend: "Backend Service (Cloud Run, Python/FastAPI)" {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+  jobs: "Safety Jobs (Cloud Run Jobs)" {class: rectangle}
+  firestore: "Firestore (session state)" {class: cylinder}
+  gcs: "GCS (files + artifacts)" {class: cylinder}
+  bigquery: "BigQuery (observability analytics)" {class: cylinder}
+}
+
+# --- Flows -------------------------------------------------------------------
+user -> gcp.frontend: "HTTPS (UI)"
+user -> gcp.backend: "HTTPS + WSS"
+gcp.frontend -> gcp.backend: API wiring
+gcp.backend -> gemini: inference
+gcp.backend -> gcp.firestore: read/write
+gcp.backend -> gcp.gcs: read/write
+gcp.firestore -> gcp.bigquery: "export -> views" {style.stroke-dash: 4}
+gcp.jobs -> gcp.bigquery: "anomaly metrics" {style.stroke-dash: 4}
+gcp.backend -> gcp.bigquery: admin metrics
+github -> gcp.backend: "build + deploy" {style.stroke-dash: 4}
+github -> gcp.frontend: "build + deploy" {style.stroke-dash: 4}

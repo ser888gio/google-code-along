@@ -1,0 +1,120 @@
+direction: down
+
+# ---------------------------------------------------------------------------
+# How RsLiveTemplate is updated during user interaction
+# Source: frontend/app/hooks/useRsState.ts, useRsExtraction.ts,
+#         frontend/app/page.tsx, backend/api/discovery.py
+# ---------------------------------------------------------------------------
+
+user: User {
+  class: users
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+}
+
+# ----- Frontend (Next.js) --------------------------------------------------
+frontend: Frontend - Next.js / React {
+  icon: https://icons.terrastruct.com/dev%2Fnodejs.svg
+
+  # The panel being updated (render target)
+  rstemplate: "RsLiveTemplate (render target)" {
+    class: rectangle
+    style.fill: "#dff0e3"
+    header: "CompletenessHeader (bar + status)" {class: rectangle}
+    cards: "FieldCard list (value / suggestion)" {class: rectangle}
+    banner: "isExtracting -> processing banner" {class: rectangle}
+    toast: "recentlyChangedKeys -> updated toast" {class: rectangle}
+  }
+
+  page: "page.tsx handleSend + streamChat callbacks" {class: rectangle}
+
+  ext: "useRsExtraction (nonce guard + isExtracting)" {class: rectangle}
+
+  # State core - every path converges here
+  state: "useRsState (state core)" {
+    style.fill: "#fff3d6"
+    apply: "applyExtraction(): diff vs latestFieldsRef, merge, set" {class: rectangle}
+    setuser: "setUserField(): optimistic + 600ms debounced PATCH" {class: rectangle}
+    accept: "acceptSuggestion / dismissSuggestion" {class: rectangle}
+    direct: "applyDirectChatAnswer / applyUploadAttachments" {class: rectangle}
+    hydrate: "hydrateFromSession (load saved session)" {class: rectangle}
+    fields: "fields + recentlyChangedKeys (useState)" {
+      class: rectangle
+      style.fill: "#ffe0a3"
+    }
+    completeness: "completeness (useMemo over required fields)" {class: rectangle}
+  }
+
+  api: "lib/api.ts (HTTP client)" {class: rectangle}
+}
+
+# ----- Backend + cloud -----------------------------------------------------
+backend: Backend - FastAPI (discovery router) {
+  icon: https://icons.terrastruct.com/dev%2Fpython.svg
+
+  extract_ep: "POST /context/extract (per-session dedup lock)" {class: rectangle}
+  patch_ep: "PATCH /discovery/{id}/rs-field-state" {class: rectangle}
+  agent: "Discovery extractor (extract_discovery_fields)" {class: rectangle}
+  compose: "compose_rs_field_view (merge AI + accepted)" {class: rectangle}
+}
+
+gemini: "Gemini Flash Lite" {class: cloud}
+firestore: "Firestore - discovery_state + rs_field_state" {class: cylinder}
+
+# ===========================================================================
+# Path A - AI extraction after a chat turn (the main loop)
+# ===========================================================================
+user -> page: "1. send message"
+page -> ext: "2. stream done -> beginExtraction() (isExtracting=true, nonce++)"
+ext -> api: "3. extractContext(sessionId)"
+api -> backend.extract_ep: "4. POST /context/extract"
+backend.extract_ep -> backend.agent
+backend.agent -> gemini: "5. extract 28 fields" {style.stroke-dash: 4}
+backend.extract_ep -> firestore: "6. upsert_discovery_state" {style.stroke-dash: 4}
+backend.extract_ep -> backend.compose: "7. merge"
+backend.compose -> api: "8. ContextResponse (merged fields + completeness)"
+backend.compose -> firestore: "read rs_field_state"
+api -> ext: "9. RsPartialData"
+ext -> state.apply: "10. applyExtraction(partial) (only if nonce current)"
+
+# ===========================================================================
+# Path B - inline SSE field_updates streamed during the turn
+# ===========================================================================
+page -> state.apply: "onFieldUpdate (SSE) -> applyExtraction(field_updates)" {style.stroke-dash: 4}
+
+# ===========================================================================
+# Path C - manual edit in a FieldCard
+# ===========================================================================
+user -> rstemplate.cards: "type value / edit"
+rstemplate.cards -> state.setuser: "onFieldChange(key, value)"
+state.setuser -> state.fields: "optimistic setFields (source=user_manual)"
+state.setuser -> api: "debounced PATCH accept/clear" {style.stroke-dash: 4}
+
+# ===========================================================================
+# Path D - accept / dismiss an AI suggestion
+# ===========================================================================
+user -> rstemplate.cards: "click Accept / Dismiss"
+rstemplate.cards -> state.accept: "acceptSuggestion / dismissSuggestion(key)"
+state.accept -> state.fields: "setFields (clear pendingSuggestion)"
+state.accept -> api: "PATCH rs-field-state" {style.stroke-dash: 4}
+
+# Manual / accept / direct PATCHes all hit the same endpoint and feed back in
+api -> backend.patch_ep: "accept / dismiss / clear"
+backend.patch_ep -> firestore: "accept_rs_fields / dismiss / clear" {style.stroke-dash: 4}
+backend.patch_ep -> backend.compose
+api -> state.apply: "merged view -> applyExtraction(merged)"
+
+# ===========================================================================
+# Path E - load a saved session (no diff, no toast)
+# ===========================================================================
+page -> state.hydrate: "on session load -> hydrateFromSession(partial)"
+state.hydrate -> state.fields: "setFields directly"
+
+# ===========================================================================
+# Core re-render - all paths converge on fields, driving the panel
+# ===========================================================================
+state.apply -> state.fields: "setFields + setRecentlyChangedKeys"
+state.direct -> state.fields: "setFields"
+state.fields -> state.completeness: "recompute"
+state.fields -> rstemplate: "state prop -> re-render" {style.stroke-width: 3}
+state.completeness -> rstemplate.header: "completeness prop"
+ext -> rstemplate.banner: "isExtracting prop"

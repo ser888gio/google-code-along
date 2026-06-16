@@ -4,10 +4,28 @@ Monorepo for the AI-Assisted Requirement Specification Generator.
 
 An interactive AI persona that guides business users through defining their needs and automatically generates coherent, standardized Requirement Specification (RS) documents, complete with auto-generated system diagrams. </br>
 
+## System Overview
+
+### Infrastructure
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/infrastructure-simplified-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./diagrams/infrastructure-simplified-light.svg">
+  <img alt="Infrastructure Overview" src="./diagrams/infrastructure-simplified-light.svg">
+</picture>
+
+### Architecture
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/architecture-simplified-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./diagrams/architecture-simplified-light.svg">
+  <img alt="Architecture Overview" src="./diagrams/architecture-simplified-light.svg">
+</picture>
+
+[More diagrams →](./diagrams/README.md)
+
 ## Features
 
-- **Conversational Discovery:** Chat with an expert Discovery Agent (Google ADK + Gemini 2.5 Pro) to map out "As-Is" and "To-Be" specifications.
-- **Live RS Template:** A sidebar panel tracks and fills all 22 RS fields across 6 sections in real time as the conversation progresses.
+- **Conversational Discovery:** Chat with an expert Discovery Agent (Google ADK + Gemini 3.1 Pro) to map out "As-Is" and "To-Be" specifications.
+- **Live RS Template:** A sidebar panel tracks and fills all 28 RS fields across 6 sections in real time as the conversation progresses.
 - **Automated Diagramming:** Generates BPMN and Dataflow diagrams from conversational context, rendered client-side with Mermaid.js.
 - **Document Export:** Compiles the session into standard PDF and Word (DOCX) outputs.
 - **Firestore Persistence:** Session state and RS fields are synced continuously to Firestore so progress survives page reloads.
@@ -29,7 +47,7 @@ An interactive AI persona that guides business users through defining their need
 
 ## RS Field Schema
 
-All 22 RS fields (across 6 sections) are defined once in `backend/field_schema.py`. The frontend TypeScript types and constants are generated from this file — **never edit `frontend/app/generated/rsSchema.ts` by hand**.
+All 28 RS fields (across 6 sections) are defined once in `backend/field_schema.py`. The frontend TypeScript types and constants are generated from this file — **never edit `frontend/app/generated/rsSchema.ts` by hand**.
 
 To regenerate after changing `field_schema.py`:
 

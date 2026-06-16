@@ -110,7 +110,7 @@ backend.engine.turn -> backend.adk.orchestrator: hidden context + active field
 backend.adk.orchestrator -> gemini: inference
 backend.adk.orchestrator -> backend.adk.tools
 backend.adk.tools -> gcs: keyword search
-backend.adk.orchestrator -> backend.api.chat_r: stream text + [FINALIZING]
+backend.adk.orchestrator -> backend.api.chat_r: "stream text + [FINALIZING]"
 
 # Voice flow
 backend.api.ws_r -> backend.adk.audio
@@ -118,15 +118,15 @@ backend.adk.audio -> gemini: Live audio
 backend.adk.audio -> backend.adk.orchestrator: transcript bridge
 
 # Background extraction (async)
-backend.api.extract_r -> backend.bg.discovery {style.stroke-dash: 4}
-backend.bg.discovery -> gemini: extract 28 fields {style.stroke-dash: 4}
-backend.bg.discovery -> backend.persist.fs_writer {style.stroke-dash: 4}
+backend.api.extract_r -> backend.bg.discovery: {style.stroke-dash: 4}
+backend.bg.discovery -> gemini: "extract 28 fields" {style.stroke-dash: 4}
+backend.bg.discovery -> backend.persist.fs_writer: {style.stroke-dash: 4}
 
 # Finalization (async background task)
-backend.engine.turn -> backend.bg.finalizer: on [FINALIZING] {style.stroke-dash: 4}
-backend.bg.finalizer -> gemini: synthesize {style.stroke-dash: 4}
-backend.bg.finalizer -> gcs: final_analysis.json {style.stroke-dash: 4}
-backend.bg.finalizer -> backend.persist.fs_writer {style.stroke-dash: 4}
+backend.engine.turn -> backend.bg.finalizer: "on [FINALIZING]" {style.stroke-dash: 4}
+backend.bg.finalizer -> gemini: "synthesize" {style.stroke-dash: 4}
+backend.bg.finalizer -> gcs: "final_analysis.json" {style.stroke-dash: 4}
+backend.bg.finalizer -> backend.persist.fs_writer: {style.stroke-dash: 4}
 
 # Generation
 backend.api.docs_r -> backend.gen.docs_gen
