@@ -63,7 +63,6 @@ Required GitHub Actions secrets:
 |---|---|
 | `WIF_PROVIDER` | Full Workload Identity Provider resource name |
 | `SA_EMAIL` | Service account email that the pipeline impersonates |
-| `ADMIN_BEARER_TOKEN` | Static bearer token baked into the frontend build for admin API calls |
 
 Required GCP Secret Manager secrets referenced by the workflow:
 
@@ -73,7 +72,6 @@ Required GCP Secret Manager secrets referenced by the workflow:
 | `GCS_BUCKET_NAME` | `GCS_BUCKET_NAME` |
 | `FIRESTORE_COLLECTION` | `FIRESTORE_COLLECTION` |
 | `FIRESTORE_DATABASE` | `FIRESTORE_DATABASE` |
-| `ADMIN_BEARER_TOKEN` | `ADMIN_BEARER_TOKEN` |
 
 The CI workflow also sets these backend runtime environment variables directly:
 
@@ -149,7 +147,6 @@ It does **not** build locally with `docker build`; the local Docker daemon is no
 - Artifact Registry repository available or creatable.
 - Required APIs enabled.
 - Runtime secrets and environment variables configured.
-- `ADMIN_BEARER_TOKEN` exported locally if admin auth should work and if the frontend image should receive the admin token build arg.
 
 ### Manual Deployment Caveats
 
@@ -160,7 +157,6 @@ GCS_BUCKET_NAME=<PROJECT_ID>-bucket
 GOOGLE_CLOUD_PROJECT=<PROJECT_ID>
 APP_ENV=production
 BIGQUERY_DATASET=observability
-ADMIN_BEARER_TOKEN=<optional local env var>
 ```
 
 Production startup also requires:
@@ -206,8 +202,6 @@ FROM node:22-alpine AS runner
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:8080
 ARG NEXT_PUBLIC_WS_URL=ws://localhost:8080
-ARG NEXT_PUBLIC_ADMIN_API_TOKEN=
-
 EXPOSE 3000
 CMD ["node", "server.js"]
 ```
@@ -315,7 +309,6 @@ Backend runtime configuration:
 | `GCS_BUCKET_NAME` | Secret Manager | Required in production |
 | `FIRESTORE_COLLECTION` | Secret Manager | Required in production |
 | `FIRESTORE_DATABASE` | Secret Manager | Required in production |
-| `ADMIN_BEARER_TOKEN` | Secret Manager | Required for production admin bearer auth |
 | `GOOGLE_CLOUD_PROJECT` | Env var | Required for Firestore, BigQuery, trace links |
 | `APP_ENV` | Env var | Set to `production` |
 | `BIGQUERY_DATASET` | Env var | Defaults to `observability` |
@@ -328,8 +321,6 @@ Frontend build-time configuration:
 |---|---|
 | `NEXT_PUBLIC_API_URL` | Backend Cloud Run HTTPS URL |
 | `NEXT_PUBLIC_WS_URL` | Backend WebSocket URL, usually `wss://<backend-host>` |
-| `NEXT_PUBLIC_ADMIN_API_TOKEN` | Admin bearer token sent by frontend admin pages |
-
 Because these are `NEXT_PUBLIC_*` values, they are visible in the browser bundle. Do not put private server-only secrets in frontend build args.
 
 ---
@@ -407,7 +398,6 @@ echo -n "your-gemini-api-key" | gcloud secrets create GOOGLE_API_KEY --data-file
 echo -n "your-bucket-name" | gcloud secrets create GCS_BUCKET_NAME --data-file=-
 echo -n "srs_sessions" | gcloud secrets create FIRESTORE_COLLECTION --data-file=-
 echo -n "your-firestore-database" | gcloud secrets create FIRESTORE_DATABASE --data-file=-
-echo -n "your-admin-token" | gcloud secrets create ADMIN_BEARER_TOKEN --data-file=-
 ```
 
 To update an existing secret:
@@ -445,8 +435,8 @@ Runtime Cloud Run service account:
 | `roles/datastore.user` | Firestore read/write |
 | `roles/storage.objectAdmin` | GCS uploads, generated docs, final analysis JSON |
 | `roles/secretmanager.secretAccessor` | Secret Manager runtime secrets |
-| `roles/bigquery.jobUser` | Run admin BigQuery queries |
-| BigQuery dataset-level data viewer/editor as appropriate | Read admin views and write observability/anomaly outputs if used |
+| `roles/bigquery.jobUser` | Run BigQuery observability and safety queries |
+| BigQuery dataset-level data viewer/editor as appropriate | Read observability views and write anomaly outputs if used |
 | `roles/logging.logWriter` | Cloud Logging, usually covered by default service identity behavior |
 | `roles/cloudtrace.agent` | Export traces to Cloud Trace |
 | `roles/monitoring.metricWriter` | Export custom metrics to Cloud Monitoring |
@@ -491,9 +481,9 @@ firestore_unavailable_total
 bridge_injection_failure_total
 ```
 
-### BigQuery Admin and Observability Views
+### BigQuery Observability Views
 
-The admin UI expects these views by default:
+Observability and safety analysis use these views by default:
 
 ```text
 {PROJECT_ID}.observability.messages
@@ -626,15 +616,6 @@ Verify that `GOOGLE_API_KEY` is valid and the Gemini API is enabled:
 ```bash
 gcloud services enable generativelanguage.googleapis.com
 ```
-
-### Admin Pages Return BigQuery Errors
-
-Confirm that:
-
-- Firestore-to-BigQuery export extension instances are installed.
-- `messages` and `feedback` views exist in `BIGQUERY_DATASET`.
-- `BIGQUERY_MESSAGES_VIEW` and `BIGQUERY_FEEDBACK_VIEW` are correct if overriding defaults.
-- The backend runtime service account can run BigQuery jobs and read the dataset/views.
 
 ### Live Session Context Is Lost
 

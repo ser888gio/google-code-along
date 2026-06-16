@@ -61,6 +61,12 @@ session_duration_histogram = _meter.create_histogram(
     unit="s",
 )
 
+field_completeness_histogram = _meter.create_histogram(
+    name="rs.discovery.field.completeness_ratio",
+    description="Discovery completeness ratio (0-1) sampled after each field extraction.",
+    unit="ratio",
+)
+
 # ---------------------------------------------------------------------------
 # Counters
 # ---------------------------------------------------------------------------
@@ -104,6 +110,12 @@ prompt_injection_attempt_counter = _meter.create_counter(
 anomalous_session_counter = _meter.create_counter(
     name="rs.safety.anomalous_session",
     description="Sessions flagged for anomalous token or cost usage.",
+    unit="events",
+)
+
+finalization_status_counter = _meter.create_counter(
+    name="rs.finalization.status_total",
+    description="Finalization pipeline outcomes (success or error) per session.",
     unit="events",
 )
 
@@ -200,6 +212,17 @@ def record_session_duration(seconds: float, *, outcome: str) -> None:
 
 def record_session_completion(*, outcome: str) -> None:
     session_completion_counter.add(1, attributes={"outcome": outcome})
+
+
+def record_field_completeness(completeness_percent: int) -> None:
+    """Record the discovery completeness score (0-100) as a 0-1 ratio sample."""
+    ratio = max(0.0, min(1.0, completeness_percent / 100))
+    field_completeness_histogram.record(ratio)
+
+
+def record_finalization_status(*, status: str) -> None:
+    """status: 'success' | 'error'"""
+    finalization_status_counter.add(1, attributes={"status": status})
 
 
 def record_cache_hit_ratio(

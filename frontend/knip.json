@@ -1,13 +1,9 @@
 {
-  "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreDependencies": [
-    "postcss"
-  ],
-  "ignore": [
-    "public/pcm-player-processor.js",
-    "public/pcm-recorder-processor.js"
-  ],
-  "tags": [
-    "-lintignore"
-  ]
+	"$schema": "https://unpkg.com/knip@6/schema.json",
+	"ignoreDependencies": ["postcss"],
+	"ignore": [
+		"public/pcm-player-processor.js",
+		"public/pcm-recorder-processor.js"
+	],
+	"tags": ["-lintignore"]
 }

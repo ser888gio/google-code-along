@@ -2,7 +2,7 @@
 
 ## Overview
 
-The backend is a Python 3.12 FastAPI service that runs the conversational RS assistant, manages session state, stores uploaded artifacts, extracts RS template fields, generates diagrams and documents, and exposes admin/observability endpoints for the frontend.
+The backend is a Python 3.12 FastAPI service that runs the conversational RS assistant, manages session state, stores uploaded artifacts, extracts RS template fields, generates diagrams and documents, and exposes observability instrumentation for the frontend and platform.
 
 The service uses Google ADK for the main chat and audio agents. Some specialized jobs call Gemini directly through `google.genai.Client(api_key=GOOGLE_API_KEY)`, including discovery extraction, finalization, BPMN generation, and dataflow generation. Vertex AI inference is explicitly disabled through `GOOGLE_GENAI_USE_VERTEXAI=0`.
 
@@ -18,7 +18,7 @@ The service uses Google ADK for the main chat and audio agents. Some specialized
 | google-generativeai | 0.8.6 | Gemini dependency/client package |
 | google-cloud-firestore | 2.27.0 | Session, discovery, feedback, and analysis persistence |
 | google-cloud-storage | 3.4.1 | Uploads, generated artifacts, and knowledge base files |
-| google-cloud-bigquery | 3.41.0 | Admin metrics/session queries |
+| google-cloud-bigquery | 3.41.0 | Safety and observability queries |
 | python-multipart | 0.0.27 | Multipart upload handling |
 | reportlab | 4.4.10 | PDF generation |
 | python-docx | 1.2.0 | DOCX generation |
@@ -39,7 +39,6 @@ backend/
 |   |-- finalizer_agent.py    # Final analysis synthesis
 |   |-- prompt.py             # Orchestrator system prompt
 |   `-- research_agent.py     # Knowledge base / past analysis tools
-|-- admin_sessions.py         # Admin metrics and session detail queries
 |-- answer_classifier.py      # Detects whether a user answered the active field
 |-- answer_quality.py         # Scores field-answer quality
 |-- audio_websocket.py        # Gemini Live API WebSocket bridge
@@ -91,7 +90,7 @@ backend/
 
 ## Runtime Configuration
 
-`config.py` loads `.env` on import. The checked-in `backend/.env.example` currently lists only the core local variables, so deployment environments must also provide the optional production/admin variables below when needed.
+`config.py` loads `.env` on import. The checked-in `backend/.env.example` currently lists only the core local variables, so deployment environments must also provide optional production variables below when needed.
 
 | Variable | Required | Default | Used for |
 |---|---|---|---|
@@ -101,11 +100,10 @@ backend/
 | `FIRESTORE_COLLECTION` | Production/staging | None | Main session collection |
 | `FIRESTORE_DATABASE` | Production/staging | None | Firestore database ID |
 | `ALLOWED_ORIGINS` | No | `http://localhost:3000` | CORS allow-list, comma-separated |
-| `APP_ENV` / `ENVIRONMENT` | No | `development` | Startup validation and admin auth behavior |
-| `ADMIN_BEARER_TOKEN` | Production/staging admin access | None | Static bearer token fallback for admin API |
-| `BIGQUERY_DATASET` | No | `observability` | Admin BigQuery dataset |
-| `BIGQUERY_MESSAGES_VIEW` | No | `{project}.{dataset}.messages` | Admin session/message view |
-| `BIGQUERY_FEEDBACK_VIEW` | No | `{project}.{dataset}.feedback` | Admin feedback view |
+| `APP_ENV` / `ENVIRONMENT` | No | `development` | Startup validation behavior |
+| `BIGQUERY_DATASET` | No | `observability` | BigQuery dataset for safety and observability queries |
+| `BIGQUERY_MESSAGES_VIEW` | No | `{project}.{dataset}.messages` | Message view for analysis queries |
+| `BIGQUERY_FEEDBACK_VIEW` | No | `{project}.{dataset}.feedback` | Feedback view for analysis queries |
 | `COST_CIRCUIT_BREAKER_USD` | No | `5.0` | Per-session in-memory cost limit |
 | `GOOGLE_CLOUD_AUDIO_REGION` | No | `europe-west1` | Audio-region constant |
 | `GOOGLE_CLOUD_REGION` | In `.env.example` | None | Present in example; not read directly by `config.py` |
@@ -114,7 +112,6 @@ Startup validation is environment-dependent:
 
 - In `development`, only `GOOGLE_API_KEY` is mandatory. Missing GCP, GCS, or Firestore variables produce warnings and fail only when those integrations are used.
 - In `staging` or `production`, `GOOGLE_API_KEY`, `GOOGLE_CLOUD_PROJECT`, `GCS_BUCKET_NAME`, `FIRESTORE_COLLECTION`, and `FIRESTORE_DATABASE` are required.
-- Admin endpoints allow access without `ADMIN_BEARER_TOKEN` only in non-production environments. Production/staging requires either a valid IAP header or `Authorization: Bearer <ADMIN_BEARER_TOKEN>`.
 
 ## Model Configuration
 
@@ -283,18 +280,13 @@ Uploaded filenames are sanitized and stored under `sessions/{session_id}/{filena
 
 `/document/rs-template/docx` saves `sessions/{session_id}/rs_template.docx` in GCS and returns the file with `X-GCS-Path`.
 
-### Feedback and Admin
+### Feedback
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/feedback` | Creates message-level feedback |
 | `PATCH` | `/feedback/{message_id}` | Updates message-level feedback |
 | `POST` | `/feedback/session` | Stores session-level rating/comment and closes the session |
-| `GET` | `/admin/metrics` | BigQuery-backed aggregate metrics |
-| `GET` | `/admin/sessions` | BigQuery-backed admin session list; supports `limit` and `filter=thumbs_down` |
-| `GET` | `/admin/sessions/{session_id}` | BigQuery-backed admin session detail |
-
-Admin endpoints are protected by IAP headers or bearer token in production/staging.
 
 ## Main Chat Flow
 
@@ -414,7 +406,7 @@ The same module keeps an in-memory per-session cost accumulator and blocks reque
 - `observability/metrics.py` defines counters/histograms for turns, feedback, tokens, costs, safety blocks, and generation events.
 - `observability/tracing.py` configures tracing.
 - `observability/callbacks.py` wires ADK callbacks into logging/metrics.
-- `admin_sessions.py` queries BigQuery views for admin dashboard metrics and session detail.
+- `observability/safety_anomalies.py` queries BigQuery views for anomaly detection helpers.
 
 ### Privacy
 
@@ -447,7 +439,7 @@ From the repository root, install dependencies with `uv`:
 uv sync
 ```
 
-Create `backend/.env` from `backend/.env.example` and fill in at least `GOOGLE_API_KEY`. GCP, GCS, and Firestore variables are needed for persistence, uploads, finalization storage, admin queries, and most full-stack flows.
+Create `backend/.env` from `backend/.env.example` and fill in at least `GOOGLE_API_KEY`. GCP, GCS, and Firestore variables are needed for persistence, uploads, finalization storage, and most full-stack flows.
 
 Run the backend with the active virtual environment:
 
@@ -514,5 +506,5 @@ Notable test files:
 - `/context/extract` can return persisted Firestore discovery when ADK session state is missing.
 - Upload finalization includes plain text-like files directly, but PDFs and Office files are currently listed rather than parsed by `run_finalizer()`.
 - `GOOGLE_CLOUD_REGION` is present in `.env.example`, while `config.py` defines `GOOGLE_CLOUD_AUDIO_REGION` for the audio-region constant.
-- `ADMIN_BEARER_TOKEN`, `BIGQUERY_*`, `COST_CIRCUIT_BREAKER_USD`, `APP_ENV`, `ENVIRONMENT`, and `GOOGLE_CLOUD_AUDIO_REGION` are used by code but are not currently included in `.env.example`.
+- `BIGQUERY_*`, `COST_CIRCUIT_BREAKER_USD`, `APP_ENV`, `ENVIRONMENT`, and `GOOGLE_CLOUD_AUDIO_REGION` are used by code but are not currently included in `.env.example`.
 - `MODEL_RESEARCH` is configured, but current research tools are deterministic GCS helper functions rather than model calls.

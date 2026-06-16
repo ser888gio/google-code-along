@@ -50,6 +50,7 @@ from observability.cost import compute_cost
 from observability.metrics import (
     record_cache_hit_ratio,
     record_cost,
+    record_finalization_status,
     record_operation_duration,
     record_tokens,
 )
@@ -284,10 +285,12 @@ async def run_finalizer(
         result = _add_finalizer_metadata(result, session_id, discovery_fields)
         await _persist_finalizer_result(session_id, result)
 
+        record_finalization_status(status="success")
         logger.info(f"Finalizer complete: session_id={session_id}")
         return result
 
     except Exception as exc:
+        record_finalization_status(status="error")
         logger.error(f"Finalizer failed: session_id={session_id} error={exc}")
         await _mark_finalizer_failed(session_id)
         return None

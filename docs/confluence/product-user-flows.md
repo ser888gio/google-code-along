@@ -10,7 +10,6 @@ Primary user groups:
 |---|---|
 | Business user | Explain a need in plain language and receive a structured RS draft. |
 | Business analyst / consultant | Guide or review the discovery conversation and refine the output. |
-| Admin / reviewer | Inspect session quality, feedback, cost, traces, and failure patterns. |
 | Developer / operator | Keep the app running, debug failures, and evolve the workflow. |
 
 ---
@@ -319,7 +318,7 @@ This is the main export path tied to the live RS fields.
 
 ### Goal
 
-Collect quality signals at message and session level for admin review.
+Collect quality signals at message and session level for product improvement and operational analysis.
 
 ### Message Feedback
 
@@ -327,7 +326,7 @@ Collect quality signals at message and session level for admin review.
 1. User clicks thumbs up or thumbs down on an assistant message.
 2. Frontend calls POST /feedback.
 3. Backend stores vote and optional redacted comment in Firestore feedback collection.
-4. Admin BigQuery views surface feedback for review.
+4. BigQuery views can surface feedback for offline review.
 ```
 
 The user can later update the comment through `PATCH /feedback/{message_id}`.
@@ -344,43 +343,7 @@ The user can later update the comment through `PATCH /feedback/{message_id}`.
 ### Product Value
 
 - Helps identify repeated questions, poor answers, and missing workflow fields.
-- Powers the admin filter for thumbs-down sessions.
 - Provides signal for prompt, workflow, and extraction improvements.
-
----
-
-## Flow 9: Admin Review
-
-### Goal
-
-Let reviewers inspect usage, quality, cost, and session transcripts.
-
-### Metrics Flow
-
-```text
-1. Admin opens /admin/metrics.
-2. Frontend calls GET /admin/metrics?days=7 with admin authorization.
-3. Backend queries BigQuery views.
-4. Frontend renders cost, token, latency, safety, feedback, and model breakdowns.
-```
-
-### Session Review Flow
-
-```text
-1. Admin opens /admin/sessions.
-2. Frontend calls GET /admin/sessions.
-3. Admin optionally filters to thumbs-down sessions.
-4. Admin opens a session detail page.
-5. Frontend calls GET /admin/sessions/{session_id}.
-6. Backend returns redacted transcript, feedback, token/cost metrics, tool calls, and trace links.
-```
-
-### Product Rules
-
-- Admin pages are English-only.
-- Admin data comes from BigQuery views, not directly from Firestore.
-- Message text shown in admin surfaces is redacted.
-- Cloud Trace links are included when trace IDs are available.
 
 ---
 
@@ -397,7 +360,6 @@ Let reviewers inspect usage, quality, cost, and session transcripts.
 8. Analysis tab displays finalizer output.
 9. User downloads RS-template DOCX.
 10. User submits feedback.
-11. Admin reviews quality, cost, and transcript data.
 ```
 
 ---
@@ -408,7 +370,6 @@ Let reviewers inspect usage, quality, cost, and session transcripts.
 - The app has no full reconnect or replay mechanism for voice WebSocket sessions.
 - Uploaded rich documents are not fully parsed for finalizer context yet.
 - Some generated field labels may still fall back to English in localized UI.
-- Admin review depends on BigQuery export/view setup.
 - There is no separate pull-request CI workflow documented as current behavior; deployment workflow is the main GitHub Actions path.
 
 ---
@@ -424,5 +385,4 @@ Before demoing or releasing a build, run through:
 5. Generate RS-template DOCX after enough completeness.
 6. Trigger finalization and confirm Analysis tab reaches `complete`.
 7. Submit thumbs feedback on an assistant message.
-8. Open admin sessions and verify the transcript appears, if BigQuery views are configured.
-9. Test voice mode on localhost if the change touches audio or WebSocket code.
+8. Test voice mode on localhost if the change touches audio or WebSocket code.

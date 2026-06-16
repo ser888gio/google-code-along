@@ -33,6 +33,8 @@ The Google Cloud OTel exporter writes custom metrics under
 - `workload.googleapis.com/genai.client.ttft_seconds`
 - `workload.googleapis.com/genai.client.operation.duration_seconds`
 - `workload.googleapis.com/rs.session.completion_total`
+- `workload.googleapis.com/rs.discovery.field.completeness_ratio`
+- `workload.googleapis.com/rs.finalization.status_total`
 
 Log-based metrics are available as `logging.googleapis.com/user/<metric_name>`.
 

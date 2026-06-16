@@ -13,7 +13,7 @@ The user-facing assistant should behave like an expert IT business consultant: p
 - Main workflow: chat-first discovery interview for current state, target state, requirements, risks, technical context, and additional information.
 - Live RS preview: the frontend shows canonical RS fields as the conversation progresses.
 - Finalization: the backend synthesizes chat history, discovered fields, uploaded text-like files, and knowledge-base context into final analysis data.
-- Outputs: RS template DOCX, legacy document exports, BPMN-style Mermaid diagrams, data flow diagrams, final analysis, admin review views, and feedback capture.
+- Outputs: RS template DOCX, legacy document exports, BPMN-style Mermaid diagrams, data flow diagrams, final analysis, and feedback capture.
 - Persistence: Firestore stores sessions, messages, extracted fields, workflow state, final analysis, and feedback. GCS stores uploads, generated artifacts, knowledge base documents, and final analysis JSON.
 
 ## Architecture
@@ -41,7 +41,7 @@ Important implementation docs:
 - `backend/field_schema.py` is the single source of truth for the RS schema. It currently defines 28 fields across 6 sections.
 - `frontend/app/generated/rsSchema.ts` is generated from `backend/field_schema.py`. Do not edit it by hand.
 - `backend/config.py` is the source for model names, environment variables, GCS prefixes, markers, and runtime constants.
-- `frontend/lib/api.ts` is the central browser API client for backend HTTP, SSE, upload, document, diagram, feedback, and admin calls.
+- `frontend/lib/api.ts` is the central browser API client for backend HTTP, SSE, upload, document, diagram, and feedback calls.
 - `frontend/app/page.tsx` is the main chat workspace and session lifecycle surface.
 - `backend/main.py` wires the FastAPI app and routers. The route implementations live under `backend/api/`.
 - Accepted RS field state distinguishes user-accepted values from AI-extracted suggestions. DOCX export should use accepted values only. The acceptance policy belongs in `backend/field_schema.py` as an `acceptance_mode` field and is generated to the frontend with the rest of the RS schema. Persist user decisions in one rich `rs_field_state_json` Firestore field containing accepted values and dismissed suggestions, with no read-through fallback from legacy `direct_fields_json`. AI suggestions require individual user acceptance; do not add bulk accept.
@@ -52,7 +52,7 @@ The backend is a FastAPI service that uses Google ADK for the main chat and audi
 
 Key areas:
 
-- `backend/api/`: routers for chat, discovery, documents, diagrams, sessions, feedback, and admin.
+- `backend/api/`: routers for chat, discovery, documents, diagrams, sessions, and feedback.
 - `backend/agent/agent.py`: ADK orchestrator and audio agent definitions.
 - `backend/agent/prompt.py`: user-facing business-consultant system prompt.
 - `backend/agent/discovery_agent.py`: field extraction and one-field workflow helpers.
@@ -81,7 +81,6 @@ Key areas:
 - `frontend/app/components/RsLiveTemplate.tsx`: live RS preview driven by generated schema metadata.
 - `frontend/app/components/BpmnPanel.tsx` and `DataflowPanel.tsx`: diagram requests and rendering.
 - `frontend/app/components/AnalysisPanel.tsx`: finalizer output display.
-- `frontend/app/admin/`: BigQuery-backed admin metrics and session review pages.
 - `frontend/app/i18n/`: small Czech/English locale layer.
 - `frontend/lib/api.ts`: typed fetch/SSE/upload helpers.
 - `frontend/lib/useWebSocket.ts`, `useAudioRecorder.ts`, and `useAudioPlayer.ts`: voice mode.
@@ -105,7 +104,7 @@ analyses/{session_id}/final_analysis.json  Finalizer output
 knowledge_base/{category}/                 Templates, guidelines, examples
 ```
 
-BigQuery views under `infra/firestore-bigquery/` support admin metrics and session review. Monitoring and safety assets live under `infra/monitoring/` and `infra/safety/`.
+BigQuery views under `infra/firestore-bigquery/` support observability and safety analysis. Monitoring and safety assets live under `infra/monitoring/` and `infra/safety/`.
 
 ## Local Development
 
@@ -153,7 +152,6 @@ pre-commit run --all-files
 - ADK sessions are process-local and in-memory. Firestore persists durable state, but backend restarts can lose live ADK session context and in-flight generation triggers.
 - Finalization reads text-like uploaded files (`.txt`, `.md`, `.json`, `.csv`) but currently lists rather than parses PDFs and Office files in that path.
 - Local development requires `GOOGLE_API_KEY`; production/staging also need GCP project, GCS bucket, Firestore collection, and Firestore database config.
-- Admin endpoints require IAP or `ADMIN_BEARER_TOKEN` in production/staging.
 
 ## Known Drift Risks
 

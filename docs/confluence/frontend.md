@@ -2,11 +2,11 @@
 
 ## Overview
 
-The frontend is a **Next.js 16** app for the RS Generator. The main route is a client-side conversational workspace with a chat panel and a live Requirement Specification panel. The app also includes admin routes for observability and transcript review.
+The frontend is a **Next.js 16** app for the RS Generator. The main route is a client-side conversational workspace with a chat panel and a live Requirement Specification panel.
 
 The frontend talks to the backend through:
 
-- HTTP `fetch` calls for chat streaming, discovery state, uploads, document generation, diagrams, history, feedback, final analysis, and admin data.
+- HTTP `fetch` calls for chat streaming, discovery state, uploads, document generation, diagrams, history, feedback, and final analysis.
 - Server-Sent Events (SSE) for streaming text chat responses.
 - WebSocket audio streaming for voice mode.
 
@@ -50,12 +50,6 @@ npm run lint         # eslint
 ```text
 frontend/
 |-- app/
-|   |-- admin/
-|   |   |-- metrics/page.tsx             # Admin observability dashboard
-|   |   `-- sessions/
-|   |       |-- page.tsx                  # Admin session review list
-|   |       |-- MessageBubbles.tsx        # Admin prompt/completion transcript bubbles
-|   |       `-- [id]/page.tsx             # Admin session detail view
 |   |-- components/
 |   |   |-- RsLiveTemplate.tsx            # Live RS preview panel
 |   |   |-- AnalysisPanel.tsx             # Final analysis display
@@ -106,12 +100,11 @@ frontend/
 |---|---|---|
 | `NEXT_PUBLIC_API_URL` | code default: `http://localhost:8080` | Backend base URL for browser HTTP/SSE calls. |
 | `NEXT_PUBLIC_WS_URL` | code default: `ws://localhost:8080` | Backend WebSocket base URL for audio mode. |
-| `NEXT_PUBLIC_ADMIN_API_TOKEN` | empty | Frontend-side bearer token sent to admin endpoints. Backend validates it against `ADMIN_BEARER_TOKEN`. |
 | `NEXT_SERVER_ACTION_ALLOWED_ORIGINS` | `localhost:3000` | Allowed origins for Next Server Actions config. |
 
-Current caveat: `.env.local.example` only contains `NEXT_PUBLIC_API_URL=http://localhost:8000` and `NEXT_SERVER_ACTION_ALLOWED_ORIGINS=localhost:3000`, which does not match the code defaults (`8080`) and omits `NEXT_PUBLIC_WS_URL` and `NEXT_PUBLIC_ADMIN_API_TOKEN`.
+Current caveat: `.env.local.example` only contains `NEXT_PUBLIC_API_URL=http://localhost:8000` and `NEXT_SERVER_ACTION_ALLOWED_ORIGINS=localhost:3000`, which does not match the code defaults (`8080`) and omits `NEXT_PUBLIC_WS_URL`.
 
-In Docker builds, `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_WS_URL`, and `NEXT_PUBLIC_ADMIN_API_TOKEN` are injected as build arguments and baked into the Next.js client bundle.
+In Docker builds, `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_WS_URL` are injected as build arguments and baked into the Next.js client bundle.
 
 ---
 
@@ -235,9 +228,6 @@ Key exports:
 | `submitFeedback(...)` | `POST /feedback` |
 | `updateFeedbackComment(...)` | `PATCH /feedback/{messageId}` |
 | `submitSessionFeedback(...)` | `POST /feedback/session` |
-| `getAdminMetrics(days)` | `GET /admin/metrics?days=...` |
-| `getAdminSessions(filter, limit)` | `GET /admin/sessions` |
-| `getAdminSession(sessionId)` | `GET /admin/sessions/{sessionId}` |
 
 ---
 
@@ -288,8 +278,6 @@ The app uses a small custom i18n layer:
 - The default locale is `cs`.
 - The selected locale is persisted to `localStorage`.
 - `LanguageSwitcher.tsx` exposes the toggle in the main UI.
-- Admin pages are English-only.
-
 Known i18n gap: some generated RS fields are not yet present in `FIELD_LABEL_KEYS`, `cs.json`, or `en.json`, so they are not translated in the live preview.
 
 ---
@@ -306,22 +294,6 @@ Known i18n gap: some generated RS fields are not yet present in `FIELD_LABEL_KEY
 ```
 
 This is not a narrow `/api/*` rewrite. The browser-side API client usually calls `NEXT_PUBLIC_API_URL` directly, and the WebSocket client calls `NEXT_PUBLIC_WS_URL` directly. WebSocket traffic is not proxied by the Next rewrite.
-
----
-
-## Admin Dashboard
-
-Admin routes:
-
-| Route | Purpose |
-|---|---|
-| `/admin/metrics` | Observability summary for cost, tokens, latency, safety finishes, feedback, model/phase breakdowns, and daily trends |
-| `/admin/sessions` | Review list of sessions, with optional `filter=thumbs_down` |
-| `/admin/sessions/[id]` | Transcript detail with prompt/completion cards, token/cost details, tool calls, feedback, and Cloud Trace links |
-
-Frontend admin requests send `Authorization: Bearer ${NEXT_PUBLIC_ADMIN_API_TOKEN}` when the token is configured. Backend admin authorization accepts IAP headers or the backend `ADMIN_BEARER_TOKEN`; in non-production environments, an empty backend token allows access.
-
-The admin UI is BigQuery-backed through the backend. It does not currently render extracted RS field values in the session detail page.
 
 ---
 

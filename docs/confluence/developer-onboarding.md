@@ -32,7 +32,7 @@ You also need access to a GCP project with:
 - Gemini API key available as `GOOGLE_API_KEY`.
 - Firestore database.
 - GCS bucket.
-- Optional BigQuery views for admin pages.
+- Optional BigQuery views for observability and safety analysis.
 - Optional Cloud Monitoring/Trace for observability.
 
 ---
@@ -55,7 +55,6 @@ You also need access to a GCP project with:
 |   |   |-- page.tsx                    # Main chat workspace
 |   |   |-- components/                 # RS preview, diagrams, uploads, analysis
 |   |   |-- generated/rsSchema.ts       # Generated from backend field schema
-|   |   `-- admin/                      # Admin review and metrics pages
 |   |-- lib/                            # API client, WebSocket, audio hooks
 |   |-- public/                         # Static image and AudioWorklet processors
 |   `-- __tests__/
@@ -85,7 +84,6 @@ GOOGLE_API_KEY=...
 GCS_BUCKET_NAME=...
 FIRESTORE_COLLECTION=...
 FIRESTORE_DATABASE=...
-ADMIN_BEARER_TOKEN=...
 GOOGLE_CLOUD_PROJECT=...
 GOOGLE_GENAI_USE_VERTEXAI=0
 ALLOWED_ORIGINS=http://localhost:3000
@@ -126,7 +124,6 @@ Create `frontend/.env.local`:
 ```text
 NEXT_PUBLIC_API_URL=http://localhost:8080
 NEXT_PUBLIC_WS_URL=ws://localhost:8080
-NEXT_PUBLIC_ADMIN_API_TOKEN=
 NEXT_SERVER_ACTION_ALLOWED_ORIGINS=localhost:3000
 ```
 
@@ -230,7 +227,6 @@ pre-commit run --all-files
 | Change document export | `backend/generation/*`, `backend/main.py`, frontend download button wiring |
 | Change diagram behavior | `backend/bpmn/*`, `backend/dataflow/*`, `frontend/app/components/*Panel.tsx`, `MermaidDiagram.tsx` |
 | Change voice mode | `backend/audio_websocket.py`, `backend/main.py`, `frontend/lib/useWebSocket.ts`, audio hooks, AudioWorklet files |
-| Change admin review | `backend/admin_sessions.py`, BigQuery SQL views, `frontend/app/admin/*` |
 
 ---
 
@@ -274,5 +270,4 @@ If voice mode fails:
 - Some older comments and planning docs still refer to 22 fields, Gemini 1.5, Vertex AI, or Vercel. The current Confluence docs describe the newer Cloud Run, Gemini API key, and 28-field implementation.
 - ADK sessions are in memory. Restarting the backend loses live agent context even though Firestore persists messages and field state.
 - `.env.local.example` may lag behind the current frontend variables.
-- Admin pages depend on BigQuery views; they can be unavailable in a minimal local setup.
 - Uploaded PDF, DOCX, and image files are stored and listed, but the finalizer currently reads only plain text extensions for file content.

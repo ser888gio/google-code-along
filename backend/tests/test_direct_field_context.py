@@ -11,7 +11,7 @@ def test_clean_direct_fields_keeps_known_non_empty_values():
             "product_owner": "  Jana Novak  ",
             "unknown": "ignored",
             "department": "",
-            "requestor": None,
+            "requester": None,
         }
     )
 
