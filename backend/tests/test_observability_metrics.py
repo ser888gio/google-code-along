@@ -42,6 +42,26 @@ def test_phase6_cache_hit_ratio_is_clamped_by_model():
     assert metrics._cache_hit_ratios == {"gemini-test": 1.0}
 
 
+def test_field_completeness_records_clamped_ratio(monkeypatch):
+    histogram = _FakeHistogram()
+    monkeypatch.setattr(metrics, "field_completeness_histogram", histogram)
+
+    metrics.record_field_completeness(90)
+    metrics.record_field_completeness(150)
+
+    assert histogram.calls == [(0.9, {}), (1.0, {})]
+
+
+def test_finalization_status_counter_has_status_attribute(monkeypatch):
+    counter = _FakeCounter()
+    monkeypatch.setattr(metrics, "finalization_status_counter", counter)
+
+    metrics.record_finalization_status(status="success")
+    metrics.record_finalization_status(status="error")
+
+    assert counter.calls == [(1, {"status": "success"}), (1, {"status": "error"})]
+
+
 def test_phase6_safety_metrics_have_required_attributes(monkeypatch):
     safety_counter = _FakeCounter()
     circuit_counter = _FakeCounter()

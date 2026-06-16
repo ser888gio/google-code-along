@@ -37,6 +37,7 @@ from observability.cost import compute_cost
 from observability.metrics import (
     record_cache_hit_ratio,
     record_cost,
+    record_field_completeness,
     record_operation_duration,
     record_tokens,
 )
@@ -241,6 +242,7 @@ async def extract_discovery_fields(
             )
         logger.info(f"Model call completed: model={MODEL_DISCOVERY} elapsed={elapsed:.2f}s")
         result = _normalize_discovery_result(json.loads(_strip_markdown_json_fence(response.text or "")))
+        record_field_completeness(result["completeness"])
         logger.info(
             "Discovery extraction done: "
             f"completeness={result['completeness']}% "
