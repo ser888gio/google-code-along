@@ -8,6 +8,16 @@ artifacts for dashboards, alert policies, and log-based metrics.
 Replace `PROJECT_ID`, `BACKEND_SERVICE_NAME`, and notification channel IDs in
 the files before applying.
 
+The GitHub Actions deploy service account needs Cloud Monitoring dashboard
+permissions because `.github/workflows/cicd.yaml` creates or updates this
+dashboard when `dashboard.json` changes:
+
+```bash
+gcloud projects add-iam-policy-binding PROJECT_ID \
+  --member="serviceAccount:SA_EMAIL" \
+  --role="roles/monitoring.dashboardEditor"
+```
+
 ```bash
 gcloud logging metrics create extract_timeout_total \
   --description="Pre-stream discovery extraction timed out" \
