@@ -449,7 +449,17 @@ CI/CD deploy service account:
 | `roles/iam.serviceAccountUser` | Deploy revisions as the runtime service account |
 | `roles/artifactregistry.writer` | Push images |
 | `roles/secretmanager.secretAccessor` | Attach Secret Manager secrets during deploy |
+| `roles/monitoring.dashboardEditor` | Create and update the checked-in Cloud Monitoring dashboard |
 | `roles/cloudbuild.builds.editor` | Needed if using `deploy.sh` / Cloud Build |
+
+Grant the dashboard role to the GitHub Actions deploy service account before
+changing `infra/monitoring/dashboard.json`:
+
+```bash
+gcloud projects add-iam-policy-binding {PROJECT_ID} \
+  --member="serviceAccount:{SA_EMAIL}" \
+  --role="roles/monitoring.dashboardEditor"
+```
 
 ---
 

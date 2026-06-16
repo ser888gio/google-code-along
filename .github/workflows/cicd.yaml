@@ -82,9 +82,20 @@ jobs:
             | head -n 1)"
 
           if [ -n "$dashboard_id" ]; then
+            tmp_dashboard_update="$(mktemp)"
+            dashboard_etag="$(gcloud monitoring dashboards describe "$dashboard_id" \
+              --project="${{ env.PROJECT_ID }}" \
+              --format='value(etag)')"
+            if [ -z "$dashboard_etag" ]; then
+              echo "::error::Could not resolve etag for Cloud Monitoring dashboard $dashboard_id"
+              exit 1
+            fi
+
+            jq --arg etag "$dashboard_etag" '.etag = $etag' "$tmp_dashboard" > "$tmp_dashboard_update"
+
             gcloud monitoring dashboards update "$dashboard_id" \
               --project="${{ env.PROJECT_ID }}" \
-              --config-from-file="$tmp_dashboard"
+              --config-from-file="$tmp_dashboard_update"
           else
             gcloud monitoring dashboards create \
               --project="${{ env.PROJECT_ID }}" \
