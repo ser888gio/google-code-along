@@ -95,7 +95,6 @@ pre-commit run --all-files
 - `backend/api/diagrams.py`: BPMN and dataflow endpoints.
 - `backend/api/sessions.py`: history, uploads, Firestore session data.
 - `backend/api/feedback.py`: message and session feedback.
-- `backend/api/admin.py`: admin metrics and session review.
 - `backend/agent/agent.py`: ADK text and audio agent objects.
 - `backend/agent/prompt.py`: orchestrator system prompt.
 - `backend/agent/discovery_agent.py`: extraction and workflow helpers.
@@ -117,7 +116,6 @@ pre-commit run --all-files
 - `frontend/app/components/AnalysisPanel.tsx`: final analysis view.
 - `frontend/app/generated/rsSchema.ts`: generated RS schema.
 - `frontend/app/i18n/`: Czech/English translations and locale context.
-- `frontend/app/admin/`: admin metrics and session review.
 - `frontend/lib/api.ts`: backend client functions.
 - `frontend/lib/useWebSocket.ts`: voice WebSocket hook.
 - `frontend/lib/useAudioRecorder.ts` and `useAudioPlayer.ts`: PCM audio pipeline.

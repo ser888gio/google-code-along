@@ -7,7 +7,7 @@ The RS Generator has observability at four levels:
 - Request and model traces through OpenTelemetry and Cloud Trace.
 - Custom metrics through OpenTelemetry and Cloud Monitoring.
 - Structured application logs from FastAPI, workflow, safety, Firestore, GCS, and voice paths.
-- Admin review data through Firestore-to-BigQuery views.
+- Firestore-to-BigQuery views for offline analysis.
 
 The goal is to answer:
 
@@ -27,8 +27,7 @@ The goal is to answer:
 | Cloud Trace | Request spans, ADK model spans, GenAI attributes, trace links | OpenTelemetry |
 | Cloud Monitoring | Latency, cost, token, safety, session, feedback metrics | OpenTelemetry exporter |
 | Log-based metrics | Events detected from logs, such as extraction timeout or bridge injection failure | Cloud Logging metrics |
-| BigQuery admin views | Redacted transcript review, cost/tokens per message, feedback | Firestore export views |
-| Admin UI | Human-friendly metrics and session review pages | Backend admin endpoints |
+| BigQuery views | Redacted transcript review, cost/tokens per message, feedback | Firestore export views |
 
 ---
 
@@ -198,15 +197,9 @@ logging.googleapis.com/user/<metric_name>
 
 ---
 
-## Admin Metrics
+## BigQuery Analysis Views
 
-Admin metrics are served by:
-
-```text
-GET /admin/metrics?days=7
-```
-
-The endpoint queries BigQuery-backed views and returns:
+BigQuery-backed views can be queried directly for:
 
 - Session count.
 - Message count.
@@ -220,30 +213,6 @@ The endpoint queries BigQuery-backed views and returns:
 - Per-model breakdown.
 - Daily trend rows.
 
-Frontend page:
-
-```text
-frontend/app/admin/metrics/page.tsx
-```
-
-Backend implementation:
-
-```text
-backend/admin_sessions.py
-```
-
----
-
-## Admin Session Review
-
-Session review endpoints:
-
-```text
-GET /admin/sessions
-GET /admin/sessions?filter=thumbs_down
-GET /admin/sessions/{session_id}
-```
-
 They are backed by BigQuery views defined in:
 
 ```text
@@ -251,7 +220,7 @@ infra/firestore-bigquery/messages_view.sql
 infra/firestore-bigquery/feedback_view.sql
 ```
 
-Session detail includes:
+The message and feedback views include:
 
 - Redacted transcript.
 - Message IDs.
@@ -264,7 +233,7 @@ Session detail includes:
 - Phase and finish reason.
 - Message feedback.
 
-This is the main place to review low-quality sessions, repeated-question loops, safety issues, and high-cost interactions.
+These views support review of low-quality sessions, repeated-question loops, safety issues, and high-cost interactions.
 
 ---
 
@@ -440,16 +409,6 @@ Check:
 4. GCS write permissions for `analyses/{session_id}/final_analysis.json`.
 5. Cost circuit events during finalizer extraction.
 
-### Admin Pages Fail
-
-Check:
-
-1. Admin authorization header or IAP configuration.
-2. `ADMIN_BEARER_TOKEN`.
-3. BigQuery dataset/table/view names.
-4. Firestore-to-BigQuery export freshness.
-5. Backend logs for `Could not query admin metrics from BigQuery`.
-
 ### Voice Mode Fails
 
 Check:
@@ -466,7 +425,7 @@ Check:
 
 The observability system tries to reduce sensitive data exposure:
 
-- Message text stored for admin review is redacted by `privacy/redactor.py`.
+- Message text stored for offline review is redacted by `privacy/redactor.py`.
 - Original text hashes are stored for correlation without preserving raw originals.
 - Trace span content is truncated before being attached as span events.
 - User IDs and session IDs are hashed in some metrics.
@@ -479,6 +438,5 @@ Important caveat: logs can still include short previews or operational identifie
 
 - Cost circuit state is in memory and resets after backend restart.
 - Some dashboard tiles are roadmap placeholders until corresponding evaluators are implemented.
-- Admin metrics depend on BigQuery export/view setup.
 - Voice quality metrics are mostly log-based today; there are no dedicated audio latency or reconnect metrics yet.
-- Final analysis schema is not yet generated into strongly typed frontend/admin analytics contracts.
+- Final analysis schema is not yet generated into strongly typed frontend analytics contracts.

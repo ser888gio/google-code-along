@@ -12,7 +12,7 @@ The current implementation is centered on:
 - Direct Gemini API key usage, not Vertex AI mode.
 - Firestore for persisted session, discovery, workflow, final-analysis, and feedback data.
 - GCS for uploaded files and generated artifacts.
-- BigQuery plus Cloud Monitoring/Trace for observability and admin review.
+- BigQuery plus Cloud Monitoring/Trace for observability and safety analysis.
 
 ---
 
@@ -30,7 +30,7 @@ The current implementation is centered on:
 +----------------+-------------------------------------------------+
                  |
                  | HTTP + SSE: POST /chat/stream
-                 | HTTP: uploads, discovery, diagrams, docs, admin
+                 | HTTP: uploads, discovery, diagrams, docs, feedback
                  | WebSocket: /ws/{user_id}/{session_id}
                  v
 +------------------------------------------------------------------+
@@ -65,7 +65,7 @@ The current implementation is centered on:
                    v
        +------------------+
        | BigQuery views   |
-       | admin analytics  |
+       | observability    |
        +------------------+
 ```
 
@@ -84,11 +84,10 @@ The current implementation is centered on:
 | `FirestoreSrsPanel` | Displays compiled Firestore SRS snapshot data |
 | `AnalysisPanel` | Displays finalizer output once `GET /analyses/{session_id}` reports completion |
 | `FileUpload` | Uploads files to backend `/upload`, which writes them to GCS |
-| `lib/api.ts` | HTTP and SSE API client for chat, discovery, docs, diagrams, uploads, feedback, admin |
+| `lib/api.ts` | HTTP and SSE API client for chat, discovery, docs, diagrams, uploads, and feedback |
 | `lib/useWebSocket.ts` | Persistent WebSocket connection for voice mode |
 | `lib/useAudioRecorder.ts` / `lib/useAudioPlayer.ts` | Browser PCM capture/playback for Gemini Live voice mode |
 | `app/generated/rsSchema.ts` | Auto-generated field and section metadata from backend schema |
-| `app/admin/*` | Admin session review and metrics screens |
 
 ### Backend (Cloud Run - Python/FastAPI)
 
@@ -108,7 +107,6 @@ The current implementation is centered on:
 | `gcs/connector.py` | GCS list/read/write/delete/existence operations |
 | `observability/` | Metrics, tracing, model callbacks, safety checks, cost tracking, anomaly queries |
 | `privacy/redactor.py` | Local redaction and hashing for persisted conversation and feedback text |
-| `admin_sessions.py` | Admin authentication and BigQuery-backed session/metrics queries |
 
 ---
 
@@ -283,18 +281,10 @@ Upload constraints:
 
 ### BigQuery
 
-BigQuery is used for admin review and observability analytics. Views are defined in `infra/firestore-bigquery/`:
+BigQuery is used for observability and safety analytics. Views are defined in `infra/firestore-bigquery/`:
 
 - `messages_view.sql`: flattens Firestore session `messages[]`.
 - `feedback_view.sql`: reads the top-level Firestore `feedback` collection export.
-
-Admin endpoints query these views:
-
-- `GET /admin/metrics`
-- `GET /admin/sessions`
-- `GET /admin/sessions/{session_id}`
-
----
 
 ## Streaming Architecture
 
@@ -423,7 +413,7 @@ Additional observability surfaces:
 - `observability/safety.py` blocks known unsafe prompt patterns and enforces per-session cost budget.
 - `infra/safety/anomalous_sessions.sql` and `infra/safety/anomaly-metric-job.yaml` support scheduled anomaly detection.
 - `infra/monitoring/` contains dashboard, log-based metrics, and alert policy definitions.
-- Admin pages query BigQuery-backed session and feedback views.
+- BigQuery-backed session and feedback views support offline observability analysis.
 
 ---
 
@@ -433,7 +423,6 @@ Additional observability surfaces:
 |---|---|
 | GCP credentials | GitHub Actions uses Workload Identity Federation; Cloud Run uses runtime service identity |
 | Gemini API key | Injected from Secret Manager in deployment; direct API key mode is forced via `GOOGLE_GENAI_USE_VERTEXAI=0` |
-| Admin API | Protected by IAP header or bearer token; local dev may allow access without token |
 | PII in stored messages | `privacy/redactor.py` redacts common emails, phones, API keys, and credit cards, and stores original text hashes |
 | Prompt injection from user data | Finalizer wraps transcript and uploaded file content with explicit user-data guardrails |
 | Prompt safety | `observability/safety.py` checks user prompts before chat execution |
@@ -479,7 +468,6 @@ GitHub Actions: .github/workflows/cicd.yaml
     +--> Build frontend image with:
     |       NEXT_PUBLIC_API_URL=<backend URL>
     |       NEXT_PUBLIC_WS_URL=wss://<backend host>
-    |       NEXT_PUBLIC_ADMIN_API_TOKEN=<admin token>
     +--> Deploy frontend to Cloud Run in europe-west4
 ```
 
@@ -489,7 +477,6 @@ Backend runtime secrets are injected from Secret Manager:
 - `GCS_BUCKET_NAME`
 - `FIRESTORE_COLLECTION`
 - `FIRESTORE_DATABASE`
-- `ADMIN_BEARER_TOKEN`
 
 See the [Deployment Guide](deployment.md) for manual deployment and GCP setup details.
 
@@ -507,7 +494,7 @@ See the [Deployment Guide](deployment.md) for manual deployment and GCP setup de
 | ADK in-memory sessions for live context | Simple local/cloud runtime, but persistent ADK sessions are needed before production hardening |
 | GCS for uploads and generated artifacts | Durable storage for binary files and generated JSON/DOCX artifacts |
 | GCS keyword search for past analyses | Simple MVP retrieval without vector index provisioning |
-| BigQuery views for admin review | Gives replayable analytics over redacted messages and feedback |
+| BigQuery views for observability | Gives replayable analytics over redacted messages and feedback |
 | `field_schema.py` as schema source | Prevents drift between extraction, workflow, exports, and frontend rendering |
 | Mermaid.js for diagrams | Client-side rendering with simple backend-generated diagram syntax |
 | Cloud Run for hosting | Serverless Docker deployment with native GCP integrations |

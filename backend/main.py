@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from api import admin, chat, diagrams, discovery, documents, feedback, sessions
+from api import chat, diagrams, discovery, documents, feedback, sessions
 from config import validate_config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,7 +59,6 @@ def health():
     return {"status": "ok"}
 
 
-app.include_router(admin.router)
 app.include_router(chat.router)
 app.include_router(diagrams.router)
 app.include_router(discovery.router)

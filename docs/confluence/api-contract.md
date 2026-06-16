@@ -17,7 +17,6 @@ The frontend uses these environment variables:
 ```text
 NEXT_PUBLIC_API_URL=http://localhost:8080
 NEXT_PUBLIC_WS_URL=ws://localhost:8080
-NEXT_PUBLIC_ADMIN_API_TOKEN=
 ```
 
 Unless noted otherwise, JSON endpoints use:
@@ -39,20 +38,6 @@ Error responses generally use FastAPI's standard shape:
 ## Authentication
 
 Most user-facing endpoints are not authenticated by the app itself. They rely on deployment-level controls, CORS, and GCP runtime identity for backend access to Firestore/GCS.
-
-Admin endpoints require one of:
-
-- An accepted IAP header in deployed environments.
-- `Authorization: Bearer <ADMIN_BEARER_TOKEN>`.
-- Local non-production behavior when the backend admin token is empty.
-
-Frontend admin calls send the bearer token from:
-
-```text
-NEXT_PUBLIC_ADMIN_API_TOKEN
-```
-
-Important: because `NEXT_PUBLIC_*` values are baked into the browser bundle, this token is visible to users of the frontend build. Prefer IAP or another deployment-level access layer for production admin access.
 
 ---
 
@@ -717,58 +702,6 @@ If no SRS snapshot has been written:
   "data": null
 }
 ```
-
----
-
-## Admin API
-
-All admin endpoints require admin authorization.
-
-### `GET /admin/metrics?days=7`
-
-Returns BigQuery-backed observability aggregates.
-
-Query parameters:
-
-| Parameter | Default | Range |
-|---|---:|---|
-| `days` | 7 | 1 to 90 |
-
-Response top-level shape:
-
-```json
-{
-  "window_days": 7,
-  "generated_at": "2026-05-14T12:00:00Z",
-  "source": {
-    "messages_view": "project.dataset.messages_view",
-    "feedback_view": "project.dataset.feedback_view"
-  },
-  "summary": {},
-  "by_model": [],
-  "daily": []
-}
-```
-
-### `GET /admin/sessions?limit=50&filter=thumbs_down`
-
-Returns admin session summaries.
-
-Query parameters:
-
-| Parameter | Default | Range / values |
-|---|---:|---|
-| `limit` | 50 | 1 to 200 |
-| `filter` | none | `thumbs_down` |
-
-### `GET /admin/sessions/{session_id}`
-
-Returns a transcript with redacted messages, token counts, costs, tool calls, feedback, and Cloud Trace links.
-
-Errors:
-
-- `404`: session not found.
-- `502`: BigQuery query failed.
 
 ---
 

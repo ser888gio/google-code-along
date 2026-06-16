@@ -101,7 +101,6 @@ jobs:
             GCS_BUCKET_NAME=GCS_BUCKET_NAME:latest
             FIRESTORE_COLLECTION=FIRESTORE_COLLECTION:latest
             FIRESTORE_DATABASE=FIRESTORE_DATABASE:latest
-            ADMIN_BEARER_TOKEN=ADMIN_BEARER_TOKEN:latest
 
       # ==========================================
       # 2. FRONTEND SERVICE (europe-west4)
@@ -140,5 +139,3 @@ jobs:
           service: business-persona-ai-frontend
           region: europe-west4
           image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
-          secrets: |
-            ADMIN_API_TOKEN=ADMIN_BEARER_TOKEN:latest

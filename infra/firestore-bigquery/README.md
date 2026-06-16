@@ -3,7 +3,7 @@
 Phase 4 keeps chat data in one Firestore session document with a `messages`
 array. Install one Firebase `firestore-bigquery-export` extension instance for
 the configured `FIRESTORE_COLLECTION`, then create `messages_view.sql` as the
-replay-friendly view used by dashboards/admin queries.
+replay-friendly view used by dashboards and offline analysis queries.
 
 Phase 5 stores assistant-message feedback and end-of-chat session ratings in a
 separate top-level Firestore `feedback` collection. Install a second extension

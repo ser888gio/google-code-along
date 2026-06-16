@@ -14,7 +14,6 @@ dependencies = []
 # /pyproject.toml and /backend/requirements.txt.
 aislop-extras = [
   "opentelemetry",
-  "admin_sessions",
   "answer_classifier",
   "answer_quality",
   "audio_websocket",
