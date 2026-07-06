@@ -1,0 +1,86 @@
+direction: down
+
+title: |md
+  # RS Generator — Whole-App Architecture
+| {near: top-center; style.font-size: 28}
+
+user: Business User {
+  class: users
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+  shape: person
+}
+
+gcp: Google Cloud Platform — europe-west4 {
+  style.stroke-dash: 3
+
+  frontend: Frontend Service (Cloud Run) {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FCompute%2FCloud%20Run.svg
+    next: Next.js / React / TypeScript {
+      icon: https://icons.terrastruct.com/dev%2Freact.svg
+    }
+  }
+
+  backend: Backend Service (Cloud Run) {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FCompute%2FCloud%20Run.svg
+    fastapi: FastAPI + uvicorn (Python 3.12) {
+      icon: https://icons.terrastruct.com/dev%2Fpython.svg
+    }
+    adk: Google ADK runtime {
+      icon: https://icons.terrastruct.com/dev%2Fpython.svg
+    }
+  }
+
+  firestore: Firestore {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FDatabases%2FCloud%20Firestore.svg
+    shape: cylinder
+  }
+  gcs: Cloud Storage (GCS) {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FStorage%2FCloud%20Storage.svg
+    shape: cylinder
+  }
+  bigquery: BigQuery Views {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FData%20Analytics%2FBigQuery.svg
+    shape: cylinder
+  }
+
+  obs: Cloud Trace + Monitoring {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FManagement%20Tools%2FMonitoring.svg
+  }
+
+  gemini: Gemini API (direct key) {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FAI%20and%20Machine%20Learning%2FAI%20Platform.svg
+  }
+
+  secrets: Secret Manager {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FSecurity%2FKey%20Management%20Service.svg
+  }
+}
+
+cicd: CI/CD {
+  style.stroke-dash: 3
+  gh: GitHub Actions (cicd.yaml) {
+    icon: https://icons.terrastruct.com/dev%2Fgithub.svg
+  }
+  ar: Artifact Registry {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FDeveloper%20Tools%2FContainer%20Registry.svg
+  }
+}
+
+# Runtime request flow
+user -> gcp.frontend: HTTPS
+gcp.frontend -> gcp.backend: SSE POST /chat/stream {style.stroke-dash: 4}
+gcp.frontend -> gcp.backend: HTTP uploads / discovery / diagrams / docs / feedback
+gcp.frontend -> gcp.backend: "WS /ws/{user}/{session}" {style.stroke-dash: 4}
+
+gcp.backend -> gcp.gemini: generate_content / Live
+gcp.backend -> gcp.firestore: sessions, state, feedback
+gcp.backend -> gcp.gcs: uploads, analyses, knowledge_base
+gcp.backend -> gcp.obs: OTel spans + metrics
+gcp.firestore -> gcp.bigquery: export views {style.stroke-dash: 4}
+gcp.secrets -> gcp.backend: API key + config secrets
+
+# Deploy flow
+cicd.gh -> gcp.secrets: WIF auth {style.stroke-dash: 4}
+cicd.gh -> cicd.ar: build + push images
+cicd.ar -> gcp.frontend: deploy image
+cicd.ar -> gcp.backend: deploy image

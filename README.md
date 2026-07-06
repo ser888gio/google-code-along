@@ -6,18 +6,32 @@ An interactive AI persona that guides business users through defining their need
 
 ## System Overview
 
-### Infrastructure
+### Whole-App Architecture
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/infrastructure-simplified-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./diagrams/infrastructure-simplified-light.svg">
-  <img alt="Infrastructure Overview" src="./diagrams/infrastructure-simplified-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/app-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./diagrams/app-light.svg">
+  <img alt="Whole-App Architecture" src="./diagrams/app-light.svg">
 </picture>
 
-### Architecture
+### Backend Architecture
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/architecture-simplified-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./diagrams/architecture-simplified-light.svg">
-  <img alt="Architecture Overview" src="./diagrams/architecture-simplified-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/backend-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./diagrams/backend-light.svg">
+  <img alt="Backend Architecture" src="./diagrams/backend-light.svg">
+</picture>
+
+### Frontend Architecture
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/frontend-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./diagrams/frontend-light.svg">
+  <img alt="Frontend Architecture" src="./diagrams/frontend-light.svg">
+</picture>
+
+### Observability & Safety
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./diagrams/observability-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./diagrams/observability-light.svg">
+  <img alt="Observability & Safety Architecture" src="./diagrams/observability-light.svg">
 </picture>
 
 [More diagrams →](./diagrams/README.md)
