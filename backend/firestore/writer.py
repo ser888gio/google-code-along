@@ -15,7 +15,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, TypedDict, Unpack, cast
 
 from config import (
     FIRESTORE_COLLECTION,
@@ -124,46 +124,50 @@ def get_srs_fields(session_id: str) -> dict[str, Any] | None:
     return snap.to_dict()
 
 
+class MessageTelemetry(TypedDict, total=False):
+    trace_id: str | None
+    span_id: str | None
+    model: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    cache_read_tokens: int | None
+    cost_usd: float | None
+    ttft_ms: int | None
+    itl_ms: int | None
+    latency_ms: int | None
+    tool_calls: list[dict[str, Any]] | None
+    phase: str | None
+    finish_reason: str | None
+
+
 def _message_doc(
     *,
     message_id: str,
     role: str,
     text: str,
     created_at: datetime,
-    trace_id: str | None = None,
-    span_id: str | None = None,
-    model: str | None = None,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
-    cache_read_tokens: int | None = None,
-    cost_usd: float | None = None,
-    ttft_ms: int | None = None,
-    itl_ms: int | None = None,
-    latency_ms: int | None = None,
-    tool_calls: list[dict[str, Any]] | None = None,
-    phase: str | None = None,
-    finish_reason: str | None = None,
+    **telemetry: Unpack[MessageTelemetry],
 ) -> dict[str, Any]:
     """Build the Phase 4 message schema with redacted compatibility fields."""
     text_redacted = redact_text(text)
     doc: dict[str, Any] = {
         "message_id": message_id,
-        "trace_id": trace_id,
-        "span_id": span_id,
+        "trace_id": telemetry.get("trace_id"),
+        "span_id": telemetry.get("span_id"),
         "role": role,
         "text_redacted": text_redacted,
         "text_original_hash": hash_text(text),
-        "model": model,
-        "input_tokens": int(input_tokens or 0),
-        "output_tokens": int(output_tokens or 0),
-        "cache_read_tokens": int(cache_read_tokens or 0),
-        "cost_usd": float(cost_usd or 0.0),
-        "ttft_ms": ttft_ms,
-        "itl_ms": itl_ms,
-        "latency_ms": latency_ms,
-        "tool_calls": tool_calls or [],
-        "phase": phase,
-        "finish_reason": finish_reason,
+        "model": telemetry.get("model"),
+        "input_tokens": int(telemetry.get("input_tokens") or 0),
+        "output_tokens": int(telemetry.get("output_tokens") or 0),
+        "cache_read_tokens": int(telemetry.get("cache_read_tokens") or 0),
+        "cost_usd": float(telemetry.get("cost_usd") or 0.0),
+        "ttft_ms": telemetry.get("ttft_ms"),
+        "itl_ms": telemetry.get("itl_ms"),
+        "latency_ms": telemetry.get("latency_ms"),
+        "tool_calls": telemetry.get("tool_calls") or [],
+        "phase": telemetry.get("phase"),
+        "finish_reason": telemetry.get("finish_reason"),
         "created_at": created_at,
         # Backwards-compatible fields consumed by the current history UI.
         "text": text_redacted,
@@ -178,19 +182,7 @@ def append_conversation_turn(
     assistant_text: str,
     *,
     message_id: str | None = None,
-    trace_id: str | None = None,
-    span_id: str | None = None,
-    model: str | None = None,
-    input_tokens: int | None = None,
-    output_tokens: int | None = None,
-    cache_read_tokens: int | None = None,
-    cost_usd: float | None = None,
-    ttft_ms: int | None = None,
-    itl_ms: int | None = None,
-    latency_ms: int | None = None,
-    tool_calls: list[dict[str, Any]] | None = None,
-    phase: str | None = None,
-    finish_reason: str | None = None,
+    **telemetry: Unpack[MessageTelemetry],
 ) -> None:
     """Append one user+assistant turn to the messages array for *session_id*.
 
@@ -214,28 +206,16 @@ def append_conversation_turn(
                         role="user",
                         text=user_text,
                         created_at=created_at,
-                        trace_id=trace_id,
-                        span_id=span_id,
-                        phase=phase,
+                        trace_id=telemetry.get("trace_id"),
+                        span_id=telemetry.get("span_id"),
+                        phase=telemetry.get("phase"),
                     ),
                     _message_doc(
                         message_id=assistant_message_id,
                         role="assistant",
                         text=assistant_text,
                         created_at=created_at,
-                        trace_id=trace_id,
-                        span_id=span_id,
-                        model=model,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                        cache_read_tokens=cache_read_tokens,
-                        cost_usd=cost_usd,
-                        ttft_ms=ttft_ms,
-                        itl_ms=itl_ms,
-                        latency_ms=latency_ms,
-                        tool_calls=tool_calls,
-                        phase=phase,
-                        finish_reason=finish_reason,
+                        **telemetry,
                     ),
                 ]
             ),
