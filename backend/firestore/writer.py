@@ -415,15 +415,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _empty_rs_view() -> dict[str, Any]:
-    return {
-        "completeness": 0,
-        "accepted_completeness": 0,
-        "discovery_completeness": 0,
-        "fields": {},
-    }
-
-
 def _valid_field_values(fields: dict[str, str]) -> dict[str, str]:
     return {
         key: str(value).strip()
@@ -780,28 +771,6 @@ def upsert_discovery_state(session_id: str, discovery: dict) -> None:
 # ---------------------------------------------------------------------------
 # Direct-input fields — set by the user in the UI, never overwritten by AI
 # ---------------------------------------------------------------------------
-
-
-def _merge_direct_fields(state: dict, direct: dict[str, str]) -> None:
-    """Merge *direct* key-value pairs into *state* and recompute completeness.
-
-    Direct fields take precedence over AI-extracted values.  An empty-string
-    value clears the field (user deleted their input).  Each merged entry is
-    tagged source='user' (or 'upload' for the attachments key) so the frontend
-    can distinguish user-typed values from AI-extracted ones.
-    """
-    fields = state.setdefault("fields", {})
-    for key, value in direct.items():
-        if value is not None and str(value).strip():
-            source = "upload" if key == "attachments" else "user"
-            fields[key] = {"filled": True, "value": value, "source": source}
-        else:
-            # Empty string or None — clear the field regardless of prior state
-            fields[key] = {"filled": False, "value": None, "source": None}
-    filled_required = sum(
-        1 for k in REQUIRED_FIELDS if isinstance(fields.get(k), dict) and fields[k].get("filled", False)
-    )
-    state["completeness"] = round((filled_required / len(REQUIRED_FIELDS)) * 100)
 
 
 def upsert_direct_fields(session_id: str, fields: dict[str, str]) -> None:
