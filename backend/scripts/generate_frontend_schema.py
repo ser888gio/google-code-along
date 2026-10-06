@@ -16,10 +16,7 @@ from field_schema import (  # noqa: E402
     DEFERRED_ANSWER_PATTERNS,
     DIRECT_CHAT_FIELD_KEYS,
     FIELD_SCHEMA,
-    OPTIONAL_FIELDS,
     REQUIRED_FIELDS,
-    STRICT_DIRECT_FIELD_KEYS,
-    SUGGESTABLE_DIRECT_FIELD_KEYS,
     build_sections,
 )
 
@@ -35,10 +32,7 @@ def main() -> None:
     TARGET.parent.mkdir(parents=True, exist_ok=True)
     sections_json = _json(build_sections())
     required_json = _json(REQUIRED_FIELDS)
-    optional_json = _json(OPTIONAL_FIELDS)
-    strict_direct_json = _json(STRICT_DIRECT_FIELD_KEYS)
-    suggestable_direct_json = _json(SUGGESTABLE_DIRECT_FIELD_KEYS)
-    direct_chat_keys_json = _json(DIRECT_CHAT_FIELD_KEYS)
+    direct_chat_key_union = " | ".join(json.dumps(key) for key in DIRECT_CHAT_FIELD_KEYS)
     deferred_patterns_json = _json(DEFERRED_ANSWER_PATTERNS)
     direct_chat_patterns = [
         {
@@ -53,7 +47,6 @@ def main() -> None:
         "from backend/field_schema.py.\n"
         f"""// Do not edit by hand.
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface FieldDef {{
   key: string;
   label: string;
@@ -76,11 +69,7 @@ export interface Section {{
 export const RS_SECTIONS: Section[] = {sections_json};
 
 export const REQUIRED_FIELD_KEYS = {required_json} as const;
-const OPTIONAL_FIELD_KEYS = {optional_json} as const;
-const STRICT_DIRECT_FIELD_KEYS = {strict_direct_json} as const;
-const SUGGESTABLE_DIRECT_FIELD_KEYS = {suggestable_direct_json} as const;
-const DIRECT_CHAT_FIELD_KEYS = {direct_chat_keys_json} as const;
-export type DirectChatFieldKey = (typeof DIRECT_CHAT_FIELD_KEYS)[number];
+export type DirectChatFieldKey = {direct_chat_key_union};
 
 export const DIRECT_CHAT_FIELD_PATTERNS: Array<{{
   key: DirectChatFieldKey;
