@@ -155,3 +155,68 @@ def test_append_conversation_turn_calls_set_with_merge_and_session_id():
     assert payload["session_id"] == "sess1"
     assert "messages" in payload
     assert doc_ref.set.call_args.kwargs.get("merge") is True
+
+
+def test_append_conversation_turn_writes_user_and_assistant_message_docs():
+    client, doc_ref = _mock_client()
+
+    with (
+        patch("firestore.writer._client", return_value=client),
+        patch("firestore.writer.firestore.ArrayUnion", side_effect=lambda items: items),
+    ):
+        append_conversation_turn(
+            "sess1",
+            "user message",
+            "assistant reply",
+            message_id="m1",
+            trace_id="t1",
+            span_id="s1",
+            model="gemini",
+            input_tokens=10,
+            output_tokens=20,
+            cost_usd=0.5,
+            latency_ms=300,
+            tool_calls=[{"name": "search"}],
+            phase="discovery",
+            finish_reason="STOP",
+        )
+
+    user_doc, assistant_doc = doc_ref.set.call_args.args[0]["messages"]
+    created_at = user_doc["created_at"]
+    assert user_doc == {
+        "message_id": "m1:user",
+        "trace_id": "t1",
+        "span_id": "s1",
+        "role": "user",
+        "text_redacted": "user message",
+        "text_original_hash": user_doc["text_original_hash"],
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.0,
+        "tool_calls": [],
+        "phase": "discovery",
+        "created_at": created_at,
+        "text": "user message",
+        "ts": created_at.isoformat(),
+    }
+    assert assistant_doc == {
+        "message_id": "m1",
+        "trace_id": "t1",
+        "span_id": "s1",
+        "role": "assistant",
+        "text_redacted": "assistant reply",
+        "text_original_hash": assistant_doc["text_original_hash"],
+        "model": "gemini",
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "cache_read_tokens": 0,
+        "cost_usd": 0.5,
+        "latency_ms": 300,
+        "tool_calls": [{"name": "search"}],
+        "phase": "discovery",
+        "finish_reason": "STOP",
+        "created_at": created_at,
+        "text": "assistant reply",
+        "ts": created_at.isoformat(),
+    }
