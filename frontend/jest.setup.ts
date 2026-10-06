@@ -24,3 +24,14 @@ if (typeof Element !== "undefined" && !Element.prototype.scrollIntoView) {
 		/* intentionally empty */
 	};
 }
+
+if (typeof globalThis.IntersectionObserver === "undefined") {
+	globalThis.IntersectionObserver = class {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+		takeRecords() {
+			return [];
+		}
+	} as unknown as typeof IntersectionObserver;
+}

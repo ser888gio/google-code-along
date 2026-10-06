@@ -34,7 +34,7 @@ jest.mock("../lib/api", () => ({
 	getHistory: jest.fn().mockResolvedValue([]),
 	getAnalysis: jest.fn().mockResolvedValue({ status: "not_found" }),
 	getSessionUploads: jest.fn().mockResolvedValue([]),
-	patchDirectFields: jest.fn().mockResolvedValue(null),
+	patchRsFieldState: jest.fn().mockResolvedValue(null),
 }));
 
 // Stub child components that have their own complex deps
@@ -84,19 +84,25 @@ jest.mock("@skodaflow/web-library", () => ({
 	),
 }));
 
+import { LocaleProvider } from "../app/i18n/LocaleContext";
 import ChatPage from "../app/page";
-import { extractContext, patchDirectFields, streamChat } from "../lib/api";
+import { extractContext, patchRsFieldState, streamChat } from "../lib/api";
 
 const mockStreamChat = streamChat as jest.Mock;
 const mockExtractContext = extractContext as jest.Mock;
-const mockPatchDirectFields = patchDirectFields as jest.Mock;
+const mockPatchRsFieldState = patchRsFieldState as jest.Mock;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function renderPage() {
-	return render(<ChatPage />);
+	localStorage.setItem("locale", "en");
+	return render(
+		<LocaleProvider>
+			<ChatPage />
+		</LocaleProvider>,
+	);
 }
 
 // Simulate a completed stream that sends one text chunk
@@ -147,9 +153,7 @@ describe("ChatPage — initial render", () => {
 
 	it("renders the welcome message", () => {
 		renderPage();
-		expect(
-			screen.getByText(/Welcome to your Business Analyst session/i),
-		).toBeInTheDocument();
+		expect(screen.getByText(/I'm your Discovery Agent/i)).toBeInTheDocument();
 	});
 
 	it("renders the Send button", () => {
@@ -219,7 +223,7 @@ describe("ChatPage — message rendering", () => {
 		});
 	});
 
-	it("shows 'AI CONSULTANT' label on assistant messages", async () => {
+	it("shows 'Discovery Agent' label on assistant messages", async () => {
 		resolveStream("Hi there.");
 		renderPage();
 
@@ -231,12 +235,12 @@ describe("ChatPage — message rendering", () => {
 
 		await waitFor(() => {
 			expect(
-				screen.getAllByText("AI CONSULTANT").length,
+				screen.getAllByText("Discovery Agent").length,
 			).toBeGreaterThanOrEqual(1);
 		});
 	});
 
-	it("shows 'VY' label on user messages", async () => {
+	it("shows 'YOU' label on user messages", async () => {
 		resolveStream();
 		renderPage();
 
@@ -246,7 +250,7 @@ describe("ChatPage — message rendering", () => {
 			fireEvent.click(screen.getByRole("button", { name: /Send/i }));
 		});
 
-		expect(screen.getByText("VY")).toBeInTheDocument();
+		expect(screen.getByText("YOU")).toBeInTheDocument();
 	});
 
 	it("clears the input field after sending", async () => {
@@ -371,31 +375,31 @@ describe("ChatPage — error state", () => {
 // ---------------------------------------------------------------------------
 
 describe("ChatPage — tab bar", () => {
-	const TABS = ["Preview", "BPMN", "Data", "Database", "Analysis", "Summary"];
+	const TABS = ["Preview", "Database", "Download File"];
 
-	it("renders all RS tabs", () => {
+	it("renders the visible RS tabs", () => {
 		renderPage();
 		for (const tab of TABS) {
 			expect(screen.getByRole("button", { name: tab })).toBeInTheDocument();
 		}
 	});
 
-	it("clicking Analysis before finalization shows the pending message", async () => {
+	it("does not render the hidden BPMN, Data and Analysis tabs", () => {
 		renderPage();
-		const analysisTab = screen.getByRole("button", { name: "Analysis" });
-		await act(async () => {
-			fireEvent.click(analysisTab);
-		});
-		expect(screen.getByText(/Analysis will appear here/i)).toBeInTheDocument();
+		for (const tab of ["BPMN", "Data", "Analysis"]) {
+			expect(
+				screen.queryByRole("button", { name: tab }),
+			).not.toBeInTheDocument();
+		}
 	});
 
 	it("clicking Preview tab shows the requirements specification panel", async () => {
 		renderPage();
 		// Click away first, then back
-		const analysisTab = screen.getByRole("button", { name: "Analysis" });
+		const databaseTab = screen.getByRole("button", { name: "Database" });
 		const previewTab = screen.getByRole("button", { name: "Preview" });
 		await act(async () => {
-			fireEvent.click(analysisTab);
+			fireEvent.click(databaseTab);
 		});
 		await act(async () => {
 			fireEvent.click(previewTab);
@@ -470,11 +474,19 @@ describe("ChatPage — RS live template", () => {
 		expect(placeholders.length).toBe(28);
 	});
 
-	it("updates field content after a turn when extractContext returns data", async () => {
+	it("shows an AI suggestion after a turn when extractContext returns data", async () => {
 		mockExtractContext.mockResolvedValue({
 			completeness: 35,
+			accepted_completeness: 0,
+			discovery_completeness: 35,
 			fields: {
-				process_as_is: { filled: true, value: "Team uses spreadsheets today." },
+				process_as_is: {
+					status: "suggested",
+					accepted: null,
+					suggestion: { value: "Team uses spreadsheets today." },
+					filled: false,
+					value: null,
+				},
 			},
 		});
 		resolveStream("Great, let me note that down.");
@@ -488,7 +500,7 @@ describe("ChatPage — RS live template", () => {
 
 		await waitFor(() => {
 			expect(
-				screen.getByText("Team uses spreadsheets today."),
+				screen.getByText(/AI suggests: Team uses spreadsheets today\./),
 			).toBeInTheDocument();
 		});
 	});
@@ -509,8 +521,8 @@ describe("ChatPage — direct chat field answers", () => {
 		mockStreamChat.mockReset();
 		mockExtractContext.mockReset();
 		mockExtractContext.mockResolvedValue(null);
-		mockPatchDirectFields.mockReset();
-		mockPatchDirectFields.mockResolvedValue(null);
+		mockPatchRsFieldState.mockReset();
+		mockPatchRsFieldState.mockResolvedValue(null);
 	});
 
 	function resolveTwoTurns(firstReply: string, secondReply = "Dekuji.") {
@@ -566,8 +578,10 @@ describe("ChatPage — direct chat field answers", () => {
 		await waitFor(() => {
 			expect(screen.getByDisplayValue("Ales Priklad")).toBeInTheDocument();
 		});
-		expect(mockPatchDirectFields).toHaveBeenCalledWith("test-session", {
-			product_owner: "Ales Priklad",
+		expect(mockPatchRsFieldState).toHaveBeenCalledWith("test-session", {
+			action: "accept",
+			source: "user_direct_chat",
+			fields: { product_owner: "Ales Priklad" },
 		});
 
 		const secondCallDirectFields = mockStreamChat.mock.calls[1][8];
@@ -599,7 +613,7 @@ describe("ChatPage — direct chat field answers", () => {
 		expect(
 			screen.queryByDisplayValue("Nevim, doplnim pozdeji."),
 		).not.toBeInTheDocument();
-		expect(mockPatchDirectFields).not.toHaveBeenCalled();
+		expect(mockPatchRsFieldState).not.toHaveBeenCalled();
 
 		const secondCallDirectFields = mockStreamChat.mock.calls[1][8];
 		expect(secondCallDirectFields?.product_owner).toBeUndefined();
