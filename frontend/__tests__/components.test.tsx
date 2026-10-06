@@ -38,18 +38,34 @@ jest.mock("../lib/api", () => ({
 }));
 
 // Stub child components that have their own complex deps
-jest.mock("../app/components/FileUpload", () => () => (
-	<div data-testid="file-upload" />
-));
-jest.mock("../app/components/BpmnPanel", () => () => (
-	<div data-testid="bpmn-panel" />
-));
-jest.mock("../app/components/DataflowPanel", () => () => (
-	<div data-testid="dataflow-panel" />
-));
-jest.mock("../app/components/FirestoreSrsPanel", () => () => (
-	<div data-testid="firestore-panel" />
-));
+jest.mock(
+	"../app/components/FileUpload",
+	() =>
+		function FileUpload() {
+			return <div data-testid="file-upload" />;
+		},
+);
+jest.mock(
+	"../app/components/BpmnPanel",
+	() =>
+		function BpmnPanel() {
+			return <div data-testid="bpmn-panel" />;
+		},
+);
+jest.mock(
+	"../app/components/DataflowPanel",
+	() =>
+		function DataflowPanel() {
+			return <div data-testid="dataflow-panel" />;
+		},
+);
+jest.mock(
+	"../app/components/FirestoreSrsPanel",
+	() =>
+		function FirestoreSrsPanel() {
+			return <div data-testid="firestore-panel" />;
+		},
+);
 jest.mock("../app/components/AnalysisPanel", () => ({
 	__esModule: true,
 	default: () => <div data-testid="analysis-panel" />,
