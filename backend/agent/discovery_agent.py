@@ -183,9 +183,6 @@ def _normalize_discovery_result(parsed: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Standalone extraction helper (for use outside ADK context, e.g. REST endpoints)
 # ---------------------------------------------------------------------------
-# TODO: replace the existing extract_rs_context() in context/extractor.py
-#       with this function once the 22-field schema is finalized.
-#       The old 8-field extractor can be kept temporarily for frontend backwards compat.
 
 
 async def extract_discovery_fields(
