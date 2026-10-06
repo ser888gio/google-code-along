@@ -30,6 +30,7 @@ Bucket layout this agent reads from:
 
 import json
 
+from config import GCS_PREFIX_ANALYSES, GCS_PREFIX_KNOWLEDGE_BASE
 from gcs.connector import list_files, read_text
 from google.adk.tools import BaseTool, FunctionTool
 from logger import get_logger
@@ -74,7 +75,7 @@ def search_past_analyses(query: str, max_results: int = 3) -> dict:
     TODO: add in-memory cache with TTL to avoid re-reading all GCS files every call.
     """
     try:
-        analysis_paths = [p for p in list_files(prefix="analyses/") if p.endswith("final_analysis.json")]
+        analysis_paths = [p for p in list_files(prefix=f"{GCS_PREFIX_ANALYSES}/") if p.endswith("final_analysis.json")]
         logger.debug(f"Searching past analyses: query='{query}' found={len(analysis_paths)} files")
         if not analysis_paths:
             return {"found": False, "results": []}
@@ -151,9 +152,9 @@ def list_knowledge_base_docs() -> dict:
     try:
         return {
             "categories": {
-                "templates": list_files(prefix="knowledge_base/templates/"),
-                "guidelines": list_files(prefix="knowledge_base/guidelines/"),
-                "examples": list_files(prefix="knowledge_base/examples/"),
+                "templates": list_files(prefix=f"{GCS_PREFIX_KNOWLEDGE_BASE}/templates/"),
+                "guidelines": list_files(prefix=f"{GCS_PREFIX_KNOWLEDGE_BASE}/guidelines/"),
+                "examples": list_files(prefix=f"{GCS_PREFIX_KNOWLEDGE_BASE}/examples/"),
             }
         }
     except Exception as exc:
