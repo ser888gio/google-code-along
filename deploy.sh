@@ -43,6 +43,11 @@ deploy_backend() {
 
 deploy_frontend() {
     echo "--- Frontend Deployment ---"
+    # NEXT_PUBLIC_* is baked at build time; an empty value makes the browser call the frontend origin and 404.
+    if [ -z "$BACKEND_URL" ]; then
+        echo "ERROR: BACKEND_URL is empty; refusing to build frontend." >&2
+        return 1
+    fi
     FRONTEND_SERVICE_NAME="$SERVICE_NAME-frontend"
     FRONTEND_IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$FRONTEND_SERVICE_NAME:latest"
 
