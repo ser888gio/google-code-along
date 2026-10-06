@@ -2,7 +2,6 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
-	type FeedbackVote,
 	type FinalAnalysis,
 	type RsState,
 	type SessionRating,
@@ -14,13 +13,13 @@ import {
 } from "../lib/api";
 import AnalysisPanel, { FinalizingOverlay } from "./components/AnalysisPanel";
 import BpmnPanel from "./components/BpmnPanel";
+import ChatTranscript from "./components/ChatTranscript";
 import DataflowPanel from "./components/DataflowPanel";
 import FileUpload from "./components/FileUpload";
 import FirestoreSrsPanel from "./components/FirestoreSrsPanel";
-import MessageBubble from "./components/MessageBubble";
 import RsLiveTemplate from "./components/RsLiveTemplate";
 import { type FinalizingStatus, useChatSession } from "./hooks/useChatSession";
-import { type Message, useMessages } from "./hooks/useMessages";
+import { useMessages } from "./hooks/useMessages";
 import { useRsExtraction } from "./hooks/useRsExtraction";
 import { useRsState } from "./hooks/useRsState";
 import { type ChatMode, useVoiceMode } from "./hooks/useVoiceMode";
@@ -863,43 +862,6 @@ function SessionRatingModal({
 					</button>
 				</div>
 			</form>
-		</div>
-	);
-}
-
-// ─── Chat Transcript ──────────────────────────────────────────────────────────
-
-function ChatTranscript({
-	messages,
-	sessionId,
-	bottomRef,
-	onFeedback,
-	onFeedbackComment,
-	onChoiceSelect,
-	textareaRef,
-}: {
-	messages: Message[];
-	sessionId: string | null;
-	bottomRef: React.RefObject<HTMLDivElement | null>;
-	onFeedback: (localId: string, vote: FeedbackVote) => Promise<void>;
-	onFeedbackComment: (localId: string, comment: string) => Promise<void>;
-	onChoiceSelect: (msgId: string, choice: string) => void;
-	textareaRef: React.RefObject<HTMLTextAreaElement | null>;
-}) {
-	return (
-		<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
-			{messages.map((msg) => (
-				<MessageBubble
-					key={msg.id}
-					msg={msg}
-					sessionId={sessionId}
-					onFeedback={onFeedback}
-					onFeedbackComment={onFeedbackComment}
-					onChoiceSelect={onChoiceSelect}
-					textareaRef={textareaRef}
-				/>
-			))}
-			<div ref={bottomRef} />
 		</div>
 	);
 }
