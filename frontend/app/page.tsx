@@ -1298,7 +1298,7 @@ export default function ChatPage() {
 
 	function newConversation() {
 		msgs.resetMessages(t("welcome_message"));
-		session.resetSession(t("welcome_message"));
+		session.resetSession();
 		rs.resetExtraction();
 		rsState.reset();
 		setActiveWorkflowField(null);
