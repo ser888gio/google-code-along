@@ -68,10 +68,6 @@ class RsFieldStatePatch(BaseModel):
     source: str | None = None
 
 
-def _response_from_state(discovery: dict | None, rs_field_state: dict | None) -> dict:
-    return compose_rs_field_view(discovery, rs_field_state)
-
-
 # Per-session dedup lock for /context/extract.
 # Prevents multiple parallel Gemini extraction calls for the same session
 # (common in voice mode where turn_complete events arrive faster than
@@ -153,12 +149,12 @@ async def context_extract(req: ContextRequest):
                 f"session_id={sid} "
                 f"completeness={saved.get('completeness')}%"
             )
-            return _response_from_state(saved, rs_field_state)
+            return compose_rs_field_view(saved, rs_field_state)
         rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
         if rs_field_state:
-            return _response_from_state(None, rs_field_state)
+            return compose_rs_field_view(None, rs_field_state)
         logger.info(f"No ADK session and no saved state for session_id={sid}")
-        return _response_from_state(None, None)
+        return compose_rs_field_view(None, None)
 
     # --- Per-session dedup lock ---
     # Ensure only one Gemini extraction runs per session at a time.
@@ -186,8 +182,8 @@ async def context_extract(req: ContextRequest):
                 logger.info(
                     f"Returning coalesced extraction result: session_id={sid} completeness={saved.get('completeness')}%"
                 )
-                return _response_from_state(saved, rs_field_state)
-            return _response_from_state(None, None)
+                return compose_rs_field_view(saved, rs_field_state)
+            return compose_rs_field_view(None, None)
 
     async with lock:
         # Re-fetch session inside the lock to pick up events that were
@@ -200,7 +196,7 @@ async def context_extract(req: ContextRequest):
         )
         if session is None:
             logger.warning(f"Session disappeared during extraction: session_id={sid}")
-            return _response_from_state(None, None)
+            return compose_rs_field_view(None, None)
 
         conversation_text = extract_conversation_text(session)
         logger.info(
@@ -239,9 +235,9 @@ async def context_extract(req: ContextRequest):
             merged = None
         if merged:
             rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
-            return _response_from_state(merged, rs_field_state)
+            return compose_rs_field_view(merged, rs_field_state)
         rs_field_state = await loop.run_in_executor(None, get_rs_field_state, sid)
-        return _response_from_state(result, rs_field_state)
+        return compose_rs_field_view(result, rs_field_state)
 
 
 @router.get("/discovery/{session_id}", response_model=ContextResponse)
@@ -258,9 +254,9 @@ async def discovery_state(session_id: str):
         logger.debug(f"Discovery state retrieved: session_id={session_id} completeness={saved.get('completeness')}%")
     rs_field_state = await loop.run_in_executor(None, get_rs_field_state, session_id)
     if saved or rs_field_state:
-        return _response_from_state(saved, rs_field_state)
+        return compose_rs_field_view(saved, rs_field_state)
     logger.debug(f"No saved discovery state for session_id={session_id}")
-    return _response_from_state(None, None)
+    return compose_rs_field_view(None, None)
 
 
 @router.patch("/discovery/{session_id}/rs-field-state", response_model=ContextResponse)
@@ -287,7 +283,7 @@ async def patch_rs_field_state(session_id: str, body: RsFieldStatePatch):
 
     discovery = await loop.run_in_executor(None, get_discovery_state, session_id)
     rs_field_state = await loop.run_in_executor(None, get_rs_field_state, session_id)
-    return _response_from_state(discovery, rs_field_state)
+    return compose_rs_field_view(discovery, rs_field_state)
 
 
 @router.patch("/discovery/{session_id}/fields", response_model=ContextResponse)
@@ -304,4 +300,4 @@ async def patch_direct_fields(session_id: str, body: DirectFieldsPatch):
     )
     discovery = await loop.run_in_executor(None, get_discovery_state, session_id)
     rs_field_state = await loop.run_in_executor(None, get_rs_field_state, session_id)
-    return _response_from_state(discovery, rs_field_state)
+    return compose_rs_field_view(discovery, rs_field_state)

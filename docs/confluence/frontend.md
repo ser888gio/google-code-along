@@ -214,7 +214,6 @@ Key exports:
 | `streamChat(...)` | `POST /chat/stream` |
 | `extractContext(sessionId)` | `POST /context/extract` |
 | `getDiscoveryState(sessionId)` | `GET /discovery/{sessionId}` |
-| `patchDirectFields(sessionId, fields)` | `PATCH /discovery/{sessionId}/fields` |
 | `downloadRsTemplateDocx(sessionId)` | `POST /document/rs-template/docx` |
 | `downloadPdf(sessionId)` | `POST /document/docx`; despite the name, downloads a DOCX |
 | `generateBpmn(sessionId)` | `POST /bpmn/generate` |

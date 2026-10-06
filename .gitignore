@@ -17,8 +17,6 @@ frontend/.env.local
 **/.pytest_cache/
 **/.venv/
 
-.aislop/
-!.aislop/config.yml
 .github/
 .uv-cache/
 .venv/

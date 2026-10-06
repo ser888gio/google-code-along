@@ -112,12 +112,7 @@ export function useChatSession(setError: (msg: string) => void) {
 		}
 	}
 
-	function openSessionRating(isStreaming: boolean, chatMode: string) {
-		if (!sessionId || isStreaming) return;
-		setRatingOpen(true);
-	}
-
-	function resetSession(welcomeText: string) {
+	function resetSession() {
 		setSessionId(null);
 		setSessionEnded(false);
 		setSessionRating(null);
@@ -146,7 +141,6 @@ export function useChatSession(setError: (msg: string) => void) {
 		openHistory,
 		loadSession,
 		handleSessionRatingSubmit,
-		openSessionRating,
 		resetSession,
 	};
 }

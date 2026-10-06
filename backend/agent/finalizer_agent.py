@@ -37,7 +37,7 @@ import os
 import time
 from typing import Any, cast
 
-from config import GCS_PREFIX_SESSIONS, GOOGLE_API_KEY, MODEL_FINALIZER, TEXT_EXTENSIONS
+from config import GCS_PREFIX_ANALYSES, GCS_PREFIX_SESSIONS, GOOGLE_API_KEY, MODEL_FINALIZER, TEXT_EXTENSIONS
 from firestore.writer import (
     set_finalization_error,
     upsert_final_analysis,
@@ -377,7 +377,7 @@ async def save_final_analysis(session_id: str, analysis: dict) -> str:
     """
 
     safe_session_id = sanitize_gcs_segment(session_id, field_name="session_id")
-    path = f"analyses/{safe_session_id}/final_analysis.json"
+    path = f"{GCS_PREFIX_ANALYSES}/{safe_session_id}/final_analysis.json"
     data = json.dumps(analysis, ensure_ascii=False, indent=2)
     gcs_uri = await asyncio.to_thread(write_file, path, data, "application/json")
     logger.info(f"Final analysis saved to GCS: {gcs_uri}")

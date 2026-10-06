@@ -221,7 +221,7 @@ pre-commit run --all-files
 | Task | Files usually involved |
 |---|---|
 | Add or rename an RS field | `backend/field_schema.py`, generated `frontend/app/generated/rsSchema.ts`, `RsLiveTemplate.tsx`, `app/i18n/*.json`, tests |
-| Change chat behavior | `backend/agent/prompt.py`, `backend/agent/discovery_agent.py`, `backend/answer_classifier.py`, `backend/main.py` |
+| Change chat behavior | `backend/prompts/agent.py`, `backend/agent/discovery_agent.py`, `backend/answer_classifier.py`, `backend/main.py` |
 | Change extraction behavior | `backend/context/extractor.py`, `backend/agent/discovery_agent.py`, `backend/field_schema.py` |
 | Change final analysis | `backend/agent/finalizer_agent.py`, `frontend/app/components/AnalysisPanel.tsx`, `frontend/lib/api.ts` |
 | Change document export | `backend/generation/*`, `backend/main.py`, frontend download button wiring |
