@@ -39,73 +39,18 @@ export default function ChatInput({
 	onMicToggle: () => void;
 }) {
 	const { t } = useLocale();
-	const isVoiceConnected = wsConnectionState === "connected";
 
 	return (
 		<div className="shrink-0 border-t border-gray-200 p-3">
 			{chatMode === "voice" ? (
-				<div className="flex flex-col items-center gap-2">
-					{wsConnectionState === "connecting" && (
-						<p className="text-xs text-yellow-600">{t("voice.connecting")}</p>
-					)}
-					{wsConnectionState === "error" && (
-						<p className="text-xs text-red-600">{t("voice.conn_failed")}</p>
-					)}
-					{recorderError && (
-						<p className="text-xs text-red-600">{recorderError}</p>
-					)}
-					<div className="flex items-center gap-3">
-						<button
-							type="button"
-							onClick={onMicToggle}
-							disabled={!isVoiceConnected || sessionEnded}
-							title={isRecording ? "Stop speaking" : "Start speaking"}
-							className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
-								isRecording
-									? "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse"
-									: isVoiceConnected && !sessionEnded
-										? "bg-[#4a6659] text-white hover:opacity-90"
-										: "bg-gray-300 text-gray-500 cursor-not-allowed"
-							}`}
-						>
-							<svg
-								aria-hidden="true"
-								width="20"
-								height="20"
-								viewBox="0 0 24 24"
-								fill="none"
-							>
-								<path
-									d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"
-									fill="currentColor"
-								/>
-								<path
-									d="M19 10v2a7 7 0 01-14 0v-2"
-									stroke="currentColor"
-									strokeWidth="2"
-									strokeLinecap="round"
-								/>
-								<path
-									d="M12 19v4M8 23h8"
-									stroke="currentColor"
-									strokeWidth="2"
-									strokeLinecap="round"
-								/>
-							</svg>
-						</button>
-						<span className="text-xs text-gray-500">
-							{isRecording
-								? t("voice.listening")
-								: isPlaying
-									? t("voice.ai_speaking")
-									: isVoiceConnected
-										? sessionEnded
-											? t("voice.chat_ended")
-											: t("voice.tap_to_speak")
-										: t("voice.connecting")}
-						</span>
-					</div>
-				</div>
+				<VoiceControls
+					wsConnectionState={wsConnectionState}
+					isRecording={isRecording}
+					isPlaying={isPlaying}
+					sessionEnded={sessionEnded}
+					recorderError={recorderError}
+					onMicToggle={onMicToggle}
+				/>
 			) : (
 				<div className="flex items-end gap-2">
 					<button
@@ -214,6 +159,109 @@ export default function ChatInput({
 					</div>
 				</div>
 			)}
+		</div>
+	);
+}
+
+function voiceStatusKey({
+	isRecording,
+	isPlaying,
+	isVoiceConnected,
+	sessionEnded,
+}: {
+	isRecording: boolean;
+	isPlaying: boolean;
+	isVoiceConnected: boolean;
+	sessionEnded: boolean;
+}): string {
+	if (isRecording) return "voice.listening";
+	if (isPlaying) return "voice.ai_speaking";
+	if (!isVoiceConnected) return "voice.connecting";
+	return sessionEnded ? "voice.chat_ended" : "voice.tap_to_speak";
+}
+
+function micButtonClass(isRecording: boolean, canSpeak: boolean): string {
+	if (isRecording)
+		return "bg-red-500 text-white shadow-lg shadow-red-200 animate-pulse";
+	if (canSpeak) return "bg-[#4a6659] text-white hover:opacity-90";
+	return "bg-gray-300 text-gray-500 cursor-not-allowed";
+}
+
+function VoiceControls({
+	wsConnectionState,
+	isRecording,
+	isPlaying,
+	sessionEnded,
+	recorderError,
+	onMicToggle,
+}: {
+	wsConnectionState: string;
+	isRecording: boolean;
+	isPlaying: boolean;
+	sessionEnded: boolean;
+	recorderError: string | null;
+	onMicToggle: () => void;
+}) {
+	const { t } = useLocale();
+	const isVoiceConnected = wsConnectionState === "connected";
+	const canSpeak = isVoiceConnected && !sessionEnded;
+
+	return (
+		<div className="flex flex-col items-center gap-2">
+			{wsConnectionState === "connecting" && (
+				<p className="text-xs text-yellow-600">{t("voice.connecting")}</p>
+			)}
+			{wsConnectionState === "error" && (
+				<p className="text-xs text-red-600">{t("voice.conn_failed")}</p>
+			)}
+			{recorderError && <p className="text-xs text-red-600">{recorderError}</p>}
+			<div className="flex items-center gap-3">
+				<button
+					type="button"
+					onClick={onMicToggle}
+					disabled={!canSpeak}
+					title={isRecording ? "Stop speaking" : "Start speaking"}
+					className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${micButtonClass(
+						isRecording,
+						canSpeak,
+					)}`}
+				>
+					<svg
+						aria-hidden="true"
+						width="20"
+						height="20"
+						viewBox="0 0 24 24"
+						fill="none"
+					>
+						<path
+							d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"
+							fill="currentColor"
+						/>
+						<path
+							d="M19 10v2a7 7 0 01-14 0v-2"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+						/>
+						<path
+							d="M12 19v4M8 23h8"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+						/>
+					</svg>
+				</button>
+				<span className="text-xs text-gray-500">
+					{t(
+						voiceStatusKey({
+							isRecording,
+							isPlaying,
+							isVoiceConnected,
+							sessionEnded,
+						}),
+					)}
+				</span>
+			</div>
 		</div>
 	);
 }
