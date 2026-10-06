@@ -54,7 +54,7 @@ Key areas:
 
 - `backend/api/`: routers for chat, discovery, documents, diagrams, sessions, and feedback.
 - `backend/agent/agent.py`: ADK orchestrator and audio agent definitions.
-- `backend/agent/prompt.py`: user-facing business-consultant system prompt.
+- `backend/prompts/agent.py`: system prompts for the orchestrator, discovery, research, and finalizer agents.
 - `backend/agent/discovery_agent.py`: field extraction and one-field workflow helpers.
 - `backend/answer_classifier.py` and `backend/answer_quality.py`: per-turn answer classification and quality scoring.
 - `backend/agent/finalizer_agent.py`: final analysis generation.

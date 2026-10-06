@@ -96,7 +96,7 @@ pre-commit run --all-files
 - `backend/api/sessions.py`: history, uploads, Firestore session data.
 - `backend/api/feedback.py`: message and session feedback.
 - `backend/agent/agent.py`: ADK text and audio agent objects.
-- `backend/agent/prompt.py`: orchestrator system prompt.
+- `backend/prompts/agent.py`: orchestrator and agent system prompts.
 - `backend/agent/discovery_agent.py`: extraction and workflow helpers.
 - `backend/agent/finalizer_agent.py`: final analysis pipeline.
 - `backend/agent/research_agent.py`: GCS-backed research tools and Vertex stub.
