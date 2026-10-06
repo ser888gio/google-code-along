@@ -46,28 +46,48 @@ function dispatchSseEvent(
 	parsed: Record<string, unknown>,
 	callbacks: StreamChatCallbacks,
 ): boolean {
-	if (parsed.session_id) callbacks.onSessionId(parsed.session_id as string);
-	if (parsed.message_id) callbacks.onMessageId?.(parsed.message_id as string);
+	// One event may carry several keys; the helpers run in this order on purpose.
+	notifyIdentifiers(parsed, callbacks);
 	if (parsed.error) {
 		callbacks.onError(parsed.error as string);
 		return true;
 	}
+	notifyTurnProgress(parsed, callbacks);
+	notifyStructuredUpdates(parsed, callbacks);
+	return false;
+}
+
+function notifyIdentifiers(
+	parsed: Record<string, unknown>,
+	callbacks: StreamChatCallbacks,
+): void {
+	if (parsed.session_id) callbacks.onSessionId(parsed.session_id as string);
+	if (parsed.message_id) callbacks.onMessageId?.(parsed.message_id as string);
+}
+
+function notifyTurnProgress(
+	parsed: Record<string, unknown>,
+	callbacks: StreamChatCallbacks,
+): void {
 	if (parsed.text) callbacks.onChunk(parsed.text as string);
 	if (parsed.event === "finalizing") callbacks.onFinalizing?.();
 	if (typeof parsed.active_field === "string")
 		callbacks.onActiveField?.(parsed.active_field);
-	if (
-		parsed.field_update &&
-		typeof (parsed.field_update as Record<string, unknown>).key === "string"
-	) {
-		const update = parsed.field_update as { key: string; value?: string };
+}
+
+function notifyStructuredUpdates(
+	parsed: Record<string, unknown>,
+	callbacks: StreamChatCallbacks,
+): void {
+	const update = parsed.field_update as
+		| { key?: unknown; value?: string }
+		| undefined;
+	if (typeof update?.key === "string")
 		callbacks.onFieldUpdate?.(update.key, update.value ?? "");
-	}
 	if (Array.isArray(parsed.choices))
 		callbacks.onChoices?.(parsed.choices as string[]);
 	if (typeof parsed.text_replace === "string")
 		callbacks.onTextReplace?.(parsed.text_replace);
-	return false;
 }
 
 function dispatchSsePayload(
