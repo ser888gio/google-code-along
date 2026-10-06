@@ -1,0 +1,87 @@
+direction: down
+
+title: |md
+  # Observability & Safety Architecture
+| {near: top-center; style.font-size: 28}
+
+turn: Chat Request / Turn {
+  icon: https://icons.terrastruct.com/dev%2Fpython.svg
+}
+
+safety: observability/safety.py {
+  preflight: Prompt-injection preflight {shape: hexagon}
+  cost: 'Cost circuit breaker ($5 default)' {shape: hexagon}
+}
+
+callbacks: observability/callbacks.py {
+  before: before_model_cb (stamp span, redacted prompt)
+  after: after_model_cb (tokens, cost, finish reason)
+  tools: before/after_tool_cb
+}
+
+instrument: Instrumentation {
+  metrics: observability/metrics.py (OTel) {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+  tracing: observability/tracing.py (OTel) {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+  redactor: privacy/redactor.py
+}
+
+gemini: Gemini API {
+  icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FAI%20and%20Machine%20Learning%2FAI%20Platform.svg
+}
+
+firestore: Firestore (redacted messages + metrics) {
+  icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FDatabases%2FCloud%20Firestore.svg
+  shape: cylinder
+}
+
+gcp: GCP Observability {
+  trace: Cloud Trace {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FManagement%20Tools%2FTrace.svg
+  }
+  monitoring: Cloud Monitoring (workload metrics) {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FManagement%20Tools%2FMonitoring.svg
+  }
+  logging: Cloud Logging {
+    icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FManagement%20Tools%2FLogging.svg
+  }
+  logmetrics: Log-based metrics (extract_timeout, firestore_unavailable, bridge_injection_failure)
+  dashboard: Dashboard + Alert policies (infra/monitoring)
+}
+
+bigquery: BigQuery Views (messages_view, feedback_view) {
+  icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FData%20Analytics%2FBigQuery.svg
+  shape: cylinder
+}
+
+jobs: Safety Jobs (infra/safety) {
+  redteam: redteam-job.yaml -> injection_block_rate
+  anomaly: anomaly-metric-job.yaml + anomalous_sessions.sql -> anomalous_session
+}
+
+turn -> safety.preflight: check user prompt
+turn -> safety.cost: check session cost
+safety.preflight -> callbacks.before: allowed
+callbacks.before -> gemini: model call
+gemini -> callbacks.after: response + usage
+callbacks.after -> instrument.metrics: record ttft / tokens / cost / safety
+callbacks.before -> instrument.tracing: span attributes
+callbacks.tools -> instrument.tracing: tool span events
+instrument.metrics -> instrument.redactor: redact previews
+
+instrument.tracing -> gcp.trace: OTel exporter
+instrument.metrics -> gcp.monitoring: OTel exporter
+turn -> gcp.logging: structured logs
+gcp.logging -> gcp.logmetrics: extract from logs
+gcp.logmetrics -> gcp.monitoring: user metrics
+gcp.monitoring -> gcp.dashboard: SLIs + alerts
+
+callbacks.after -> firestore: per-turn metrics
+firestore -> bigquery: export {style.stroke-dash: 4}
+bigquery -> jobs.anomaly: scan sessions {style.stroke-dash: 4}
+jobs.redteam -> gcp.monitoring: block rate
+jobs.anomaly -> gcp.monitoring: anomalous_session
+safety.cost -> gcp.monitoring: cost_circuit_tripped

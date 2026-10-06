@@ -1,0 +1,84 @@
+direction: down
+
+title: |md
+  # Frontend Architecture — Next.js App Router
+| {near: top-center; style.font-size: 28}
+
+user: Business User {
+  class: users
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+  shape: person
+}
+
+app: Next.js App (app/) {
+  page: page.tsx — two-panel workspace {
+    icon: https://icons.terrastruct.com/dev%2Freact.svg
+  }
+
+  hooks: Hooks {
+    session: useChatSession.ts
+    messages: useMessages.ts
+    rsstate: useRsState.ts
+    extraction: useRsExtraction.ts
+    voice: useVoiceMode.ts
+  }
+
+  panels: RS Workspace Panels {
+    live: RsLiveTemplate.tsx
+    bpmn: BpmnPanel.tsx
+    dataflow: DataflowPanel.tsx
+    analysis: AnalysisPanel.tsx
+    srs: FirestoreSrsPanel.tsx
+    upload: FileUpload.tsx
+    mermaid: MermaidDiagram.tsx
+  }
+
+  cross: Cross-cutting {
+    i18n: i18n/LocaleContext (cs / en)
+    schema: generated/rsSchema.ts {shape: document}
+    directchat: lib/directChatAnswer.ts
+  }
+}
+
+apiclient: lib/api.ts — HTTP + SSE + upload client {
+  icon: https://icons.terrastruct.com/dev%2Ftypescript.svg
+}
+
+voicelib: Voice Libs {
+  ws: lib/useWebSocket.ts
+  rec: lib/useAudioRecorder.ts
+  play: lib/useAudioPlayer.ts
+  worklet: public/pcm-*-processor.js
+}
+
+backend: Backend (Cloud Run) {
+  icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FCompute%2FCloud%20Run.svg
+}
+
+user -> app.page: interacts
+
+app.page -> app.hooks.session: session lifecycle
+app.page -> app.hooks.messages: message state
+app.page -> app.hooks.rsstate: RS field state
+app.page -> app.hooks.extraction: post-turn extract
+app.page -> app.hooks.voice: voice mode toggle
+app.page -> app.panels: render tabs
+app.page -> app.cross.i18n: t() labels
+
+app.cross.schema -> app.panels.live: field metadata
+app.cross.schema -> app.cross.directchat: pattern matching
+
+app.hooks.session -> apiclient: streamChat (SSE)
+app.hooks.extraction -> apiclient: POST /context/extract
+app.hooks.rsstate -> apiclient: sessions / fields
+app.panels.upload -> apiclient: POST /upload
+app.panels.bpmn -> apiclient: POST /bpmn/generate
+app.panels.dataflow -> apiclient: POST /dataflow/generate
+app.panels.analysis -> apiclient: "GET /analyses/{id} (poll)"
+
+app.hooks.voice -> voicelib.ws: connect
+voicelib.rec -> voicelib.worklet: PCM capture
+voicelib.play -> voicelib.worklet: PCM playback
+
+apiclient -> backend: HTTP + SSE
+voicelib.ws -> backend: "WS /ws/{user}/{session}" {style.stroke-dash: 4}

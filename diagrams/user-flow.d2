@@ -1,0 +1,149 @@
+direction: down
+
+title: |md
+  # User Flow — Interaction & Decisions
+| {near: top-center; style.font-size: 28}
+
+classes: {
+  decision: {
+    shape: diamond
+    style.fill: "#fef7e0"
+  }
+  terminal: {
+    shape: oval
+    style.fill: "#e6f4ea"
+  }
+  side: {
+    style.fill: "#f1f3f4"
+    style.stroke-dash: 2
+  }
+}
+
+user: Business User {
+  class: users
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+  shape: person
+}
+
+start: Open workspace {
+  shape: oval
+  style.fill: "#e8f0fe"
+}
+auth: Redirect to Microsoft Entra ID (OAuth2 / OIDC sign-in) {
+  style.fill: "#e8f0fe"
+}
+authed: Authenticated? {class: decision}
+session: Session minted for signed-in user {
+  style.fill: "#e8f0fe"
+}
+landing: Landing — welcome, 0%, empty fields (Preview / Database / Summary) {
+  style.fill: "#f1f3f4"
+}
+
+loop: Discovery Loop {
+  style.stroke-dash: 3
+
+  send: User sends message (POST /chat/stream) {
+    icon: https://icons.terrastruct.com/dev%2Ftypescript.svg
+  }
+  classify: Answer classified? {class: decision}
+  answered: Field filled (ANSWERED)
+  clarify: Assistant re-asks (CLARIFICATION)
+  deferred: Field parked (DEFERRED / skip)
+  advance: Backend advances FSM + picks next field {shape: hexagon}
+  update: Live field_update + choices buttons {
+    icon: https://icons.terrastruct.com/dev%2Freact.svg
+  }
+}
+
+extract: POST /context/extract {style.stroke-dash: 4}
+gauge: Completeness gauge (red < 50 / orange / green >= 80) {
+  shape: cylinder
+  style.fill: "#e8f0fe"
+}
+
+# Side branches off the loop
+upload: Upload file (modal, POST /upload) {class: side}
+voice: Toggle Voice (WebSocket mic + transcripts) {class: side}
+edit: Edit field / Accept AI suggestion (PATCH) {class: side}
+feedback: Thumbs feedback on message {class: side}
+history: History sidebar — resume session {class: side}
+lang: CZ / EN switch {class: side}
+
+# Completeness gates
+gate70: >= 70%? {class: decision}
+gate80: >= 80%? {class: decision}
+gate90: >= 90%? {class: decision}
+dfd: Data-Flow diagram (Mermaid)
+docx: Download RS .docx
+bpmn: BPMN + finalize offered
+
+# Wrap-up + finalize
+exhausted: All fields exhausted? {class: decision}
+finalizeq: Finalize now? {class: decision}
+reopen: Reopen deferred field
+marker: "[FINALIZING] emitted -> SSE finalizing event" {style.fill: "#fef7e0"}
+overlay: Analysis tab + finalizing overlay {style.fill: "#fef7e0"}
+poll: "Poll GET /analyses/{id} every 5s" {style.fill: "#fef7e0"}
+statusq: status? {class: decision}
+complete: AnalysisPanel — recommendation / team / priority / risks {class: terminal}
+errorState: Cost / failure notice {shape: oval; style.fill: "#fce8e6"}
+
+# Session end
+endchat: End chat -> rate 1-5 -> input locked {class: terminal}
+
+# --- Main flow ---
+user -> start
+start -> auth
+auth -> authed
+authed -> auth: no (retry) {style.stroke-dash: 4}
+authed -> session: yes
+session -> landing -> loop.send
+
+loop.send -> loop.classify
+loop.classify -> loop.answered: answered
+loop.classify -> loop.clarify: clarification
+loop.classify -> loop.deferred: deferred
+loop.answered -> loop.advance
+loop.clarify -> loop.advance
+loop.deferred -> loop.advance
+loop.advance -> loop.update
+loop.update -> loop.send: next turn
+
+# Completeness pipeline
+loop.send -> extract: after turn {style.stroke-dash: 4}
+extract -> gauge
+
+# Gates fed by completeness
+gauge -> gate70
+gate70 -> dfd: yes
+gauge -> gate80
+gate80 -> docx: yes
+gauge -> gate90
+gate90 -> bpmn: yes
+
+# Side branches (user can take these any time during the loop)
+loop.send -> upload {style.stroke-dash: 2}
+loop.send -> voice {style.stroke-dash: 2}
+loop.update -> edit {style.stroke-dash: 2}
+loop.update -> feedback {style.stroke-dash: 2}
+loop.send -> lang {style.stroke-dash: 2}
+history -> loop.send: restore {style.stroke-dash: 2}
+
+# Wrap-up decision
+loop.advance -> exhausted: no fields left
+exhausted -> loop.send: no {style.stroke-dash: 4}
+exhausted -> finalizeq: yes
+finalizeq -> reopen: no
+reopen -> loop.send {style.stroke-dash: 4}
+finalizeq -> marker: yes
+
+# Finalize path
+gate90 -> marker: auto-finalize {style.stroke-dash: 4}
+marker -> overlay -> poll -> statusq
+statusq -> complete: complete
+statusq -> poll: pending {style.stroke-dash: 4}
+statusq -> errorState: error
+
+# Session end (reachable from the loop)
+loop.update -> endchat: user ends chat {style.stroke-dash: 2}

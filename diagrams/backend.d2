@@ -1,0 +1,118 @@
+direction: down
+
+title: |md
+  # Backend Architecture — FastAPI + Google ADK
+| {near: top-center; style.font-size: 28}
+
+client: Frontend / Browser {
+  class: users
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+}
+
+main: main.py — FastAPI app (CORS, telemetry, routers) {
+  icon: https://icons.terrastruct.com/dev%2Fpython.svg
+}
+
+routers: API Routers (backend/api) {
+  chat: chat.py
+  discovery: discovery.py
+  diagrams: diagrams.py
+  documents: documents.py
+  sessions: sessions.py
+  feedback: feedback.py
+}
+
+turn: Turn Engine {
+  chat_turn: chat_turn.py
+  streaming: chat_streaming.py
+  classify: answer_classifier.py
+  quality: answer_quality.py
+  fsm: workflow_state.py (FSM) {shape: hexagon}
+}
+
+agents: ADK Agents + Gemini Pipelines {
+  orch: Orchestrator rs_agent — Gemini 3.1 Pro {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+  audio: Audio agent — Gemini 3.1 Flash Live {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+  discov: discovery_agent — Flash-Lite {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+  finalize: finalizer_agent — Gemini 3.1 Pro {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+  research: research_agent (GCS tools) {
+    icon: https://icons.terrastruct.com/dev%2Fpython.svg
+  }
+}
+
+voice: Voice Path {
+  ws: audio_websocket.py
+  bridge: session_bridge.py
+}
+
+gen: Generation & Diagrams {
+  srs: generation/srs_compiler.py
+  compiler: generation/compiler.py
+  pdf: generation/pdf_export.py
+  word: generation/word_export.py
+  bpmn: bpmn/generator.py (Mermaid)
+  dataflow: dataflow/generator.py (Mermaid)
+}
+
+schema: field_schema.py — 28 fields / 6 sections {shape: document}
+
+persist: Persistence & Privacy {
+  writer: firestore/writer.py
+  gcs_conn: gcs/connector.py
+  redactor: privacy/redactor.py
+}
+
+firestore: Firestore {
+  icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FDatabases%2FCloud%20Firestore.svg
+  shape: cylinder
+}
+gcs: Cloud Storage {
+  icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FStorage%2FCloud%20Storage.svg
+  shape: cylinder
+}
+gemini: Gemini API {
+  icon: https://icons.terrastruct.com/gcp%2FProducts%20and%20services%2FAI%20and%20Machine%20Learning%2FAI%20Platform.svg
+}
+
+client -> main: HTTP / SSE / WS
+main -> routers: include_router
+
+routers.chat -> turn.chat_turn: run turn
+turn.chat_turn -> turn.classify: classify answer
+turn.chat_turn -> turn.fsm: advance phase
+turn.chat_turn -> turn.streaming: stream tokens
+turn.streaming -> agents.orch: run orchestrator
+agents.orch -> agents.research: tools (search_past_analyses, list_kb, search_vertex_ai stub)
+turn.chat_turn -> agents.discov: per-turn extraction
+turn.chat_turn -> agents.finalize: "on [FINALIZING]" {style.stroke-dash: 4}
+
+routers.discovery -> agents.discov: POST /context/extract
+routers.documents -> gen: docx / pdf / rs-template
+routers.diagrams -> gen.bpmn: score >= 90
+routers.diagrams -> gen.dataflow: score >= 70
+
+main -> voice.ws: "WS /ws/{user}/{session}" {style.stroke-dash: 4}
+voice.ws -> agents.audio: PCM stream {style.stroke-dash: 4}
+voice.bridge -> agents.orch: inject transcript
+
+agents.orch -> gemini: generate_content
+agents.discov -> gemini: extract
+agents.finalize -> gemini: synthesize
+agents.finalize -> gcs: final_analysis.json
+
+schema -> agents.discov: field metadata
+schema -> gen.srs: field metadata
+
+turn.chat_turn -> persist.writer: persist state
+persist.writer -> persist.redactor: redact text
+persist.writer -> firestore: read / write
+persist.gcs_conn -> gcs: read / write
+agents.research -> gcs: search analyses / list KB

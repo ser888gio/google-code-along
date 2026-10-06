@@ -1,0 +1,65 @@
+direction: down
+
+title: |md
+  # User Flow — Happy Path
+| {near: top-center; style.font-size: 28}
+
+user: Business User {
+  class: users
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+  shape: person
+}
+
+start: Open app {
+  shape: oval
+  style.fill: "#e8f0fe"
+}
+
+auth: Sign in with Microsoft Entra ID {
+  style.fill: "#e8f0fe"
+}
+
+landing: See welcome + empty RS (0%) {
+  style.fill: "#f1f3f4"
+}
+
+send: Type answer, press Send {
+  icon: https://icons.terrastruct.com/dev%2Ftypescript.svg
+}
+
+respond: Assistant streams reply (SSE); RS fills live {
+  style.fill: "#f1f3f4"
+}
+
+ready: Completeness >= 80% — "ready to generate" {
+  style.fill: "#e6f4ea"
+}
+
+offer: Assistant offers to finalize (>= 90%) -> user says "generate" {
+  style.fill: "#e6f4ea"
+}
+
+finalizing: Finalizing overlay + poll every 5s {
+  style.fill: "#fef7e0"
+}
+
+analysis: Analysis ready — recommendation / team / risks {
+  style.fill: "#e6f4ea"
+}
+
+download: Download RS .docx {
+  shape: oval
+  style.fill: "#e6f4ea"
+}
+
+user -> start
+start -> auth
+auth -> landing: authenticated
+landing -> send
+send -> respond
+respond -> send: keep chatting until enough collected {style.stroke-dash: 4}
+respond -> ready
+ready -> offer
+offer -> finalizing
+finalizing -> analysis
+analysis -> download
