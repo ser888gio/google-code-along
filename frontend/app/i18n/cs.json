@@ -21,6 +21,8 @@
 	"header.rs": "Specifikace požadavků",
 	"header.voice_to_text": "Přepnout na textový režim",
 	"header.text_to_voice": "Přepnout na hlasový režim",
+	"mobile.view_chat": "Chat",
+	"mobile.view_rs": "Specifikace",
 	"tab.preview": "Náhled",
 	"tab.bpmn": "BPMN",
 	"tab.data": "Data",

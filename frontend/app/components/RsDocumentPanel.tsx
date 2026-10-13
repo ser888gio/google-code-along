@@ -126,13 +126,16 @@ export default function RsDocumentPanel({
 						</button>
 					))}
 				</div>
-				<div className="flex shrink-0 items-center gap-3">
+				<div className="hidden shrink-0 items-center gap-3 lg:flex">
 					<button
 						type="button"
 						onClick={onNewConversation}
+						aria-label={t("btn.new_conversation")}
+						title={t("btn.new_conversation")}
 						className="flex items-center gap-1.5 whitespace-nowrap rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
 					>
-						{t("btn.new_conversation")}
+						<span className="xl:hidden">+</span>
+						<span className="hidden xl:inline">{t("btn.new_conversation")}</span>
 					</button>
 					<LanguageSwitcher />
 				</div>
