@@ -19,7 +19,6 @@ import { useMessages } from "./hooks/useMessages";
 import { useRsExtraction } from "./hooks/useRsExtraction";
 import { useRsState } from "./hooks/useRsState";
 import { useVoiceMode } from "./hooks/useVoiceMode";
-import LanguageSwitcher from "./i18n/LanguageSwitcher";
 import { useLocale } from "./i18n/LocaleContext";
 import {
 	type DirectChatFieldKey,
@@ -244,16 +243,6 @@ export default function ChatPage() {
 
 	return (
 		<div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
-			<div className="fixed right-4 top-4 z-50 flex items-center gap-3">
-				<button
-					type="button"
-					onClick={newConversation}
-					className="flex items-center gap-1.5 rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
-				>
-					{t("btn.new_conversation")}
-				</button>
-				<LanguageSwitcher />
-			</div>
 			{/* ── Left panel ─────────────────────────────────── */}
 			<div className="flex min-h-0 w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
 				{session.historyOpen && (
@@ -393,6 +382,7 @@ export default function ChatPage() {
 					recentlyChangedKeys={rsState.recentlyChangedKeys}
 					clearChangedKey={rsState.clearChangedKey}
 					clearAllChangedKeys={rsState.clearAllChangedKeys}
+					onNewConversation={newConversation}
 				/>
 			</div>
 
