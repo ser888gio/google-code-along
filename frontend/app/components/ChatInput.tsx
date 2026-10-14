@@ -82,10 +82,10 @@ export default function ChatInput({
 						onChange={(e) => onInputChange(e.target.value)}
 						onKeyDown={onKeyDown}
 						placeholder={t("input.placeholder")}
-						rows={1}
+						rows={3}
 						disabled={isStreaming || sessionEnded}
 						className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-base text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
-						style={{ minHeight: 40, maxHeight: 160 }}
+						style={{ minHeight: 88, maxHeight: 160 }}
 					/>
 					<div className="flex shrink-0 flex-col gap-2">
 						<button

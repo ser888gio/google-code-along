@@ -391,7 +391,7 @@ describe("ChatPage — error state", () => {
 // ---------------------------------------------------------------------------
 
 describe("ChatPage — tab bar", () => {
-	const TABS = ["Preview", "Database", "Download File"];
+	const TABS = ["Preview", "BPMN", "Data", "Download File"];
 
 	it("renders the visible RS tabs", () => {
 		renderPage();
@@ -400,9 +400,9 @@ describe("ChatPage — tab bar", () => {
 		}
 	});
 
-	it("does not render the hidden BPMN, Data and Analysis tabs", () => {
+	it("does not render the hidden Database and Analysis tabs", () => {
 		renderPage();
-		for (const tab of ["BPMN", "Data", "Analysis"]) {
+		for (const tab of ["Database", "Analysis"]) {
 			expect(
 				screen.queryByRole("button", { name: tab }),
 			).not.toBeInTheDocument();
@@ -412,10 +412,10 @@ describe("ChatPage — tab bar", () => {
 	it("clicking Preview tab shows the requirements specification panel", async () => {
 		renderPage();
 		// Click away first, then back
-		const databaseTab = screen.getByRole("button", { name: "Database" });
+		const bpmnTab = screen.getByRole("button", { name: "BPMN" });
 		const previewTab = screen.getByRole("button", { name: "Preview" });
 		await act(async () => {
-			fireEvent.click(databaseTab);
+			fireEvent.click(bpmnTab);
 		});
 		await act(async () => {
 			fireEvent.click(previewTab);

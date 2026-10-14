@@ -34,6 +34,7 @@ export default function ChatPage() {
 	const [input, setInput] = useState("");
 	const [isStreaming, setIsStreaming] = useState(false);
 	const [uploadOpen, setUploadOpen] = useState(false);
+	const [mobileView, setMobileView] = useState<"chat" | "rs">("chat");
 	const [activeWorkflowField, setActiveWorkflowField] = useState<string | null>(
 		null,
 	);
@@ -243,19 +244,42 @@ export default function ChatPage() {
 	}
 
 	return (
-		<div className="flex h-screen overflow-hidden bg-gray-100 font-sans">
-			<div className="fixed right-4 top-4 z-50 flex items-center gap-3">
+		<div className="flex h-dvh flex-col overflow-hidden bg-gray-100 font-sans lg:flex-row">
+			{/* ── Small-screen view switcher ─────────────────── */}
+			<div className="flex shrink-0 items-center gap-2 border-b border-gray-200 bg-white px-3 py-2 lg:hidden">
+				<div className="flex min-w-0 flex-1 rounded border border-gray-200 p-0.5">
+					{(["chat", "rs"] as const).map((view) => (
+						<button
+							type="button"
+							key={view}
+							aria-pressed={mobileView === view}
+							onClick={() => setMobileView(view)}
+							className={`flex-1 truncate rounded px-2 py-1.5 text-xs font-semibold transition-colors ${
+								mobileView === view
+									? "bg-[#1a3a2a] text-white"
+									: "text-gray-600 hover:text-gray-900"
+							}`}
+						>
+							{t(view === "chat" ? "mobile.view_chat" : "mobile.view_rs")}
+						</button>
+					))}
+				</div>
 				<button
 					type="button"
 					onClick={newConversation}
-					className="flex items-center gap-1.5 rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+					aria-label={t("btn.new_conversation")}
+					title={t("btn.new_conversation")}
+					className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[#4caf50] bg-[#4caf50] text-lg font-semibold leading-none text-white shadow-sm transition-opacity hover:opacity-90"
 				>
-					{t("btn.new_conversation")}
+					+
 				</button>
 				<LanguageSwitcher />
 			</div>
+
 			{/* ── Left panel ─────────────────────────────────── */}
-			<div className="flex min-h-0 w-1/2 shrink-0 flex-col border-r border-gray-200 bg-white">
+			<div
+				className={`${mobileView === "chat" ? "flex" : "hidden"} min-h-0 w-full flex-1 flex-col border-r border-gray-200 bg-white lg:flex lg:w-1/2 lg:flex-none`}
+			>
 				{session.historyOpen && (
 					<HistorySidebar
 						sessions={session.historySessions}
@@ -374,7 +398,9 @@ export default function ChatPage() {
 			</div>
 
 			{/* ── Right panel ────────────────────────────────── */}
-			<div className="flex w-1/2 flex-col overflow-hidden">
+			<div
+				className={`${mobileView === "rs" ? "flex" : "hidden"} min-h-0 w-full flex-1 flex-col overflow-hidden lg:flex lg:w-1/2 lg:flex-initial`}
+			>
 				<RsDocumentPanel
 					activeTab={activeTab}
 					onTabChange={setActiveTab}
@@ -393,6 +419,7 @@ export default function ChatPage() {
 					recentlyChangedKeys={rsState.recentlyChangedKeys}
 					clearChangedKey={rsState.clearChangedKey}
 					clearAllChangedKeys={rsState.clearAllChangedKeys}
+					onNewConversation={newConversation}
 				/>
 			</div>
 

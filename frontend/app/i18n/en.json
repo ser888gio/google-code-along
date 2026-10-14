@@ -21,6 +21,8 @@
 	"header.rs": "Requirements Specification",
 	"header.voice_to_text": "Switch to text mode",
 	"header.text_to_voice": "Switch to voice mode",
+	"mobile.view_chat": "Chat",
+	"mobile.view_rs": "Specification",
 	"tab.preview": "Preview",
 	"tab.bpmn": "BPMN",
 	"tab.data": "Data",

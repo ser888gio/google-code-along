@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import type { FinalAnalysis, RsState, SrsData } from "../../lib/api";
 import type { FinalizingStatus } from "../hooks/useChatSession";
+import LanguageSwitcher from "../i18n/LanguageSwitcher";
 import { useLocale } from "../i18n/LocaleContext";
 import AnalysisPanel, { FinalizingOverlay } from "./AnalysisPanel";
 import BpmnPanel from "./BpmnPanel";
@@ -19,8 +20,8 @@ const RS_TABS = [
 	"Summary",
 ] as const;
 export type RsTab = (typeof RS_TABS)[number];
-// BPMN, Data and Analysis are hidden from the tab bar; Analysis is still opened programmatically on finalization.
-const HIDDEN_TABS = new Set<RsTab>(["BPMN", "Data", "Analysis"]);
+// Analysis is hidden from the tab bar but still opened programmatically on finalization.
+const HIDDEN_TABS = new Set<RsTab>(["Database", "Analysis"]);
 
 export default function RsDocumentPanel({
 	activeTab,
@@ -40,6 +41,7 @@ export default function RsDocumentPanel({
 	recentlyChangedKeys,
 	clearChangedKey,
 	clearAllChangedKeys,
+	onNewConversation,
 }: {
 	activeTab: RsTab;
 	onTabChange: (t: RsTab) => void;
@@ -58,6 +60,7 @@ export default function RsDocumentPanel({
 	recentlyChangedKeys: Set<string>;
 	clearChangedKey: (key: string) => void;
 	clearAllChangedKeys: () => void;
+	onNewConversation: () => void;
 }) {
 	const { t } = useLocale();
 	const TAB_LABELS: Record<string, string> = {
@@ -103,11 +106,11 @@ export default function RsDocumentPanel({
 
 	return (
 		<div className="flex h-full flex-col">
-			<div className="flex shrink-0 items-center border-b border-gray-200 bg-white px-4">
-				<span className="mr-4 border-r border-gray-200 py-3 pr-4 text-sm font-semibold text-gray-800">
+			<div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4">
+				<span className="mr-4 hidden whitespace-nowrap border-r border-gray-200 py-3 pr-4 text-sm font-semibold text-gray-800 2xl:inline">
 					{t("header.rs")}
 				</span>
-				<div className="flex overflow-x-auto">
+				<div className="flex min-w-0 flex-1 overflow-x-auto">
 					{RS_TABS.filter((tab) => !HIDDEN_TABS.has(tab)).map((tab) => (
 						<button
 							type="button"
@@ -122,6 +125,19 @@ export default function RsDocumentPanel({
 							{TAB_LABELS[tab] ?? tab}
 						</button>
 					))}
+				</div>
+				<div className="hidden shrink-0 items-center gap-3 lg:flex">
+					<button
+						type="button"
+						onClick={onNewConversation}
+						aria-label={t("btn.new_conversation")}
+						title={t("btn.new_conversation")}
+						className="flex items-center gap-1.5 whitespace-nowrap rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+					>
+						<span className="xl:hidden">+</span>
+						<span className="hidden xl:inline">{t("btn.new_conversation")}</span>
+					</button>
+					<LanguageSwitcher />
 				</div>
 			</div>
 
