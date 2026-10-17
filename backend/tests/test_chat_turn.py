@@ -2,7 +2,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from chat_turn import _is_finalize_choice, prepare_workflow_turn, run_turn_postprocessing
 
 
