@@ -4,8 +4,9 @@ Finalizer Agent — Use Case Analysis & Classification.
 Responsibility: produce the complete final analysis document once the discovery
 session reaches ≥ 90% completeness. This is the last step in the pipeline.
 
-Triggered: by main.py as an asyncio.Task when the orchestrator outputs the
-           [FINALIZING] marker in its streamed response.
+Triggered: by chat_turn.run_turn_postprocessing as an asyncio.Task once
+           finalization starts — for text chat when the workflow reaches
+           ready_to_finalize, for voice when the audio model outputs [FINALIZING].
 
 Input assembled by run_finalizer() before calling Gemini Pro:
   - Full conversation transcript (from ADK session events)
@@ -279,8 +280,8 @@ async def run_finalizer(
 ) -> dict | None:
     """Run the full finalization pipeline for a session.
 
-    Called by main.py as asyncio.create_task() when [FINALIZING] is detected.
-    Writes the result to GCS and Firestore.
+    Called by chat_turn.run_turn_postprocessing as asyncio.create_task() once
+    finalization starts. Writes the result to GCS and Firestore.
 
     Args:
         session_id:        ADK session ID.

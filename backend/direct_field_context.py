@@ -255,6 +255,9 @@ def _render_workflow_context(
     lines.extend(_render_deferred_workflow_fields(context, labels))
 
     if context.get("ready_to_finalize"):
-        lines.append("- The user chose to finalize. Summarize briefly and emit [FINALIZING] on its own line.")
+        lines.append(
+            "- The user chose to finalize. The system now generates the final analysis. "
+            "Summarize briefly and say the analysis will appear shortly. Do not ask further questions."
+        )
 
     return lines

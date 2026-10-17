@@ -436,7 +436,7 @@ async def run_turn_postprocessing(
             logger.info(f"Finalizer not launched: session={session_id} already finalizing or complete")
             return
         runtime.record_session_outcome(session_id, "finalized")
-        logger.info(f"[FINALIZING] detected: session={session_id} — launching finalizer")
+        logger.info(f"Finalization started: session={session_id} — launching finalizer")
 
         session_snap = await runtime.session_service.get_session(
             app_name=APP_NAME,
