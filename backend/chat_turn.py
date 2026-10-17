@@ -165,7 +165,9 @@ async def prepare_workflow_turn(
 
     tail_text = _build_conversation_tail(session, message)
     if state.phase == Phase.WRAP_UP:
-        if _is_finalize_choice(message):
+        finalize = _is_finalize_choice(message)
+        logger.info(f"Wrap-up decision: event=wrap_up_decision session_id={session_id} finalize={finalize}")
+        if finalize:
             state.transition(WorkflowEvent.FINALIZE_CHOSEN)
         else:
             await _reopen_first_deferred_field(
@@ -196,6 +198,8 @@ async def prepare_workflow_turn(
     if state.phase != Phase.READY_TO_FINALIZE:
         next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
         if next_field is None:
+            if state.phase != Phase.WRAP_UP:
+                logger.info(f"Wrap-up entered: event=wrap_up_entered session_id={session_id}")
             state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
         else:
             state.transition(WorkflowEvent.FIELD_FOUND, active_field=next_field)
