@@ -237,7 +237,7 @@ export default function ChatPage() {
 							key={view}
 							aria-pressed={mobileView === view}
 							onClick={() => setMobileView(view)}
-							className={`flex-1 truncate rounded px-2 py-1.5 text-xs font-semibold transition-colors ${
+							className={`min-w-0 flex-1 truncate rounded px-1 py-2 text-xs font-semibold transition-colors sm:px-2 ${
 								mobileView === view
 									? "bg-[#1a3a2a] text-white"
 									: "text-gray-600 hover:text-gray-900"
@@ -252,7 +252,7 @@ export default function ChatPage() {
 					onClick={newConversation}
 					aria-label={t("btn.new_conversation")}
 					title={t("btn.new_conversation")}
-					className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[#4caf50] bg-[#4caf50] text-lg font-semibold leading-none text-white shadow-sm transition-opacity hover:opacity-90"
+					className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-[#4caf50] bg-[#4caf50] text-lg font-semibold leading-none text-white shadow-sm transition-opacity hover:opacity-90"
 				>
 					+
 				</button>
@@ -261,7 +261,7 @@ export default function ChatPage() {
 
 			{/* ── Left panel ─────────────────────────────────── */}
 			<div
-				className={`${mobileView === "chat" ? "flex" : "hidden"} min-h-0 w-full flex-1 flex-col border-r border-gray-200 bg-white lg:flex lg:w-1/2 lg:flex-none`}
+				className={`${mobileView === "chat" ? "flex" : "hidden"} relative min-h-0 w-full flex-1 flex-col border-r border-gray-200 bg-white lg:flex lg:w-1/2 lg:flex-none`}
 			>
 				{session.historyOpen && (
 					<HistorySidebar
@@ -339,7 +339,7 @@ export default function ChatPage() {
 						}}
 					>
 						<div
-							className="w-80 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+							className="w-[calc(100%-2rem)] max-w-80 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
 							onClick={(e) => e.stopPropagation()}
 							onKeyDown={(e) => e.stopPropagation()}
 						>
@@ -350,7 +350,8 @@ export default function ChatPage() {
 								<button
 									type="button"
 									onClick={() => setUploadOpen(false)}
-									className="text-xs text-gray-400 hover:text-gray-600"
+									aria-label={t("btn.close")}
+									className="-mr-2 flex h-8 w-8 items-center justify-center rounded text-sm text-gray-400 hover:bg-gray-100 hover:text-gray-600"
 								>
 									✕
 								</button>
@@ -375,8 +376,8 @@ export default function ChatPage() {
 					onSubmit={session.handleSessionRatingSubmit}
 				/>
 
-				<div className="shrink-0 px-4 py-1.5 text-center">
-					<p className="text-[10px] text-gray-400">{t("disclaimer")}</p>
+				<div className="shrink-0 px-4 py-1.5 text-center short:hidden">
+					<p className="text-[11px] text-gray-400">{t("disclaimer")}</p>
 				</div>
 			</div>
 

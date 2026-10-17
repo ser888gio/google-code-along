@@ -57,6 +57,7 @@ export default function ChatInput({
 						type="button"
 						onClick={onOpenUpload}
 						title="Attach a file"
+						aria-label={t("modal.attach_file")}
 						disabled={sessionEnded}
 						className="flex shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 hover:border-[#4caf50] hover:text-[#4caf50] transition-colors"
 						style={{ width: 40, height: 40 }}
@@ -65,15 +66,14 @@ export default function ChatInput({
 							aria-hidden="true"
 							width="18"
 							height="18"
-							viewBox="0 0 18 18"
+							viewBox="0 0 24 24"
 							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
 						>
-							<path
-								d="M9 4v10M4 9h10"
-								stroke="currentColor"
-								strokeWidth="1.8"
-								strokeLinecap="round"
-							/>
+							<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
 						</svg>
 					</button>
 					<textarea
@@ -82,17 +82,20 @@ export default function ChatInput({
 						onChange={(e) => onInputChange(e.target.value)}
 						onKeyDown={onKeyDown}
 						placeholder={t("input.placeholder")}
-						rows={3}
+						rows={2}
 						disabled={isStreaming || sessionEnded}
-						className="flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-base text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50"
-						style={{ minHeight: 88, maxHeight: 160 }}
+						className="min-h-22 min-w-0 flex-1 resize-none rounded border border-gray-200 bg-white px-3 py-2 text-base text-gray-800 placeholder-gray-400 outline-none focus:border-[#4caf50] disabled:opacity-50 short:min-h-11"
+						style={{ maxHeight: 160 }}
 					/>
-					<div className="flex shrink-0 flex-col gap-2">
+					{/* Icon-only below `sm` so the textarea gets the width on phones. */}
+					<div className="flex shrink-0 flex-col gap-2 short:flex-row">
 						<button
 							type="button"
 							onClick={onSend}
 							disabled={!input.trim() || isStreaming || sessionEnded}
-							className="flex items-center gap-1.5 rounded bg-[#4a6659] px-4 py-2.5 text-base font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label={t("btn.send")}
+							title={t("btn.send")}
+							className="flex h-10 w-10 items-center justify-center gap-1.5 rounded bg-[#4a6659] text-base font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 sm:h-auto sm:w-auto sm:px-4 sm:py-2.5"
 						>
 							{isStreaming ? (
 								<svg
@@ -115,11 +118,11 @@ export default function ChatInput({
 								</svg>
 							) : (
 								<>
-									{t("btn.send")}
+									<span className="hidden sm:inline">{t("btn.send")}</span>
 									<svg
 										aria-hidden="true"
-										width="14"
-										height="14"
+										width="16"
+										height="16"
 										viewBox="0 0 14 14"
 										fill="none"
 									>
@@ -138,7 +141,9 @@ export default function ChatInput({
 							type="button"
 							onClick={onOpenRating}
 							disabled={!sessionId || isStreaming || sessionEnded}
-							className="flex items-center justify-center gap-1.5 rounded border border-gray-200 px-2 py-2 text-xs font-semibold text-gray-600 transition-colors hover:border-[#4a6659] hover:text-[#1a3a2a] disabled:cursor-not-allowed disabled:opacity-40"
+							aria-label={sessionEnded ? t("btn.ended") : t("btn.end_chat")}
+							title={sessionEnded ? t("btn.ended") : t("btn.end_chat")}
+							className="flex h-10 w-10 items-center justify-center gap-1.5 rounded border border-gray-200 text-xs font-semibold sm:h-auto sm:w-auto sm:px-2 sm:py-2 text-gray-600 transition-colors hover:border-[#4a6659] hover:text-[#1a3a2a] disabled:cursor-not-allowed disabled:opacity-40"
 						>
 							<svg
 								aria-hidden="true"
@@ -154,7 +159,9 @@ export default function ChatInput({
 									strokeLinecap="round"
 								/>
 							</svg>
-							{sessionEnded ? t("btn.ended") : t("btn.end_chat")}
+							<span className="hidden sm:inline">
+								{sessionEnded ? t("btn.ended") : t("btn.end_chat")}
+							</span>
 						</button>
 					</div>
 				</div>

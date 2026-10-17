@@ -1,4 +1,12 @@
+/* MUI/Škoda baseline styles are emitted into `@layer mui` (see providers.tsx).
+   Ordering it after Tailwind's base but before utilities keeps the Škoda
+   typography over Tailwind preflight while letting utility classes win. */
+@layer theme, base, mui, components, utilities;
+
 @import "tailwindcss";
+
+/* Short viewports (phones in landscape): compact chat chrome. */
+@custom-variant short (@media (max-height: 500px));
 
 :root {
   --background: #ffffff;

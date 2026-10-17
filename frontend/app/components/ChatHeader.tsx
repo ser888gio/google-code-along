@@ -2,6 +2,7 @@
 
 import type { ChatMode } from "../hooks/useVoiceMode";
 import { useLocale } from "../i18n/LocaleContext";
+import { fieldLabelForKey } from "../lib/fieldLabels";
 
 export default function ChatHeader({
 	activeWorkflowField,
@@ -22,22 +23,23 @@ export default function ChatHeader({
 }) {
 	const { t } = useLocale();
 	return (
-		<div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-2">
-			<div className="flex items-center gap-2">
-				<span className="text-sm font-bold text-gray-800">
+		<div className="flex shrink-0 items-center justify-between gap-2 border-b border-gray-200 px-4 py-2">
+			<div className="flex min-w-0 items-center gap-2">
+				<span className="min-w-24 truncate text-sm font-bold text-gray-800">
 					{t("header.title")}
 				</span>
 				{activeWorkflowField && (
-					<span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-						{activeWorkflowField.replace(/_/g, " ")}
+					<span className="hidden min-w-0 truncate rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500 sm:block">
+						{fieldLabelForKey(activeWorkflowField, t)}
 					</span>
 				)}
 			</div>
-			<div className="flex items-center gap-3">
+			<div className="flex shrink-0 items-center gap-1 sm:gap-3">
 				<button
 					type="button"
 					onClick={onOpenHistory}
-					className="flex items-center gap-1.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+					aria-label={t("btn.history")}
+					className="flex h-9 min-w-9 items-center justify-center gap-1.5 rounded px-2 text-xs text-gray-500 hover:bg-gray-100 lg:h-auto lg:min-w-0 lg:py-1"
 				>
 					<svg
 						aria-hidden="true"
@@ -61,7 +63,7 @@ export default function ChatHeader({
 							strokeLinejoin="round"
 						/>
 					</svg>
-					{t("btn.history")}
+					<span className="hidden sm:inline">{t("btn.history")}</span>
 				</button>
 				<button
 					type="button"
@@ -72,7 +74,12 @@ export default function ChatHeader({
 							? t("header.voice_to_text")
 							: t("header.text_to_voice")
 					}
-					className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+					aria-label={
+						chatMode === "voice"
+							? t("header.voice_to_text")
+							: t("header.text_to_voice")
+					}
+					className={`flex h-9 min-w-9 items-center justify-center gap-1.5 rounded px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 lg:h-auto lg:min-w-0 lg:py-1 ${
 						chatMode === "voice"
 							? "bg-red-50 text-red-600 hover:bg-red-100"
 							: "text-gray-500 hover:bg-gray-100"
@@ -104,7 +111,7 @@ export default function ChatHeader({
 									strokeLinecap="round"
 								/>
 							</svg>
-							{t("btn.voice_mode")}
+							<span className="hidden sm:inline">{t("btn.voice_mode")}</span>
 						</>
 					) : (
 						<>
@@ -133,12 +140,12 @@ export default function ChatHeader({
 									strokeLinecap="round"
 								/>
 							</svg>
-							{t("btn.voice")}
+							<span className="hidden sm:inline">{t("btn.voice")}</span>
 						</>
 					)}
 				</button>
 				<div
-					className={`h-3 w-3 rounded-full ${
+					className={`h-3 w-3 shrink-0 rounded-full ${
 						chatMode === "voice"
 							? wsConnectionState === "connected"
 								? isRecording

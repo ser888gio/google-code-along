@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RsState } from "../../lib/api";
 import { RS_SECTIONS, type Section } from "../generated/rsSchema";
 import { useLocale } from "../i18n/LocaleContext";
+import { translateFieldLabel } from "../lib/fieldLabels";
 import FieldCard from "./FieldCard";
 
 const SECTION_TITLE_KEYS: Record<string, string> = {
@@ -15,39 +16,9 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
 	Additional: "rs.section.additional",
 };
 
-const FIELD_LABEL_KEYS: Record<string, string> = {
-	"Use Case Title (EN)": "rs.field.use_case_title",
-	"Customer Department": "rs.field.customer_department",
-	Requester: "rs.field.requester",
-	"Product Owner": "rs.field.product_owner",
-	"Process Description / As-Is": "rs.field.process_description_as_is",
-	"Process Context": "rs.field.process_context",
-	Trigger: "rs.field.trigger",
-	"Purpose / To-Be": "rs.field.purpose_to_be",
-	"Saved Time (hours/year)": "rs.field.saved_time_hours_per_year",
-	"Cost Saving": "rs.field.cost_saving",
-	"Revenue Increase": "rs.field.revenue_increase",
-	"Impacted Users": "rs.field.impacted_users",
-	"Added Value": "rs.field.added_value",
-	"Time Criticality": "rs.field.time_criticality",
-	"Strategic Impact": "rs.field.strategic_impact",
-	"Risk Avoidance": "rs.field.risk_avoidance",
-	"Systems & Tools Involved": "rs.field.systems_and_tools",
-	"Types of Documents Involved": "rs.field.document_types",
-	"Data Security Classification": "rs.field.data_security_classification",
-	"Solution Type": "rs.field.solution_type",
-	Comments: "rs.field.comments",
-	"Attachments (GCS paths)": "rs.field.attachments",
-};
-
 function translateSectionTitle(title: string, t: (key: string) => string) {
 	const key = SECTION_TITLE_KEYS[title];
 	return key ? t(key) : title;
-}
-
-function translateFieldLabel(label: string, t: (key: string) => string) {
-	const key = FIELD_LABEL_KEYS[label];
-	return key ? t(key) : label;
 }
 
 // ─── Section group ────────────────────────────────────────────────────────────
@@ -88,7 +59,7 @@ function SectionGroup({
 				<span className="text-xs font-bold uppercase tracking-wide text-[#1a3a2a]">
 					{translateSectionTitle(section.title, t)}
 				</span>
-				<span className="ml-auto text-[10px] text-gray-400">
+				<span className="ml-auto text-[11px] text-gray-400">
 					{filledCount}/{total}
 				</span>
 			</div>
@@ -148,7 +119,7 @@ function CompletenessHeader({ completeness }: { completeness: number }) {
 				<p className="text-xs text-gray-400">{t("rs.subtitle")}</p>
 			</div>
 			<div>
-				<div className="mb-1 flex justify-between text-[10px]">
+				<div className="mb-1 flex justify-between gap-2 text-[11px]">
 					<span className={`font-semibold ${textColor}`}>
 						{completeness}% — {statusLabel}
 					</span>
@@ -250,7 +221,7 @@ export default function RsLiveTemplate({
 			<div
 				ref={scrollContainerRef}
 				onScroll={handleScroll}
-				className="flex-1 space-y-5 overflow-y-auto p-4"
+				className={`flex-1 space-y-5 overflow-y-auto p-4 ${toastVisible ? "pb-20" : ""}`}
 			>
 				{RS_SECTIONS.map((section) => (
 					<SectionGroup
@@ -270,7 +241,7 @@ export default function RsLiveTemplate({
 
 			{toastVisible && (
 				<div className="pointer-events-none absolute bottom-4 left-0 right-0 flex justify-center">
-					<div className="pointer-events-auto flex items-center gap-2 rounded-full bg-gray-900 px-4 py-2 shadow-lg">
+					<div className="pointer-events-auto flex items-center gap-2 rounded-full bg-gray-900 py-1.5 pl-4 pr-1.5 shadow-lg">
 						<span className="text-xs font-medium text-white">
 							{changedKeysArray.length} {t("rs.toast.updated")} ·{" "}
 							{(stepIndex % changedKeysArray.length) + 1}/
@@ -279,7 +250,8 @@ export default function RsLiveTemplate({
 						<button
 							type="button"
 							onClick={handleStep}
-							className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-xs font-bold text-gray-900 hover:bg-gray-100"
+							aria-label={t("rs.toast.next")}
+							className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-sm font-bold text-gray-900 hover:bg-gray-100"
 						>
 							↓
 						</button>
