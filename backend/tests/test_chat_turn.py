@@ -190,6 +190,36 @@ def test_all_fields_exhausted_transitions_to_wrap_up():
     assert result["workflow"]["phase"] == "wrap_up"
 
 
+def _logged_events(mock_logger) -> list[str]:
+    return [call.args[0] for call in mock_logger.info.call_args_list]
+
+
+def test_entering_wrap_up_logs_event_once():
+    with patch("chat_turn.logger") as mock_logger:
+        _run_prepare(**{"chat_turn.pick_next_active_field": MagicMock(return_value=None)})
+    assert any("event=wrap_up_entered session_id=sess1" in line for line in _logged_events(mock_logger))
+
+    with patch("chat_turn.logger") as mock_logger:
+        _run_prepare(
+            message="I need more time",
+            **{
+                "chat_turn.get_workflow_state": MagicMock(return_value={"phase": "wrap_up"}),
+                "chat_turn.pick_next_active_field": MagicMock(return_value=None),
+            },
+        )
+    assert not any("event=wrap_up_entered" in line for line in _logged_events(mock_logger))
+
+
+def test_wrap_up_decision_is_logged_without_message_text():
+    with patch("chat_turn.logger") as mock_logger:
+        _run_prepare(
+            message="finalize",
+            **{"chat_turn.get_workflow_state": MagicMock(return_value={"phase": "wrap_up"})},
+        )
+    decisions = [line for line in _logged_events(mock_logger) if "event=wrap_up_decision" in line]
+    assert decisions == ["Wrap-up decision: event=wrap_up_decision session_id=sess1 finalize=True"]
+
+
 # ---------------------------------------------------------------------------
 # Case 5: NOT_APPLICABLE coercion → DEFERRED when disallowed
 # ---------------------------------------------------------------------------
