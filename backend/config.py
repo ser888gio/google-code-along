@@ -86,9 +86,11 @@ MODEL_AUDIO = "gemini-3.1-flash-live-preview"
 # Region for the Live API
 AUDIO_REGION = os.getenv("GOOGLE_CLOUD_AUDIO_REGION", "europe-west1")
 
-# Orchestrator: strong reasoning, drives the discovery conversation
-MODEL_ORCHESTRATOR = "gemini-3.1-pro-preview"
-# The default (high) thinking adds seconds of time-to-first-token on every chat turn
+# Orchestrator: drives the text discovery conversation, so it sets chat reply speed.
+# Override per deployment (e.g. a Flash model) without a code change via MODEL_ORCHESTRATOR.
+MODEL_ORCHESTRATOR = os.getenv("MODEL_ORCHESTRATOR", "gemini-3.1-pro-preview")
+# The default (high) thinking adds seconds of time-to-first-token on every chat turn.
+# Set to an empty string for models that do not accept a thinking level.
 ORCHESTRATOR_THINKING_LEVEL = os.getenv("ORCHESTRATOR_THINKING_LEVEL", "low")
 
 # Finalizer: deep synthesis across multiple sources → structured JSON

@@ -19,6 +19,7 @@ from typing import AsyncIterator
 import runtime
 from chat_turn import run_turn_postprocessing
 from config import FINALIZING_MARKER, MODEL_ORCHESTRATOR
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from logger import get_logger
 from observability.metrics import record_itl, record_ttft
 from observability.safety import FRIENDLY_COST_ERROR, CostCircuitBreakerTripped
@@ -42,9 +43,18 @@ class StreamReplyState:
     cost_aborted: bool = False
     stream_started_at: float = field(default_factory=time.perf_counter)
     ttft_recorded: bool = False
+    # Streamed text held back because it may be the start of a hidden tag.
+    pending: str = ""
+    # Once <choices> appears, the rest is never streamed; text_replace delivers the clean reply.
+    hiding_choices: bool = False
 
 
+_CHOICES_TAG = "<choices>"
 _CHOICES_PATTERN = re.compile(r"\s*<choices>(\[.*?])</choices>\s*", re.DOTALL)
+_HIDDEN_TAGS = (_CHOICES_TAG, FINALIZING_MARKER)
+
+# Token streaming: the model's reply reaches the user as it is generated.
+_TEXT_RUN_CONFIG = RunConfig(streaming_mode=StreamingMode.SSE)
 
 
 def _sse_event(payload: dict) -> str:
@@ -54,7 +64,31 @@ def _sse_event(payload: dict) -> str:
 def _event_text_parts(event) -> list[str]:
     if not event.content or not event.content.parts:
         return []
-    return [part.text for part in event.content.parts if part.text]
+    return [part.text for part in event.content.parts if part.text and getattr(part, "thought", None) is not True]
+
+
+def _hidden_tag_prefix_len(text: str) -> int:
+    """Length of the longest suffix of *text* that could be the start of a hidden tag."""
+    return max(
+        (size for tag in _HIDDEN_TAGS for size in range(1, len(tag)) if text.endswith(tag[:size])),
+        default=0,
+    )
+
+
+def _take_visible_text(state: StreamReplyState, text: str, *, flush: bool = False) -> str:
+    """Return the part of the streamed reply that is safe to show the user now."""
+    if state.hiding_choices:
+        return ""
+    buffer = (state.pending + text).replace(FINALIZING_MARKER, "")
+    state.pending = ""
+    choices_at = buffer.find(_CHOICES_TAG)
+    if choices_at != -1:
+        state.hiding_choices = True
+        return buffer[:choices_at]
+    if not flush and (hold := _hidden_tag_prefix_len(buffer)):
+        state.pending = buffer[-hold:]
+        return buffer[:-hold]
+    return buffer
 
 
 def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
@@ -67,10 +101,10 @@ def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
     state.chunk_times.append(now)
     state.reply_parts.append(text)
 
-    clean = text.replace(FINALIZING_MARKER, "").strip()
-    if not clean:
+    visible = _take_visible_text(state, text)
+    if not visible:
         return None
-    return _sse_event({"text": clean})
+    return _sse_event({"text": visible})
 
 
 async def _agent_stream_events(
@@ -81,14 +115,24 @@ async def _agent_stream_events(
     state: StreamReplyState,
 ) -> AsyncIterator[str]:
     try:
+        streamed_since_final = False
         async for event in runtime.runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=user_content,
+            run_config=_TEXT_RUN_CONFIG,
         ):
+            if event.partial is True:
+                streamed_since_final = True
+            elif streamed_since_final:
+                # ADK repeats the streamed text in one aggregated final event; skip the copy.
+                streamed_since_final = False
+                continue
             for text in _event_text_parts(event):
                 if stream_event := _record_agent_text_chunk(text, state):
                     yield stream_event
+        if tail := _take_visible_text(state, "", flush=True):
+            yield _sse_event({"text": tail})
     except CostCircuitBreakerTripped as exc:
         state.cost_aborted = True
         logger.warning(f"Stream aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")

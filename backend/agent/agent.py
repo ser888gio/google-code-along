@@ -68,8 +68,12 @@ rs_agent = Agent(
     ),
     model=MODEL_ORCHESTRATOR,
     instruction=ORCHESTRATOR_SYSTEM_PROMPT,
-    generate_content_config=genai_types.GenerateContentConfig(
-        thinking_config=genai_types.ThinkingConfig(thinking_level=ORCHESTRATOR_THINKING_LEVEL),
+    generate_content_config=(
+        genai_types.GenerateContentConfig(
+            thinking_config=genai_types.ThinkingConfig(thinking_level=ORCHESTRATOR_THINKING_LEVEL),
+        )
+        if ORCHESTRATOR_THINKING_LEVEL
+        else None
     ),
     tools=cast(Any, RESEARCH_TOOLS),  # search_past_analyses, list_knowledge_base_docs, search_vertex_ai
     before_model_callback=before_model_cb,
