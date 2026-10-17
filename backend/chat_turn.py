@@ -135,6 +135,29 @@ async def _reopen_first_deferred_field(
     await loop.run_in_executor(None, remove_deferred_fields, session_id, [field_key])
 
 
+async def _defer_unresolved_fields(
+    *,
+    session_id: str,
+    state: WorkflowState,
+    deferred_fields: dict,
+) -> None:
+    """Defer every unresolved field so wrap-up can list them as open questions."""
+    deferred_at = datetime.now(timezone.utc).isoformat()
+    unresolved = {FieldStatus.MISSING, FieldStatus.CLARIFICATION_REQUESTED}
+    new_deferred = {
+        key: {"deferred_at": deferred_at}
+        for key, status in state.field_status.items()
+        if status in unresolved and key not in deferred_fields
+    }
+    if not new_deferred:
+        return
+    for key in new_deferred:
+        state.field_status[key] = FieldStatus.DEFERRED
+    deferred_fields.update(new_deferred)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, upsert_deferred_fields, session_id, new_deferred)
+
+
 async def prepare_workflow_turn(
     *,
     session_id: str,
@@ -151,6 +174,7 @@ async def prepare_workflow_turn(
     stored_workflow = await loop.run_in_executor(None, get_workflow_state, session_id)
     state = WorkflowState.from_dict(stored_workflow)
     state = sync_workflow_with_discovery_state(state, discovery_state, direct_fields, deferred_fields)
+    phase_at_start = state.phase
 
     new_deferred = {
         key: {"deferred_at": datetime.now(timezone.utc).isoformat()}
@@ -168,7 +192,9 @@ async def prepare_workflow_turn(
         "confidence": 0.0,
         "proactive_fields": {},
         "coverage_gaps": [],
+        "finish_requested": False,
     }
+    finish_requested = False
 
     solution_type = solution_type_value(discovery_state)
 
@@ -203,15 +229,23 @@ async def prepare_workflow_turn(
             state=state,
             discovery_state=discovery_state,
         )
+        if classification.get("finish_requested"):
+            finish_requested = True
+            await _defer_unresolved_fields(session_id=session_id, state=state, deferred_fields=deferred_fields)
+            state.transition(WorkflowEvent.FINISH_REQUESTED)
 
     if state.phase != Phase.READY_TO_FINALIZE:
         next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
         if next_field is None:
-            if state.phase != Phase.WRAP_UP:
-                logger.info(f"Wrap-up entered: event=wrap_up_entered session_id={session_id}")
             state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
         else:
             state.transition(WorkflowEvent.FIELD_FOUND, active_field=next_field)
+
+    if state.phase != phase_at_start:
+        logger.info(
+            f"Workflow phase changed: event=workflow_phase_changed session_id={session_id} "
+            f"from={phase_at_start} to={state.phase} finish_requested={finish_requested}"
+        )
 
     # Treat disallowed not-applicable statuses as deferred to avoid required-field skips.
     for key, status in list(state.field_status.items()):
@@ -226,6 +260,7 @@ async def prepare_workflow_turn(
         answered_values=answered_values,
         deferred_field_keys=list(deferred_fields.keys()),
         previous_active=previous_active,
+        finish_requested=finish_requested,
     )
 
     return {

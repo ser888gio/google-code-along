@@ -26,6 +26,7 @@ class FieldStatus(StrEnum):
 class WorkflowEvent(StrEnum):
     FIELDS_EXHAUSTED = "fields_exhausted"
     FIELD_FOUND = "field_found"
+    FINISH_REQUESTED = "finish_requested"
     FINALIZE_CHOSEN = "finalize_chosen"
     REOPEN_DEFERRED = "reopen_deferred"
     FINALIZE_STARTED = "finalize_started"
@@ -44,6 +45,7 @@ class AgentContext(TypedDict):
     answered_fields: dict[str, str]
     deferred_fields: list[str]
     ready_to_finalize: bool
+    finish_requested: bool
     active_field_coverage_gaps: list[str]
     previous_field_coverage_gaps: list[str]
 
@@ -51,6 +53,7 @@ class AgentContext(TypedDict):
 _TRANSITIONS: dict[tuple[Phase, WorkflowEvent], Phase] = {
     (Phase.DISCOVERY, WorkflowEvent.FIELD_FOUND): Phase.DISCOVERY,
     (Phase.DISCOVERY, WorkflowEvent.FIELDS_EXHAUSTED): Phase.WRAP_UP,
+    (Phase.DISCOVERY, WorkflowEvent.FINISH_REQUESTED): Phase.WRAP_UP,
     (Phase.WRAP_UP, WorkflowEvent.FINALIZE_CHOSEN): Phase.READY_TO_FINALIZE,
     (Phase.WRAP_UP, WorkflowEvent.REOPEN_DEFERRED): Phase.DISCOVERY,
     (Phase.WRAP_UP, WorkflowEvent.FIELD_FOUND): Phase.DISCOVERY,
@@ -83,7 +86,7 @@ class WorkflowState:
 
         if event == WorkflowEvent.FIELD_FOUND:
             self.active_field = payload.get("active_field")
-        elif event in (WorkflowEvent.FINALIZE_CHOSEN, WorkflowEvent.FIELDS_EXHAUSTED):
+        elif event in (WorkflowEvent.FINALIZE_CHOSEN, WorkflowEvent.FIELDS_EXHAUSTED, WorkflowEvent.FINISH_REQUESTED):
             self.active_field = None
         elif event == WorkflowEvent.REOPEN_DEFERRED:
             self.active_field = payload.get("active_field")
@@ -98,6 +101,7 @@ class WorkflowState:
         answered_values: dict[str, str],
         deferred_field_keys: list[str],
         previous_active: str | None,
+        finish_requested: bool = False,
     ) -> AgentContext:
         active = self.active_field
         coverage = self.coverage_gaps
@@ -109,6 +113,7 @@ class WorkflowState:
             answered_fields=answered_values,
             deferred_fields=deferred_field_keys,
             ready_to_finalize=self.phase == Phase.READY_TO_FINALIZE,
+            finish_requested=finish_requested,
             active_field_coverage_gaps=list(coverage.get(active, [])) if active else [],
             previous_field_coverage_gaps=list(coverage.get(previous_active) or []) if previous_active else [],
         )

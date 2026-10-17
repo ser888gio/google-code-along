@@ -7,7 +7,7 @@ import json
 import re
 import time
 import unicodedata
-from typing import Literal, TypedDict, cast
+from typing import Literal, NotRequired, TypedDict, cast
 
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
 from field_schema import (
@@ -38,6 +38,7 @@ class ClassifierResult(TypedDict):
     confidence: float
     proactive_fields: dict[str, dict]
     coverage_gaps: list[str]
+    finish_requested: NotRequired[bool]
 
 
 def normalize_for_match(value: str) -> str:
@@ -84,26 +85,6 @@ def mentions_other_direct_field(active_field: str, text: str) -> bool:
     return False
 
 
-def is_short_clarification_question(text: str) -> bool:
-    """Fast path for common clarification questions."""
-    value = text.strip()
-    if not value.endswith("?") or len(value) > 180:
-        return False
-    normalized = normalize_for_match(value)
-    fieldish_terms = [
-        "hr",
-        "sap",
-        "excel",
-        "sharepoint",
-        "power",
-        "department",
-        "oddeleni",
-        "requester",
-        "owner",
-    ]
-    return not any(term in normalized for term in fieldish_terms)
-
-
 def _empty_result(classification: Classification = "not_answered") -> ClassifierResult:
     return {
         "classification": classification,
@@ -122,21 +103,13 @@ async def classify_user_turn(
 ) -> ClassifierResult:
     """Classify the latest user reply against the active field.
 
-    Deterministic fast paths avoid latency for obvious deferrals and direct-field
-    answers. Ambiguous replies fall back to a small structured Gemini Flash call.
+    Short direct-field answers take a deterministic fast path. Everything else
+    goes to a small structured Gemini Flash call, so deferrals, clarification
+    questions and requests to finish early are judged in any phrasing.
     """
     text = message.strip()
     if not text or not active_field or active_field not in FIELD_SCHEMA:
         return _empty_result()
-
-    if is_deferred_answer(text):
-        return {
-            "classification": "deferred",
-            "value": None,
-            "confidence": 1.0,
-            "proactive_fields": {},
-            "coverage_gaps": [],
-        }
 
     if (
         active_field in DIRECT_FIELD_KEYS
@@ -147,15 +120,6 @@ async def classify_user_turn(
             "classification": "answered",
             "value": clean_direct_answer_value(text),
             "confidence": 0.9,
-            "proactive_fields": {},
-            "coverage_gaps": [],
-        }
-
-    if is_short_clarification_question(text):
-        return {
-            "classification": "clarification_requested",
-            "value": None,
-            "confidence": 0.85,
             "proactive_fields": {},
             "coverage_gaps": [],
         }
@@ -237,4 +201,5 @@ async def _classify_with_llm(
         "confidence": float(active.get("confidence") or 0.0),
         "proactive_fields": proactive,
         "coverage_gaps": coverage_gaps,
+        "finish_requested": parsed.get("finish_requested") is True,
     }

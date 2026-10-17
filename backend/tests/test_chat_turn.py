@@ -2,7 +2,9 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from agent.discovery_agent import pick_next_active_field
 from chat_turn import _is_finalize_choice, prepare_workflow_turn, run_turn_postprocessing
+from field_schema import FIELD_SCHEMA
 
 
 def _std_patches(**overrides):
@@ -193,10 +195,13 @@ def _logged_events(mock_logger) -> list[str]:
     return [call.args[0] for call in mock_logger.info.call_args_list]
 
 
-def test_entering_wrap_up_logs_event_once():
+def test_phase_change_is_logged_only_when_phase_changes():
     with patch("chat_turn.logger") as mock_logger:
         _run_prepare(**{"chat_turn.pick_next_active_field": MagicMock(return_value=None)})
-    assert any("event=wrap_up_entered session_id=sess1" in line for line in _logged_events(mock_logger))
+    assert any(
+        "event=workflow_phase_changed session_id=sess1 from=discovery to=wrap_up" in line
+        for line in _logged_events(mock_logger)
+    )
 
     with patch("chat_turn.logger") as mock_logger:
         _run_prepare(
@@ -206,7 +211,76 @@ def test_entering_wrap_up_logs_event_once():
                 "chat_turn.pick_next_active_field": MagicMock(return_value=None),
             },
         )
-    assert not any("event=wrap_up_entered" in line for line in _logged_events(mock_logger))
+    assert not any("event=workflow_phase_changed" in line for line in _logged_events(mock_logger))
+
+
+def test_finish_request_in_discovery_defers_open_fields_and_enters_wrap_up():
+    mock_upsert_deferred = MagicMock(return_value=None)
+    classify = AsyncMock(
+        return_value=(
+            {
+                "classification": "not_answered",
+                "value": None,
+                "confidence": 0.9,
+                "proactive_fields": {},
+                "coverage_gaps": [],
+                "finish_requested": True,
+            },
+            None,
+        )
+    )
+    with patch("chat_turn.logger") as mock_logger:
+        result, _ = _run_prepare(
+            message="Stačí, zbytek doplníme později. Vygenerujte to.",
+            **{
+                "chat_turn.get_workflow_state": MagicMock(
+                    return_value={"phase": "discovery", "active_field": "department"}
+                ),
+                "chat_turn.classify_and_update_active_field": classify,
+                "chat_turn.upsert_deferred_fields": mock_upsert_deferred,
+                "chat_turn.pick_next_active_field": pick_next_active_field,
+            },
+        )
+
+    assert result["workflow"]["phase"] == "wrap_up"
+    assert result["workflow"]["active_field"] is None
+    assert result["workflow_context"]["finish_requested"] is True
+    assert set(result["deferred_fields"]) == set(FIELD_SCHEMA)
+    assert set(mock_upsert_deferred.call_args.args[1]) == set(FIELD_SCHEMA)
+    assert any("from=discovery to=wrap_up finish_requested=True" in line for line in _logged_events(mock_logger))
+
+
+def test_finish_request_keeps_already_answered_fields():
+    classify = AsyncMock(
+        return_value=(
+            {
+                "classification": "answered",
+                "value": "HR",
+                "confidence": 0.9,
+                "proactive_fields": {},
+                "coverage_gaps": [],
+                "finish_requested": True,
+            },
+            None,
+        )
+    )
+    result, _ = _run_prepare(
+        message="HR. A tím bych skončil.",
+        **{
+            "chat_turn.get_workflow_state": MagicMock(
+                return_value={
+                    "phase": "discovery",
+                    "active_field": "department",
+                    "field_status": {"use_case_title": "answered"},
+                }
+            ),
+            "chat_turn.classify_and_update_active_field": classify,
+            "chat_turn.pick_next_active_field": pick_next_active_field,
+        },
+    )
+
+    assert result["workflow"]["field_status"]["use_case_title"] == "answered"
+    assert "use_case_title" not in result["deferred_fields"]
 
 
 def test_wrap_up_decision_is_logged_without_message_text():

@@ -129,6 +129,11 @@ def _render_wrap_up_context(context: Mapping[str, object], labels: Mapping[str, 
         "- Do not ask ordinary discovery questions.",
         "- Summarize what was captured in one short paragraph.",
     ]
+    if context.get("finish_requested"):
+        lines.append(
+            "- The user just asked to finish now. Respect that: do not say how many questions are left "
+            "and do not try to continue the interview."
+        )
     deferred = _field_key_list(context.get("deferred_fields", []) or [])
     if deferred:
         lines.append("- List deferred or unknown fields explicitly:")

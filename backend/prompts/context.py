@@ -182,7 +182,8 @@ Return ONLY valid JSON with this structure:
       "confidence": <number 0-1>
     }
   },
-  "clarification_answer_needed": <bool>
+  "clarification_answer_needed": <bool>,
+  "finish_requested": <bool>
 }
 
 Rules:
@@ -204,6 +205,12 @@ Rules:
 - Do not invent values.
 - Extract proactive fields only when the user clearly provided the value.
 - Do not include the active field in proactive_fields.
+- Set finish_requested to true when the user asks to stop the interview now and
+  finish or generate the specification, in any wording (for example "that's
+  enough, let's finish", "stačí, vygenerujte to", "zbytek doplníme později,
+  chci to uzavřít"). This is independent of the classification: a user can
+  answer the active field and ask to finish in the same message. Do not set it
+  for a request to skip only the active field.
 - Be Czech and English aware, including diacritic variants.
 
 Conversation tail:

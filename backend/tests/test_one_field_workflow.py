@@ -5,7 +5,6 @@ from agent.discovery_agent import (
 from answer_classifier import (
     clean_direct_answer_value,
     is_deferred_answer,
-    is_short_clarification_question,
     mentions_other_direct_field,
 )
 from direct_field_context import build_augmented_user_message
@@ -54,10 +53,8 @@ def test_deferred_answer_detection_is_czech_and_diacritic_insensitive():
     assert is_deferred_answer("I don't know")
 
 
-def test_direct_answer_cleaning_and_clarification_heuristic():
+def test_direct_answer_cleaning():
     assert clean_direct_answer_value("Je to HR.") == "HR"
-    assert is_short_clarification_question("Co tim myslite?")
-    assert not is_short_clarification_question("Je to pro HR?")
 
 
 def test_direct_fast_path_detects_proactive_other_field_mentions():
