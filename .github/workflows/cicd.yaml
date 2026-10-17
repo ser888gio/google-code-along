@@ -141,6 +141,37 @@ jobs:
             FIRESTORE_COLLECTION=FIRESTORE_COLLECTION:latest
             FIRESTORE_DATABASE=FIRESTORE_DATABASE:latest
 
+      - name: Deploy User Simulation Job and Schedule
+        if: steps.changes.outputs.backend == 'true'
+        run: |-
+          region=europe-west4
+          backend_url="${{ steps.deploy-backend.outputs.url }}"
+          sa="$(gcloud run services describe business-persona-ai-backend --region "$region" \
+            --format='value(spec.template.spec.serviceAccountName)')"
+
+          gcloud run jobs deploy rs-user-simulation \
+            --region "$region" \
+            --image ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
+            --service-account "$sa" \
+            --command python --args=-m,observability.simulation.run_simulation \
+            --set-env-vars "^|^SIM_TARGET_URL=${backend_url}|SIM_RUN_PROBABILITY=0.6|SIM_MAX_START_DELAY_S=3000|SIM_INTENT_MIX=finish:0.8,early_exit:0.15,disconnect:0.05" \
+            --set-secrets GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GCS_BUCKET_NAME=GCS_BUCKET_NAME:latest \
+            --task-timeout 2h --max-retries 0 --quiet
+
+          gcloud run jobs add-iam-policy-binding rs-user-simulation --region "$region" \
+            --member "serviceAccount:${sa}" --role roles/run.invoker --quiet
+
+          # Created once and never updated, so a manual `gcloud scheduler jobs pause` survives redeploys.
+          if ! gcloud scheduler jobs describe rs-user-simulation --location "$region" >/dev/null 2>&1; then
+            gcloud scheduler jobs create http rs-user-simulation \
+              --location "$region" \
+              --schedule "0 8-16 * * 1-5" \
+              --time-zone "Europe/Prague" \
+              --uri "https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_ID }}/jobs/rs-user-simulation:run" \
+              --http-method POST \
+              --oauth-service-account-email "$sa"
+          fi
+
       # ==========================================
       # 2. FRONTEND SERVICE (europe-west4)
       # ==========================================

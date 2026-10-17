@@ -22,6 +22,10 @@ All simulated data is tagged: session IDs start with `sim-`, user IDs are
 
 ## Deploy
 
+CI (`.github/workflows/cicd.yaml`) deploys the job on every backend push to
+`develop` and creates the Cloud Scheduler trigger if it is missing. The manual
+steps below do the same thing outside CI.
+
 The job runs the backend image, so the simulator code must first reach
 `develop` (CI builds and deploys the backend image on push). Then run these in
 Cloud Shell or any bash with `gcloud`. They read the image, URL and service
@@ -41,8 +45,7 @@ SA=$(gcloud run services describe $SERVICE --region=$REGION --format='value(spec
 gcloud run jobs deploy rs-user-simulation \
   --region=$REGION --image=$IMAGE --service-account=$SA \
   --command=python --args=-m,observability.simulation.run_simulation \
-  --set-env-vars="SIM_TARGET_URL=$URL,SIM_RUN_PROBABILITY=0.6,SIM_MAX_START_DELAY_S=3000" \
-  --set-env-vars="^|^SIM_INTENT_MIX=finish:0.8,early_exit:0.15,disconnect:0.05" \
+  --set-env-vars="^|^SIM_TARGET_URL=$URL|SIM_RUN_PROBABILITY=0.6|SIM_MAX_START_DELAY_S=3000|SIM_INTENT_MIX=finish:0.8,early_exit:0.15,disconnect:0.05" \
   --set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GCS_BUCKET_NAME=GCS_BUCKET_NAME:latest \
   --task-timeout=2h --max-retries=0
 
