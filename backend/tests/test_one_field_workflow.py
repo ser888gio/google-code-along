@@ -102,3 +102,19 @@ def test_workflow_context_renders_active_field_and_wrap_up():
 
     assert "Phase: wrap_up" in wrap_up
     assert "Risk Avoidance" in wrap_up
+    assert '<choices>["Dokončit s otevřenými otázkami", "Doplnit chybějící údaje"]</choices>' in wrap_up
+    assert '<choices>["Finalize with open questions", "Fill in the missing details"]</choices>' in wrap_up
+
+
+def test_wrap_up_without_deferred_fields_offers_plain_finalize_choices():
+    wrap_up = build_augmented_user_message(
+        "ok",
+        {},
+        [],
+        workflow_context={"phase": "wrap_up", "deferred_fields": []},
+        field_labels={},
+    )
+
+    assert "should you finalize the specification now?" in wrap_up
+    assert '<choices>["Dokončit specifikaci", "Doplnit další údaje"]</choices>' in wrap_up
+    assert '<choices>["Finalize the specification", "Add more details"]</choices>' in wrap_up
