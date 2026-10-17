@@ -266,7 +266,6 @@ class PersonaModel:
                 system_instruction=self._system,
                 response_mime_type="application/json",
                 response_schema=schema,
-                temperature=0.9,
             ),
         )
         return schema.model_validate_json(response.text or "")
