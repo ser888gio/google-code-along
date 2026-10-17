@@ -11,18 +11,21 @@ from workflow_state import (
 _first_field = next(iter(FIELD_SCHEMA))
 
 # ---------------------------------------------------------------------------
-# All 8 valid transitions
+# All 11 valid transitions
 # ---------------------------------------------------------------------------
 
 _VALID_TRANSITIONS = [
     (Phase.DISCOVERY, WorkflowEvent.FIELD_FOUND, Phase.DISCOVERY),
     (Phase.DISCOVERY, WorkflowEvent.FIELDS_EXHAUSTED, Phase.WRAP_UP),
+    (Phase.DISCOVERY, WorkflowEvent.FINISH_REQUESTED, Phase.WRAP_UP),
     (Phase.WRAP_UP, WorkflowEvent.FINALIZE_CHOSEN, Phase.READY_TO_FINALIZE),
     (Phase.WRAP_UP, WorkflowEvent.REOPEN_DEFERRED, Phase.DISCOVERY),
     (Phase.WRAP_UP, WorkflowEvent.FIELD_FOUND, Phase.DISCOVERY),
     (Phase.WRAP_UP, WorkflowEvent.FIELDS_EXHAUSTED, Phase.WRAP_UP),
     (Phase.READY_TO_FINALIZE, WorkflowEvent.FINALIZE_STARTED, Phase.FINALIZING),
     (Phase.FINALIZING, WorkflowEvent.FINALIZE_COMPLETE, Phase.COMPLETE),
+    (Phase.FINALIZING, WorkflowEvent.FINALIZE_FAILED, Phase.FAILED),
+    (Phase.FAILED, WorkflowEvent.FINALIZE_RETRY, Phase.WRAP_UP),
 ]
 
 
@@ -35,16 +38,20 @@ def test_valid_transition_reaches_expected_phase(start_phase, event, expected_ph
 
 
 # ---------------------------------------------------------------------------
-# Invalid transitions — at least 4 required; we cover 6
+# Invalid transitions
 # ---------------------------------------------------------------------------
 
 _INVALID_TRANSITIONS = [
     (Phase.DISCOVERY, WorkflowEvent.FINALIZE_COMPLETE),
     (Phase.DISCOVERY, WorkflowEvent.FINALIZE_STARTED),
     (Phase.DISCOVERY, WorkflowEvent.FINALIZE_CHOSEN),
+    (Phase.DISCOVERY, WorkflowEvent.FINALIZE_FAILED),
     (Phase.COMPLETE, WorkflowEvent.FIELD_FOUND),
+    (Phase.COMPLETE, WorkflowEvent.FINALIZE_RETRY),
     (Phase.WRAP_UP, WorkflowEvent.FINALIZE_STARTED),
+    (Phase.WRAP_UP, WorkflowEvent.FINISH_REQUESTED),
     (Phase.READY_TO_FINALIZE, WorkflowEvent.FINALIZE_CHOSEN),
+    (Phase.FAILED, WorkflowEvent.FIELD_FOUND),
 ]
 
 

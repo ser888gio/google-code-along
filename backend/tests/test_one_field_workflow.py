@@ -5,7 +5,6 @@ from agent.discovery_agent import (
 from answer_classifier import (
     clean_direct_answer_value,
     is_deferred_answer,
-    is_short_clarification_question,
     mentions_other_direct_field,
 )
 from direct_field_context import build_augmented_user_message
@@ -54,10 +53,8 @@ def test_deferred_answer_detection_is_czech_and_diacritic_insensitive():
     assert is_deferred_answer("I don't know")
 
 
-def test_direct_answer_cleaning_and_clarification_heuristic():
+def test_direct_answer_cleaning():
     assert clean_direct_answer_value("Je to HR.") == "HR"
-    assert is_short_clarification_question("Co tim myslite?")
-    assert not is_short_clarification_question("Je to pro HR?")
 
 
 def test_direct_fast_path_detects_proactive_other_field_mentions():
@@ -104,6 +101,31 @@ def test_workflow_context_renders_active_field_and_wrap_up():
     assert "Risk Avoidance" in wrap_up
     assert '<choices>["Dokončit s otevřenými otázkami", "Doplnit chybějící údaje"]</choices>' in wrap_up
     assert '<choices>["Finalize with open questions", "Fill in the missing details"]</choices>' in wrap_up
+
+
+def test_finalization_phases_render_their_own_instruction_only():
+    for phase, expected in [
+        ("finalizing", "being generated"),
+        ("complete", "finalized and the final analysis is ready"),
+        ("failed", "try finalizing again"),
+    ]:
+        context = build_augmented_user_message(
+            "ok", {}, [], workflow_context={"phase": phase, "active_field": None}, field_labels={}
+        )
+        assert expected in context
+        assert "Active field" not in context
+        assert "No active field" not in context
+
+
+def test_wrap_up_after_failed_finalization_asks_for_an_apology():
+    wrap_up = build_augmented_user_message(
+        "znovu",
+        {},
+        [],
+        workflow_context={"phase": "wrap_up", "deferred_fields": [], "retrying_after_failure": True},
+        field_labels={},
+    )
+    assert "previous attempt to generate the final analysis failed" in wrap_up
 
 
 def test_wrap_up_without_deferred_fields_offers_plain_finalize_choices():

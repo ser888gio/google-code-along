@@ -32,6 +32,7 @@ from observability.turns import (
     start_turn,
     summarize_turn,
 )
+from workflow_state import Phase
 
 logger = get_logger(__name__)
 
@@ -239,9 +240,10 @@ async def chat_stream_event_generator(
     turn_summary = summarize_turn(current_turn())
     logger.info(f"Stream complete: session_id={session_id} reply_chars={len(full_reply)}")
 
-    is_finalizing = FINALIZING_MARKER in full_reply
+    # The workflow, not the model's [FINALIZING] marker, decides when text chat finalizes.
+    is_finalizing = workflow_turn["workflow"].get("phase") == Phase.READY_TO_FINALIZE
     if is_finalizing:
-        logger.info(f"[FINALIZING] detected for session_id={session_id} launching finalizer pipeline")
+        logger.info(f"Finalization chosen for session_id={session_id} launching finalizer pipeline")
         yield _sse_event({"event": "finalizing"})
 
     choices_match = _CHOICES_PATTERN.search(full_reply)
