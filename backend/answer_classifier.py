@@ -10,6 +10,7 @@ import unicodedata
 from typing import Literal, NotRequired, TypedDict, cast
 
 from config import GOOGLE_API_KEY, MODEL_DISCOVERY
+from direct_field_context import WRAP_UP_CHOICES
 from field_schema import (
     DEFERRED_ANSWER_PATTERNS,
     DIRECT_FIELD_KEYS,
@@ -18,7 +19,7 @@ from field_schema import (
     FIELD_SCHEMA,
 )
 from logger import get_logger
-from prompts.context import ACTIVE_FIELD_CLASSIFIER_PROMPT
+from prompts.context import ACTIVE_FIELD_CLASSIFIER_PROMPT, WRAP_UP_DECISION_PROMPT
 from solution_configs import get_field_rubric_block
 from utils import format_prompt_data_lines
 
@@ -30,6 +31,8 @@ Classification = Literal[
     "clarification_requested",
     "not_answered",
 ]
+
+WrapUpDecision = Literal["finalize", "fill_in", "unclear"]
 
 
 class ClassifierResult(TypedDict):
@@ -46,6 +49,14 @@ def normalize_for_match(value: str) -> str:
     normalized = unicodedata.normalize("NFD", value.lower())
     normalized = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
     return re.sub(r"\s+", " ", normalized).strip()
+
+
+_WRAP_UP_CHOICE_DECISIONS: dict[str, WrapUpDecision] = {
+    normalize_for_match(text): decision
+    for by_language in WRAP_UP_CHOICES.values()
+    for pair in by_language.values()
+    for text, decision in zip(pair, ("finalize", "fill_in"), strict=True)
+}
 
 
 def is_deferred_answer(text: str) -> bool:
@@ -127,6 +138,53 @@ async def classify_user_turn(
     return await _classify_with_llm(active_field, text, conversation_tail, solution_type)
 
 
+async def _generate_json(prompt: str, caller: str) -> dict:
+    """Run one Gemini Flash call and parse its JSON answer (optionally fenced)."""
+    from google import genai
+
+    client = genai.Client(api_key=GOOGLE_API_KEY)
+    logger.info(f"Model call started: model={MODEL_DISCOVERY} caller={caller}")
+    start = time.perf_counter()
+    response = await asyncio.to_thread(
+        client.models.generate_content,
+        model=MODEL_DISCOVERY,
+        contents=prompt,
+    )
+    logger.info(f"Model call completed: model={MODEL_DISCOVERY} elapsed={time.perf_counter() - start:.2f}s")
+    raw = (response.text or "").strip()
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return json.loads(raw.strip())
+
+
+async def classify_wrap_up_reply(message: str, conversation_tail: str = "") -> WrapUpDecision | None:
+    """Decide whether a wrap-up reply means finalize now, fill in details first, or neither.
+
+    Returns None when the model is unavailable, so the caller can fall back.
+    """
+    text = message.strip()
+    if not text:
+        return "unclear"
+    if decision := _WRAP_UP_CHOICE_DECISIONS.get(normalize_for_match(text)):
+        return decision
+
+    try:
+        prompt = WRAP_UP_DECISION_PROMPT.replace(
+            "{conversation_tail}", format_prompt_data_lines(conversation_tail)
+        ).replace("{user_message}", format_prompt_data_lines(text, default_label="Latest user line"))
+        parsed = await _generate_json(prompt, "classify_wrap_up_reply")
+    except Exception as exc:
+        logger.warning(f"classify_wrap_up_reply failed: {exc}")
+        return None
+
+    decision = parsed.get("decision")
+    if decision not in {"finalize", "fill_in", "unclear"}:
+        return "unclear"
+    return cast(WrapUpDecision, decision)
+
+
 async def _classify_with_llm(
     active_field: str,
     message: str,
@@ -135,9 +193,6 @@ async def _classify_with_llm(
 ) -> ClassifierResult:
     """Use Gemini Flash for ambiguous classification and proactive extraction."""
     try:
-        from google import genai
-
-        client = genai.Client(api_key=GOOGLE_API_KEY)
         rubric_block = get_field_rubric_block(active_field, solution_type) or "(no rubric defined)"
         prompt = (
             ACTIVE_FIELD_CLASSIFIER_PROMPT.replace("{active_field}", active_field)
@@ -153,20 +208,7 @@ async def _classify_with_llm(
                 format_prompt_data_lines(message, default_label="Latest user line"),
             )
         )
-        logger.info(f"Model call started: model={MODEL_DISCOVERY} caller=classify_user_turn")
-        start = time.perf_counter()
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model=MODEL_DISCOVERY,
-            contents=prompt,
-        )
-        logger.info(f"Model call completed: model={MODEL_DISCOVERY} elapsed={time.perf_counter() - start:.2f}s")
-        raw = (response.text or "").strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        parsed = json.loads(raw.strip())
+        parsed = await _generate_json(prompt, "classify_user_turn")
     except Exception as exc:
         logger.warning(f"classify_user_turn fallback failed: {exc}")
         return _empty_result()

@@ -33,6 +33,8 @@ def _std_patches(**overrides):
             )
         ),
         "chat_turn.apply_proactive_updates": AsyncMock(return_value=None),
+        # None = classifier unavailable, so wrap-up tests exercise the keyword fallback by default.
+        "chat_turn.classify_wrap_up_reply": AsyncMock(return_value=None),
     }
     defaults.update(overrides)
     return defaults
@@ -290,7 +292,54 @@ def test_wrap_up_decision_is_logged_without_message_text():
             **{"chat_turn.get_workflow_state": MagicMock(return_value={"phase": "wrap_up"})},
         )
     decisions = [line for line in _logged_events(mock_logger) if "event=wrap_up_decision" in line]
-    assert decisions == ["Wrap-up decision: event=wrap_up_decision session_id=sess1 finalize=True"]
+    assert decisions == [
+        "Wrap-up decision: event=wrap_up_decision session_id=sess1 decision=finalize source=keyword_fallback"
+    ]
+
+
+_DEFERRED_DEPARTMENT = {"department": {"deferred_at": "2026-06-10T00:00:00Z"}}
+
+
+def test_wrap_up_classifier_decision_overrides_keywords():
+    result, _ = _run_prepare(
+        message="Jasně, klidně.",
+        **{
+            "chat_turn.get_workflow_state": MagicMock(return_value={"phase": "wrap_up"}),
+            "chat_turn.classify_wrap_up_reply": AsyncMock(return_value="finalize"),
+        },
+    )
+    assert result["workflow"]["phase"] == "ready_to_finalize"
+
+
+def test_wrap_up_classifier_fill_in_reopens_deferred_field():
+    mock_remove = MagicMock(return_value=None)
+    result, _ = _run_prepare(
+        message="Ještě bych doplnil oddělení.",
+        **{
+            "chat_turn.get_workflow_state": MagicMock(return_value={"phase": "wrap_up"}),
+            "chat_turn.get_deferred_fields": MagicMock(return_value=dict(_DEFERRED_DEPARTMENT)),
+            "chat_turn.remove_deferred_fields": mock_remove,
+            "chat_turn.classify_wrap_up_reply": AsyncMock(return_value="fill_in"),
+        },
+    )
+    assert result["workflow"]["phase"] == "discovery"
+    mock_remove.assert_called_once_with("sess1", ["department"])
+
+
+def test_wrap_up_unclear_reply_stays_in_wrap_up():
+    mock_remove = MagicMock(return_value=None)
+    result, _ = _run_prepare(
+        message="Kolik to bude stát?",
+        **{
+            "chat_turn.get_workflow_state": MagicMock(return_value={"phase": "wrap_up"}),
+            "chat_turn.get_deferred_fields": MagicMock(return_value=dict(_DEFERRED_DEPARTMENT)),
+            "chat_turn.remove_deferred_fields": mock_remove,
+            "chat_turn.pick_next_active_field": MagicMock(return_value=None),
+            "chat_turn.classify_wrap_up_reply": AsyncMock(return_value="unclear"),
+        },
+    )
+    assert result["workflow"]["phase"] == "wrap_up"
+    mock_remove.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

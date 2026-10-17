@@ -26,7 +26,7 @@ from agent.discovery_agent import (
     sync_workflow_with_discovery_state,
 )
 from agent.finalizer_agent import run_finalizer
-from answer_classifier import ClassifierResult, normalize_for_match
+from answer_classifier import ClassifierResult, classify_wrap_up_reply, normalize_for_match
 from chat_classification import (
     apply_proactive_updates,
     classify_and_update_active_field,
@@ -91,6 +91,7 @@ def _answered_field_values(
     return values
 
 
+# Keyword fallback for when the wrap-up classifier model is unavailable.
 # Patterns run on normalize_for_match() output: lowercase, no diacritics.
 # Stems instead of whole words so Czech inflections ("finální", "vygenerování") match.
 _WRAP_UP_DECLINE = re.compile(
@@ -200,11 +201,17 @@ async def prepare_workflow_turn(
 
     tail_text = _build_conversation_tail(session, message)
     if state.phase == Phase.WRAP_UP:
-        finalize = _is_finalize_choice(message)
-        logger.info(f"Wrap-up decision: event=wrap_up_decision session_id={session_id} finalize={finalize}")
-        if finalize:
+        decision = await classify_wrap_up_reply(message, tail_text)
+        source = "classifier"
+        if decision is None:
+            decision = "finalize" if _is_finalize_choice(message) else "fill_in"
+            source = "keyword_fallback"
+        logger.info(
+            f"Wrap-up decision: event=wrap_up_decision session_id={session_id} decision={decision} source={source}"
+        )
+        if decision == "finalize":
             state.transition(WorkflowEvent.FINALIZE_CHOSEN)
-        else:
+        elif decision == "fill_in":
             await _reopen_first_deferred_field(
                 session_id=session_id,
                 state=state,
