@@ -18,7 +18,7 @@ from typing import AsyncIterator
 
 import runtime
 from chat_turn import run_turn_postprocessing
-from config import FINALIZING_MARKER, MODEL_ORCHESTRATOR
+from config import FINALIZING_MARKER, MODEL_ORCHESTRATOR, SSE_KEEPALIVE_INTERVAL_S
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from logger import get_logger
 from observability.metrics import record_itl, record_ttft
@@ -41,6 +41,7 @@ class StreamReplyState:
     reply_parts: list[str] = field(default_factory=list)
     chunk_times: list[float] = field(default_factory=list)
     cost_aborted: bool = False
+    error_aborted: bool = False
     stream_started_at: float = field(default_factory=time.perf_counter)
     ttft_recorded: bool = False
     # Streamed text held back because it may be the start of a hidden tag.
@@ -91,7 +92,8 @@ def _take_visible_text(state: StreamReplyState, text: str, *, flush: bool = Fals
     return buffer
 
 
-def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
+def _record_metrics(text: str, state: StreamReplyState) -> None:
+    """Track TTFT/ITL timing and accumulate the raw reply. No text-visibility logic here."""
     now = time.perf_counter()
     if not state.ttft_recorded:
         ttft = now - state.stream_started_at
@@ -101,6 +103,9 @@ def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
     state.chunk_times.append(now)
     state.reply_parts.append(text)
 
+
+def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
+    _record_metrics(text, state)
     visible = _take_visible_text(state, text)
     if not visible:
         return None
@@ -138,6 +143,7 @@ async def _agent_stream_events(
         logger.warning(f"Stream aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")
         yield _sse_event({"error": FRIENDLY_COST_ERROR})
     except Exception as exc:
+        state.error_aborted = True
         logger.error(
             f"Streaming error for session_id={session_id}: {exc}",
             exc_info=True,
@@ -147,7 +153,7 @@ async def _agent_stream_events(
 
 async def _keepalive_merged(
     agent_gen: AsyncIterator[str],
-    interval: float = 20.0,
+    interval: float = SSE_KEEPALIVE_INTERVAL_S,
 ) -> AsyncIterator[str]:
     """Interleave SSE keepalive comments with agent events to prevent Cloud Run idle-stream timeouts."""
     queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -175,6 +181,34 @@ async def _keepalive_merged(
         agent_task.cancel()
         with suppress(asyncio.CancelledError):
             await agent_task
+
+
+def _choices_events(full_reply: str, state: StreamReplyState, *, session_id: str) -> list[str]:
+    """Parse a `<choices>` block from the finished reply and emit the choices/text_replace events.
+
+    The stream hides everything from the first literal "<choices>" onward (see
+    _take_visible_text) on the assumption that a well-formed block follows. If that
+    assumption doesn't hold here (malformed JSON, no closing tag), fall back to
+    showing the full reply so the hidden text isn't silently dropped.
+    """
+    match = _CHOICES_PATTERN.search(full_reply)
+    if match:
+        try:
+            choices = json.loads(match.group(1))
+            if isinstance(choices, list) and 2 <= len(choices) <= 4:
+                clean_text = _CHOICES_PATTERN.sub("", full_reply)
+                clean_text = clean_text.replace(FINALIZING_MARKER, "").strip()
+                logger.info(f"Choices emitted: session_id={session_id} count={len(choices)}")
+                return [_sse_event({"choices": choices}), _sse_event({"text_replace": clean_text})]
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    if state.hiding_choices:
+        logger.warning(f"Choices block hidden but not parsed for session_id={session_id}; falling back to full text")
+        fallback_text = full_reply.replace(FINALIZING_MARKER, "").strip()
+        return [_sse_event({"text_replace": fallback_text})]
+
+    return []
 
 
 async def chat_stream_event_generator(
@@ -210,7 +244,7 @@ async def chat_stream_event_generator(
     ):
         yield stream_event
 
-    if stream_state.cost_aborted:
+    if stream_state.cost_aborted or stream_state.error_aborted:
         reset_turn(turn_token)
         yield "data: [DONE]\n\n"
         return
@@ -231,18 +265,8 @@ async def chat_stream_event_generator(
         logger.info(f"Finalization chosen for session_id={session_id} launching finalizer pipeline")
         yield _sse_event({"event": "finalizing"})
 
-    choices_match = _CHOICES_PATTERN.search(full_reply)
-    if choices_match:
-        try:
-            choices = json.loads(choices_match.group(1))
-            if isinstance(choices, list) and 2 <= len(choices) <= 4:
-                clean_text = _CHOICES_PATTERN.sub("", full_reply)
-                clean_text = clean_text.replace(FINALIZING_MARKER, "").strip()
-                yield _sse_event({"choices": choices})
-                yield _sse_event({"text_replace": clean_text})
-                logger.info(f"Choices emitted: session_id={session_id} count={len(choices)}")
-        except (json.JSONDecodeError, ValueError):
-            pass
+    for event in _choices_events(full_reply, stream_state, session_id=session_id):
+        yield event
 
     asyncio.create_task(
         run_turn_postprocessing(

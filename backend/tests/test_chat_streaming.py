@@ -48,6 +48,44 @@ def test_model_marker_alone_does_not_finalize_text_chat():
     assert postprocess.call_args.kwargs["is_finalizing"] is False
 
 
+def test_generic_streaming_error_skips_postprocessing():
+    async def failing_agent_events(*, user_id, user_content, session_id, state):
+        state.error_aborted = True
+        yield chat_streaming._sse_event({"error": "boom"})
+
+    postprocess = AsyncMock()
+
+    async def collect() -> list[str]:
+        return [
+            event
+            async for event in chat_streaming.chat_stream_event_generator(
+                session_id="sess1",
+                user_id="user1",
+                message="ok",
+                workflow_turn={"workflow": {"phase": "discovery", "active_field": None}},
+                user_content=None,
+            )
+        ]
+
+    with (
+        patch.object(chat_streaming, "_agent_stream_events", failing_agent_events),
+        patch.object(chat_streaming, "run_turn_postprocessing", postprocess),
+    ):
+        events = asyncio.run(collect())
+
+    assert events[-1] == "data: [DONE]\n\n"
+    postprocess.assert_not_called()
+
+
+def test_hidden_choices_block_that_fails_to_parse_falls_back_to_full_text():
+    state = chat_streaming.StreamReplyState()
+    state.hiding_choices = True
+    events = chat_streaming._choices_events("Vyberte: <choices>[broken", state, session_id="sess1")
+
+    assert len(events) == 1
+    assert json.loads(events[0][len("data: ") :])["text_replace"] == "Vyberte: <choices>[broken"
+
+
 # ---------------------------------------------------------------------------
 # Token streaming
 # ---------------------------------------------------------------------------

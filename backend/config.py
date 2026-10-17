@@ -93,6 +93,9 @@ MODEL_ORCHESTRATOR = os.getenv("MODEL_ORCHESTRATOR", "gemini-3.1-pro-preview")
 # Set to an empty string for models that do not accept a thinking level.
 ORCHESTRATOR_THINKING_LEVEL = os.getenv("ORCHESTRATOR_THINKING_LEVEL", "low")
 
+# Seconds between SSE keepalive comments on /chat/stream, to prevent Cloud Run idle-stream timeouts.
+SSE_KEEPALIVE_INTERVAL_S = float(os.getenv("SSE_KEEPALIVE_INTERVAL_S", "20.0"))
+
 # Finalizer: deep synthesis across multiple sources → structured JSON
 MODEL_FINALIZER = "gemini-3.1-pro-preview"
 
