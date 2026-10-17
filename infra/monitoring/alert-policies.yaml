@@ -48,17 +48,6 @@ conditions:
       duration: 300s
       trigger:
         count: 1
-  - displayName: Reliability - extraction timeout log metric
-    conditionThreshold:
-      filter: metric.type="logging.googleapis.com/user/extract_timeout_total" resource.type="cloud_run_revision"
-      aggregations:
-        - alignmentPeriod: 600s
-          perSeriesAligner: ALIGN_RATE
-      comparison: COMPARISON_GT
-      thresholdValue: 0
-      duration: 600s
-      trigger:
-        count: 1
   - displayName: Safety - cost circuit trip rate over 1 per hour
     conditionThreshold:
       filter: metric.type="workload.googleapis.com/rs.safety.cost_circuit_tripped" resource.type="generic_task"

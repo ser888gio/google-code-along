@@ -486,7 +486,6 @@ gcloud alpha monitoring policies create \
 Create log-based metrics following `infra/monitoring/README.md`. The current metrics are:
 
 ```text
-extract_timeout_total
 firestore_unavailable_total
 bridge_injection_failure_total
 ```

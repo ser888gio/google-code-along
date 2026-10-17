@@ -176,8 +176,6 @@ data: {"session_id":"session-uuid","message_id":"assistant-message-id"}
 
 data: {"active_field":"target_users"}
 
-data: {"field_update":{"key":"report_frequency","value":"Weekly, every Monday morning"}}
-
 data: {"text":"Great, weekly Monday delivery is clear."}
 
 data: {"event":"finalizing"}
@@ -192,7 +190,6 @@ Possible SSE payloads:
 | `{"session_id": "..."}` | Session was created or confirmed. Usually first event. |
 | `{"message_id": "..."}` | ID for the assistant message, used for feedback. |
 | `{"active_field": "..."}` | Backend workflow field the assistant is currently asking about. |
-| `{"field_update": {"key": "...", "value": "..."}}` | Pre-stream extraction found a changed field value. |
 | `{"text": "..."}` | Assistant text chunk. Append to the active assistant bubble. |
 | `{"event": "finalizing"}` | Finalizer pipeline has been triggered. Start polling `/analyses/{session_id}`. |
 | `{"error": "..."}` | Stream-level error. Show the message and stop the stream. |

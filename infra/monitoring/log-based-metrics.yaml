@@ -1,7 +1,4 @@
 metrics:
-  - name: extract_timeout_total
-    description: Pre-stream discovery extraction timed out.
-    filter: resource.type="cloud_run_revision" AND textPayload:"event=extract_timeout_total"
   - name: firestore_unavailable_total
     description: Firestore was unavailable to the backend.
     filter: resource.type="cloud_run_revision" AND textPayload:"event=firestore_unavailable_total"

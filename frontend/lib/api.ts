@@ -20,7 +20,6 @@ interface StreamChatCallbacks {
 	onDone: () => void;
 	onError: (err: string) => void;
 	onFinalizing?: () => void;
-	onFieldUpdate?: (key: string, value: string) => void;
 	onActiveField?: (key: string) => void;
 	onMessageId?: (id: string) => void;
 	onChoices?: (choices: string[]) => void;
@@ -79,11 +78,6 @@ function notifyStructuredUpdates(
 	parsed: Record<string, unknown>,
 	callbacks: StreamChatCallbacks,
 ): void {
-	const update = parsed.field_update as
-		| { key?: unknown; value?: string }
-		| undefined;
-	if (typeof update?.key === "string")
-		callbacks.onFieldUpdate?.(update.key, update.value ?? "");
 	if (Array.isArray(parsed.choices))
 		callbacks.onChoices?.(parsed.choices as string[]);
 	if (typeof parsed.text_replace === "string")
@@ -147,9 +141,6 @@ async function consumeSseStream(
  *   onSessionId   — fires once with the session ID (first SSE event)
  *   onFinalizing  — fires when the backend detects ≥ 90% completeness and starts
  *                   the finalizer pipeline; the UI should show a "finalizing" state
- *   onFieldUpdate — fires mid-stream when the pre-stream quick extract detects a
- *                   newly filled (or changed) RS field. Lets the right panel fill
- *                   progressively before the agent's text reply arrives.
  *   onDone        — stream ended normally
  *   onError       — network or server error
  */
@@ -161,7 +152,6 @@ export async function streamChat(
 	onDone: () => void,
 	onError: (err: string) => void,
 	onFinalizing?: () => void,
-	onFieldUpdate?: (key: string, value: string) => void,
 	directFields?: Record<string, string>,
 	deferredFields?: string[],
 	onActiveField?: (key: string) => void,
@@ -191,7 +181,6 @@ export async function streamChat(
 		onDone,
 		onError,
 		onFinalizing,
-		onFieldUpdate,
 		onActiveField,
 		onMessageId,
 		onChoices,

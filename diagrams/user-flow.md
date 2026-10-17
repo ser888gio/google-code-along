@@ -24,7 +24,7 @@ For the stripped-down linear view see [user-flow-happy-path.md](./user-flow-happ
    - **deferred / skip** → field parked (`DEFERRED`), resurfaced at wrap-up.
 3. **Backend advances the FSM** (`DISCOVERY → WRAP_UP → READY_TO_FINALIZE → FINALIZING →
    COMPLETE`) and **picks the next missing field**.
-4. **Live `field_update` + choices buttons** stream to the UI; the user can click a
+4. **Choices buttons** stream to the UI and post-turn extraction refreshes the RS; the user can click a
    quick-reply choice or type freely → next turn.
 
 After each turn, `POST /context/extract` recomputes the **completeness %**, which feeds

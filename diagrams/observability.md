@@ -12,7 +12,7 @@ Observability spans four levels: **traces** (OpenTelemetry → Cloud Trace), **m
 
 - **Cloud Trace** — request/model spans with GenAI attributes.
 - **Cloud Monitoring** — `workload.googleapis.com/*` custom metrics feed the dashboard and alert policies (`infra/monitoring/`).
-- **Cloud Logging** — structured logs feed **log-based metrics**: `extract_timeout_total`, `firestore_unavailable_total`, `bridge_injection_failure_total`.
+- **Cloud Logging** — structured logs feed **log-based metrics**: `firestore_unavailable_total`, `bridge_injection_failure_total`.
 - **Firestore → BigQuery** — redacted messages/metrics export to `messages_view` / `feedback_view` for transcript, cost, latency, and feedback review.
 
 ## Safety jobs (`infra/safety/`)

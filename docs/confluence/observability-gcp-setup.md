@@ -98,7 +98,6 @@ logging.googleapis.com/user/<metric_name>
 Current log-based metrics:
 
 ```text
-logging.googleapis.com/user/extract_timeout_total
 logging.googleapis.com/user/firestore_unavailable_total
 logging.googleapis.com/user/bridge_injection_failure_total
 ```
@@ -398,14 +397,6 @@ Exporter startup:
 resource.type="cloud_run_revision"
 resource.labels.service_name="business-persona-ai-backend"
 ("Cloud Monitoring exporter configured" OR "Cloud Monitoring exporter disabled")
-```
-
-Extraction timeout:
-
-```text
-resource.type="cloud_run_revision"
-resource.labels.service_name="business-persona-ai-backend"
-"event=extract_timeout_total"
 ```
 
 Firestore availability:

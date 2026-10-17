@@ -51,7 +51,7 @@ User message
     │       ├─ list_knowledge_base_docs()       [GCS — no LLM]
     │       └─ search_vertex_ai()              [stub — no LLM]
     │
-    ├─ extract_discovery_fields()               [MODEL_DISCOVERY — fire-and-forget]
+    ├─ extract_discovery_fields()               [MODEL_DISCOVERY — after the reply, via frontend POST /context/extract]
     │       └─ solution_configs.get_all_field_shapes()  ← solution-type-aware shapes
     │
     └─ [if FINALIZING detected]
@@ -67,6 +67,7 @@ User message
 | Constant | Current value |
 |---|---|
 | `MODEL_ORCHESTRATOR` | `gemini-3.1-pro-preview` |
+| `ORCHESTRATOR_THINKING_LEVEL` | `low` (env-overridable; text orchestrator only) |
 | `MODEL_AUDIO` | `gemini-3.1-flash-live-preview` |
 | `MODEL_DISCOVERY` | `gemini-3.1-flash-lite` |
 | `MODEL_FINALIZER` | `gemini-3.1-pro-preview` |

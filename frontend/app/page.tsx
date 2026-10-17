@@ -156,23 +156,6 @@ export default function ChatPage() {
 				rs.setFinalizingStatus("finalizing");
 				setActiveTab("Analysis");
 			},
-			(key, value) => {
-				rsState.applyExtraction({
-					completeness: 0,
-					accepted_completeness: rsState.completeness,
-					discovery_completeness: 0,
-					fields: {
-						[key]: {
-							status: "suggested",
-							accepted: null,
-							suggestion: { value, source: "ai" },
-							filled: false,
-							value: null,
-							source: null,
-						},
-					},
-				});
-			},
 			valuesForRequest,
 			deferredForRequest,
 			(key) => setActiveWorkflowField(key),

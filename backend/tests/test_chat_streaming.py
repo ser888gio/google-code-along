@@ -1,4 +1,6 @@
 import asyncio
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import chat_streaming
@@ -25,7 +27,6 @@ def _run_stream(phase: str, reply: str):
 
     with (
         patch.object(chat_streaming, "_agent_stream_events", fake_agent_events),
-        patch.object(chat_streaming, "_pre_stream_field_update_events", AsyncMock(return_value=[])),
         patch.object(chat_streaming, "run_turn_postprocessing", postprocess),
     ):
         events = asyncio.run(collect())
@@ -45,3 +46,62 @@ def test_model_marker_alone_does_not_finalize_text_chat():
     assert not any('"event": "finalizing"' in event for event in events)
     assert not any("[FINALIZING]" in event for event in events)
     assert postprocess.call_args.kwargs["is_finalizing"] is False
+
+
+# ---------------------------------------------------------------------------
+# Token streaming
+# ---------------------------------------------------------------------------
+
+
+def _visible(chunks: list[str]) -> str:
+    state = chat_streaming.StreamReplyState()
+    shown = [chat_streaming._take_visible_text(state, chunk) for chunk in chunks]
+    shown.append(chat_streaming._take_visible_text(state, "", flush=True))
+    return "".join(shown)
+
+
+def test_marker_split_across_chunks_is_never_shown():
+    assert _visible(["Hotovo. [FINAL", "IZING] Analýza bude brzy."]) == "Hotovo.  Analýza bude brzy."
+
+
+def test_choices_block_is_held_back_from_the_stream():
+    assert _visible(["Vyberte prosím: ", "<cho", 'ices>["A", "B"]</choices>']) == "Vyberte prosím: "
+
+
+def test_text_that_only_looks_like_a_tag_start_is_released():
+    state = chat_streaming.StreamReplyState()
+    assert chat_streaming._take_visible_text(state, "Cena je [") == "Cena je "
+    assert chat_streaming._take_visible_text(state, "500 Kč].") == "[500 Kč]."
+
+
+def _event(text: str, *, partial: bool | None) -> SimpleNamespace:
+    return SimpleNamespace(partial=partial, content=SimpleNamespace(parts=[SimpleNamespace(text=text, thought=None)]))
+
+
+def test_partial_events_stream_and_the_aggregated_copy_is_skipped():
+    calls: list[dict] = []
+
+    async def run_async(**kwargs):
+        calls.append(kwargs)
+        for event in (
+            _event("Dobrý ", partial=True),
+            _event("den.", partial=True),
+            _event("Dobrý den.", partial=False),
+        ):
+            yield event
+
+    async def collect(state) -> list[str]:
+        return [
+            event
+            async for event in chat_streaming._agent_stream_events(
+                user_id="user1", user_content=None, session_id="sess1", state=state
+            )
+        ]
+
+    state = chat_streaming.StreamReplyState()
+    with patch.object(chat_streaming.runtime, "runner", SimpleNamespace(run_async=run_async)):
+        events = asyncio.run(collect(state))
+
+    assert [json.loads(event[len("data: ") :])["text"] for event in events] == ["Dobrý ", "den."]
+    assert "".join(state.reply_parts) == "Dobrý den."
+    assert calls[0]["run_config"] is chat_streaming._TEXT_RUN_CONFIG

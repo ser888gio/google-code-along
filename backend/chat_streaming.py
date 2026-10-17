@@ -1,8 +1,8 @@
 """SSE streaming pipeline for /chat/stream.
 
-Turns ADK runner events into Server-Sent Events: text chunks, field updates,
-choices, keepalives, and the [DONE] terminator. Post-turn persistence is
-delegated to chat_turn.run_turn_postprocessing.
+Turns ADK runner events into Server-Sent Events: text chunks, choices,
+keepalives, and the [DONE] terminator. Post-turn persistence is delegated to
+chat_turn.run_turn_postprocessing.
 """
 
 from __future__ import annotations
@@ -17,10 +17,9 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 import runtime
-from agent.discovery_agent import extract_discovery_fields
 from chat_turn import run_turn_postprocessing
 from config import FINALIZING_MARKER, MODEL_ORCHESTRATOR
-from firestore import get_discovery_state
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from logger import get_logger
 from observability.metrics import record_itl, record_ttft
 from observability.safety import FRIENDLY_COST_ERROR, CostCircuitBreakerTripped
@@ -44,9 +43,18 @@ class StreamReplyState:
     cost_aborted: bool = False
     stream_started_at: float = field(default_factory=time.perf_counter)
     ttft_recorded: bool = False
+    # Streamed text held back because it may be the start of a hidden tag.
+    pending: str = ""
+    # Once <choices> appears, the rest is never streamed; text_replace delivers the clean reply.
+    hiding_choices: bool = False
 
 
+_CHOICES_TAG = "<choices>"
 _CHOICES_PATTERN = re.compile(r"\s*<choices>(\[.*?])</choices>\s*", re.DOTALL)
+_HIDDEN_TAGS = (_CHOICES_TAG, FINALIZING_MARKER)
+
+# Token streaming: the model's reply reaches the user as it is generated.
+_TEXT_RUN_CONFIG = RunConfig(streaming_mode=StreamingMode.SSE)
 
 
 def _sse_event(payload: dict) -> str:
@@ -56,23 +64,31 @@ def _sse_event(payload: dict) -> str:
 def _event_text_parts(event) -> list[str]:
     if not event.content or not event.content.parts:
         return []
-    return [part.text for part in event.content.parts if part.text]
+    return [part.text for part in event.content.parts if part.text and getattr(part, "thought", None) is not True]
 
 
-def _field_update_sse_events(prev_fields: dict, new_fields: dict) -> list[str]:
-    events: list[str] = []
-    for key, entry in new_fields.items():
-        if not entry or not entry.get("filled"):
-            continue
-        new_value = entry.get("value")
-        if new_value is None:
-            continue
-        prev_entry = prev_fields.get(key) or {}
-        prev_filled = bool(prev_entry.get("filled"))
-        prev_value = prev_entry.get("value")
-        if (not prev_filled) or (prev_value != new_value):
-            events.append(_sse_event({"field_update": {"key": key, "value": new_value}}))
-    return events
+def _hidden_tag_prefix_len(text: str) -> int:
+    """Length of the longest suffix of *text* that could be the start of a hidden tag."""
+    return max(
+        (size for tag in _HIDDEN_TAGS for size in range(1, len(tag)) if text.endswith(tag[:size])),
+        default=0,
+    )
+
+
+def _take_visible_text(state: StreamReplyState, text: str, *, flush: bool = False) -> str:
+    """Return the part of the streamed reply that is safe to show the user now."""
+    if state.hiding_choices:
+        return ""
+    buffer = (state.pending + text).replace(FINALIZING_MARKER, "")
+    state.pending = ""
+    choices_at = buffer.find(_CHOICES_TAG)
+    if choices_at != -1:
+        state.hiding_choices = True
+        return buffer[:choices_at]
+    if not flush and (hold := _hidden_tag_prefix_len(buffer)):
+        state.pending = buffer[-hold:]
+        return buffer[:-hold]
+    return buffer
 
 
 def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
@@ -85,39 +101,10 @@ def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
     state.chunk_times.append(now)
     state.reply_parts.append(text)
 
-    clean = text.replace(FINALIZING_MARKER, "").strip()
-    if not clean:
+    visible = _take_visible_text(state, text)
+    if not visible:
         return None
-    return _sse_event({"text": clean})
-
-
-async def _pre_stream_field_update_events(session_id: str, workflow_turn: dict) -> list[str]:
-    try:
-        loop = asyncio.get_running_loop()
-        prev_state = await loop.run_in_executor(None, get_discovery_state, session_id)
-        new_state = await asyncio.wait_for(
-            extract_discovery_fields(
-                workflow_turn["tail_text"],
-                session_id=session_id,
-                solution_type=workflow_turn.get("solution_type"),
-            ),
-            timeout=4.0,
-        )
-        events = _field_update_sse_events(
-            (prev_state or {}).get("fields") or {},
-            new_state.get("fields") or {},
-        )
-        logger.info(f"Pre-stream field_update: session={session_id} emitted={len(events)}")
-        return events
-    except asyncio.TimeoutError:
-        logger.warning(
-            f"Pre-stream extract timed out (>4s): event=extract_timeout_total session_id={session_id} timeout_seconds=4"
-        )
-    except CostCircuitBreakerTripped:
-        raise
-    except Exception as exc:
-        logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
-    return []
+    return _sse_event({"text": visible})
 
 
 async def _agent_stream_events(
@@ -128,14 +115,24 @@ async def _agent_stream_events(
     state: StreamReplyState,
 ) -> AsyncIterator[str]:
     try:
+        streamed_since_final = False
         async for event in runtime.runner.run_async(
             user_id=user_id,
             session_id=session_id,
             new_message=user_content,
+            run_config=_TEXT_RUN_CONFIG,
         ):
+            if event.partial is True:
+                streamed_since_final = True
+            elif streamed_since_final:
+                # ADK repeats the streamed text in one aggregated final event; skip the copy.
+                streamed_since_final = False
+                continue
             for text in _event_text_parts(event):
                 if stream_event := _record_agent_text_chunk(text, state):
                     yield stream_event
+        if tail := _take_visible_text(state, "", flush=True):
+            yield _sse_event({"text": tail})
     except CostCircuitBreakerTripped as exc:
         state.cost_aborted = True
         logger.warning(f"Stream aborted by cost circuit: session_id={session_id} cost_usd={exc.cost_usd:.6f}")
@@ -201,18 +198,6 @@ async def chat_stream_event_generator(
     active_field = workflow_turn["workflow"].get("active_field")
     if active_field:
         yield _sse_event({"active_field": active_field})
-
-    try:
-        for update_event in await _pre_stream_field_update_events(session_id, workflow_turn):
-            yield update_event
-    except CostCircuitBreakerTripped as exc:
-        logger.warning(
-            f"Stream aborted by cost circuit during extraction: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
-        )
-        reset_turn(turn_token)
-        yield _sse_event({"error": FRIENDLY_COST_ERROR})
-        yield "data: [DONE]\n\n"
-        return
 
     stream_state = StreamReplyState()
     async for stream_event in _keepalive_merged(

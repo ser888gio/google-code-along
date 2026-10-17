@@ -19,10 +19,6 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
 ```
 
 ```bash
-gcloud logging metrics create extract_timeout_total \
-  --description="Pre-stream discovery extraction timed out" \
-  --log-filter='resource.type="cloud_run_revision" AND textPayload:"event=extract_timeout_total"'
-
 gcloud logging metrics create firestore_unavailable_total \
   --description="Firestore was unavailable to the backend" \
   --log-filter='resource.type="cloud_run_revision" AND textPayload:"event=firestore_unavailable_total"'

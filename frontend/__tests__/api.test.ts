@@ -180,7 +180,6 @@ describe("streamChat", () => {
 			jest.fn(),
 			jest.fn(),
 			undefined,
-			undefined,
 			{ product_owner: "Jana Novak" },
 		);
 
@@ -203,7 +202,6 @@ describe("streamChat", () => {
 			jest.fn(),
 			jest.fn(),
 			jest.fn(),
-			undefined,
 			undefined,
 			{},
 			["product_owner"],

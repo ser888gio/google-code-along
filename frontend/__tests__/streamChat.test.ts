@@ -24,7 +24,6 @@ function callbacks() {
 		onDone: rec("done"),
 		onError: rec("error"),
 		onFinalizing: rec("finalizing"),
-		onFieldUpdate: rec("field"),
 		onActiveField: rec("active"),
 		onMessageId: rec("messageId"),
 		onChoices: rec("choices"),
@@ -43,7 +42,6 @@ async function run(chunks: string[], ok = true, status = 200) {
 		cb.onDone,
 		cb.onError,
 		cb.onFinalizing,
-		cb.onFieldUpdate,
 		undefined,
 		undefined,
 		cb.onActiveField,
@@ -59,7 +57,6 @@ describe("streamChat SSE dispatch", () => {
 		const event = {
 			text_replace: "R",
 			choices: ["a", "b"],
-			field_update: { key: "department", value: "IT" },
 			active_field: "requester",
 			event: "finalizing",
 			text: "T",
@@ -72,7 +69,6 @@ describe("streamChat SSE dispatch", () => {
 			'chunk:["T"]',
 			"finalizing",
 			'active:["requester"]',
-			'field:["department","IT"]',
 			'choices:[["a","b"]]',
 			'replace:["R"]',
 			"done",
@@ -105,14 +101,12 @@ describe("streamChat SSE dispatch", () => {
 		).toEqual(['chunk:["joined"]', "done"]);
 	});
 
-	it("defaults a missing field_update value and ignores malformed updates", async () => {
+	it("ignores malformed structured updates", async () => {
 		expect(
 			await run([
-				'data: {"field_update":{"key":"comments"}}\n',
-				'data: {"field_update":{"value":"no key"}}\n',
 				'data: {"active_field":42,"choices":"nope","text_replace":1}\n',
 			]),
-		).toEqual(['field:["comments",""]', "done"]);
+		).toEqual(["done"]);
 	});
 
 	it("reports a server error without reading the body", async () => {
