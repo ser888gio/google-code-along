@@ -1,7 +1,9 @@
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from chat_turn import prepare_workflow_turn, run_turn_postprocessing
+import pytest
+
+from chat_turn import _is_finalize_choice, prepare_workflow_turn, run_turn_postprocessing
 
 
 def _std_patches(**overrides):
@@ -67,6 +69,59 @@ def test_wrap_up_finalize_choice_transitions_to_ready_to_finalize():
         **{"chat_turn.get_workflow_state": MagicMock(return_value={"phase": "wrap_up"})},
     )
     assert result["workflow"]["phase"] == "ready_to_finalize"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "finalize",
+        "Yes, finalize it.",
+        "Let's finalize with the open questions.",
+        "Finalize with open questions",
+        "Yes, let's do that.",
+        "Go ahead and finish it.",
+        "Wrap it up please.",
+        "Generate the document.",
+        "Ano, prosím.",
+        "Ano, souhlasím.",
+        "No jasně, dokončete to.",
+        "Finalizovat s otevřenými otázkami.",
+        "Dokončit s otevřenými otázkami",
+        "Vygenerovat specifikaci.",
+        "Dokončete to.",
+        "Klidně to uzavřete.",
+        "Hotovo, můžeme skončit.",
+        "Nic dalšího mě již nenapadá.",
+        "Doplním to později.",
+        "Chci nechat otevřené.",
+        # Real simulated-user replies that previously fell through to discovery.
+        "Pojďme už rovnou k vygenerování té specifikace.",
+        "Tyto otevřené body si vyřešíme interně. Prosím tedy o finální vygenerování specifikace.",
+    ],
+)
+def test_is_finalize_choice_accepts(message):
+    assert _is_finalize_choice(message)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "I need more time",
+        "No, let's fill them in.",
+        "Not yet.",
+        "Don't finalize yet.",
+        "Fill in the missing details",
+        "Add more details",
+        "Ne, doplním to teď.",
+        "Doplnit chybějící údaje",
+        "Ano, ale nejdřív doplním rozpočet.",
+        "Nechci to nechat otevřené.",
+        "Ještě ne.",
+        "Rozpočet je 500 000 Kč.",
+    ],
+)
+def test_is_finalize_choice_rejects(message):
+    assert not _is_finalize_choice(message)
 
 
 # ---------------------------------------------------------------------------

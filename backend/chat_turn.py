@@ -14,6 +14,7 @@ of transport (REST, SSE, or voice WebSocket):
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from functools import partial
 
@@ -90,22 +91,30 @@ def _answered_field_values(
     return values
 
 
+# Patterns run on normalize_for_match() output: lowercase, no diacritics.
+# Stems instead of whole words so Czech inflections ("finální", "vygenerování") match.
+_WRAP_UP_DECLINE = re.compile(
+    r"^(ne|no|nope)\b(?![\s,]*(jasne|jo|dobre))|\bnot\b|\bdon'?t\b|\bnechci\b|\bnejdriv|\bjeste ne\b|\bnefinaliz"
+)
+_WRAP_UP_LATER = re.compile(r"\bpozdeji\b|\blater\b")
+_WRAP_UP_FILL_NOW = re.compile(r"\bdopln|\bfill\b|\badd\b")
+_WRAP_UP_FINALIZE = re.compile(
+    r"final|generat|generov|vygener|dokonc|uzavr|hotovo|finish|wrap(?: it)? up|\bdone\b|\bnechat\b|\bnechme\b"
+    r"|otevren|open question|nic dalsiho|nothing (?:else|more)|\bto je vse\b|that'?s all|that is all"
+)
+_WRAP_UP_AGREE = re.compile(r"^(ano|jo|jj|ok|okay|yes|yep|yeah|sure|souhlasim|klidne|muzete|go ahead|please do)\b")
+
+
 def _is_finalize_choice(message: str) -> bool:
-    """Detect a wrap-up user choice to finalize with open questions."""
+    """Detect a wrap-up answer to "finalize now with the open questions?"."""
     text = normalize_for_match(message)
-    return any(
-        phrase in text
-        for phrase in [
-            "finalize",
-            "finalise",
-            "generate",
-            "vygeneruj",
-            "finalizuj",
-            "dokoncit",
-            "nechat",
-            "pozdeji",
-        ]
-    )
+    if _WRAP_UP_DECLINE.search(text):
+        return False
+    if _WRAP_UP_LATER.search(text):
+        return True
+    if _WRAP_UP_FILL_NOW.search(text):
+        return False
+    return bool(_WRAP_UP_FINALIZE.search(text) or _WRAP_UP_AGREE.search(text))
 
 
 async def _reopen_first_deferred_field(
