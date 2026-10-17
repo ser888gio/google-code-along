@@ -111,6 +111,18 @@ def _field_key_list(value: object) -> list[str]:
     return [str(key) for key in value] if isinstance(value, (list, tuple)) else []
 
 
+_WRAP_UP_CHOICES = {
+    True: (
+        '["Dokončit s otevřenými otázkami", "Doplnit chybějící údaje"]',
+        '["Finalize with open questions", "Fill in the missing details"]',
+    ),
+    False: (
+        '["Dokončit specifikaci", "Doplnit další údaje"]',
+        '["Finalize the specification", "Add more details"]',
+    ),
+}
+
+
 def _render_wrap_up_context(context: Mapping[str, object], labels: Mapping[str, str]) -> list[str]:
     lines = [
         "- Required fields are all answered, deferred, or not applicable.",
@@ -121,7 +133,19 @@ def _render_wrap_up_context(context: Mapping[str, object], labels: Mapping[str, 
     if deferred:
         lines.append("- List deferred or unknown fields explicitly:")
         lines.extend(f"  - {labels.get(key, key)}" for key in deferred)
-    lines.append("- Ask whether the user wants to fill any of them now, or finalize with them as open questions.")
+        lines.append(
+            "- Ask one yes/no question: should you finalize now, with these fields as open questions? "
+            "Mention that the user can instead give the missing details."
+        )
+    else:
+        lines.append(
+            "- Ask one yes/no question: should you finalize the specification now? "
+            "Mention that the user can instead add more details."
+        )
+    # Fixed texts: the UI sends a clicked choice verbatim, and chat_turn matches these words.
+    cs_choices, en_choices = _WRAP_UP_CHOICES[bool(deferred)]
+    lines.append(f"- End your reply with exactly this block if you reply in Czech: <choices>{cs_choices}</choices>")
+    lines.append(f"- Or exactly this one if you reply in English: <choices>{en_choices}</choices>")
     return lines
 
 
