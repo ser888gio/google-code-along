@@ -25,7 +25,6 @@ def _run_stream(phase: str, reply: str):
 
     with (
         patch.object(chat_streaming, "_agent_stream_events", fake_agent_events),
-        patch.object(chat_streaming, "_pre_stream_field_update_events", AsyncMock(return_value=[])),
         patch.object(chat_streaming, "run_turn_postprocessing", postprocess),
     ):
         events = asyncio.run(collect())
