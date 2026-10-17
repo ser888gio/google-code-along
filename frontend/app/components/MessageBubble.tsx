@@ -93,7 +93,7 @@ export default function MessageBubble({
 				<ThinkingIndicator />
 			) : (
 				<>
-					<div className="text-base text-gray-800 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_a]:text-[#4a6659] [&_a]:underline [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-base [&_h3]:font-semibold">
+					<div className="min-w-0 text-base text-gray-800 [overflow-wrap:anywhere] [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_em]:italic [&_code]:rounded [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.85em] [&_a]:text-[#4a6659] [&_a]:underline [&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-base [&_h2]:font-bold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-base [&_h3]:font-semibold">
 						<ReactMarkdown remarkPlugins={[remarkGfm]}>
 							{msg.text}
 						</ReactMarkdown>
@@ -161,7 +161,9 @@ function UserBubble({ text }: { text: string }) {
 						strokeLinecap="round"
 					/>
 				</svg>
-				<span className="text-base text-gray-700">{text}</span>
+				<span className="min-w-0 text-base text-gray-700 [overflow-wrap:anywhere]">
+					{text}
+				</span>
 			</div>
 		</div>
 	);
@@ -240,7 +242,7 @@ function VoteButton({
 			title={t(labelKey)}
 			disabled={pending}
 			onClick={onVote}
-			className={`flex h-7 w-7 items-center justify-center rounded border transition-colors ${
+			className={`flex h-9 w-9 items-center justify-center rounded border transition-colors lg:h-7 lg:w-7 ${
 				active
 					? activeClass
 					: "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-700"
@@ -301,7 +303,7 @@ function FeedbackBar({
 					<button
 						type="button"
 						onClick={onToggleComment}
-						className="ml-1 text-xs text-gray-500 hover:text-gray-800"
+						className="ml-1 min-h-6 px-1 text-xs text-gray-500 hover:text-gray-800"
 					>
 						{commentOpen ? t("btn.hide_comment") : t("btn.add_comment")}
 					</button>
@@ -314,7 +316,7 @@ function FeedbackBar({
 						onChange={(e) => onCommentChange(e.target.value)}
 						placeholder={t("feedback.optional_comment")}
 						rows={2}
-						className="min-h-16 flex-1 resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
+						className="min-h-16 min-w-0 flex-1 resize-y rounded border border-gray-200 px-3 py-2 text-base text-gray-700 lg:text-sm outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
 					/>
 					<button
 						type="submit"

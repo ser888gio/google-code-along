@@ -1,6 +1,12 @@
 ﻿"use client";
 
-import { forwardRef, useCallback, useEffect, useRef } from "react";
+import {
+	forwardRef,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+} from "react";
 import type { FieldSource, RsField } from "../../lib/api";
 import { useLocale } from "../i18n/LocaleContext";
 
@@ -121,7 +127,7 @@ const FieldCard = forwardRef<HTMLDivElement, FieldCardProps>(function FieldCard(
 					{label}
 				</span>
 				{badgeLabel && (
-					<span className="ml-auto shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-bold text-blue-600">
+					<span className="ml-auto shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-bold text-blue-600">
 						{badgeLabel}
 					</span>
 				)}
@@ -145,6 +151,34 @@ const FieldCard = forwardRef<HTMLDivElement, FieldCardProps>(function FieldCard(
 	);
 });
 
+/** Grow a textarea to fit its content, re-fitting when its width changes. */
+function useAutoGrow(
+	ref: React.RefObject<HTMLTextAreaElement | null>,
+	value: string,
+) {
+	useLayoutEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const fit = () => {
+			el.style.height = "auto";
+			el.style.height = `${el.scrollHeight}px`;
+		};
+		fit();
+		if (typeof ResizeObserver === "undefined") return;
+		// Width changes (panel switch, rotation, hidden → shown) re-wrap the text.
+		let lastWidth = el.clientWidth;
+		const observer = new ResizeObserver(() => {
+			if (el.clientWidth === lastWidth) return;
+			lastWidth = el.clientWidth;
+			fit();
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [ref, value]);
+}
+
+// Every field is an auto-growing textarea so long values are never clipped;
+// single-line fields just start at one row and reject line breaks.
 function FieldInput({
 	multiline,
 	value,
@@ -156,23 +190,23 @@ function FieldInput({
 	placeholder: string | undefined;
 	onChange: (value: string) => void;
 }) {
-	if (multiline)
-		return (
-			<textarea
-				value={value}
-				onChange={(e) => onChange(e.target.value)}
-				placeholder={placeholder}
-				rows={3}
-				className="w-full resize-none text-sm leading-relaxed text-gray-700 outline-none placeholder-gray-300"
-			/>
-		);
+	const ref = useRef<HTMLTextAreaElement>(null);
+	useAutoGrow(ref, value);
 	return (
-		<input
-			type="text"
+		<textarea
+			ref={ref}
 			value={value}
-			onChange={(e) => onChange(e.target.value)}
+			onChange={(e) =>
+				onChange(
+					multiline ? e.target.value : e.target.value.replace(/\r?\n/g, " "),
+				)
+			}
+			onKeyDown={(e) => {
+				if (!multiline && e.key === "Enter") e.preventDefault();
+			}}
 			placeholder={placeholder}
-			className="w-full text-sm text-gray-700 outline-none placeholder-gray-300"
+			rows={multiline ? 3 : 1}
+			className="block min-h-6 w-full resize-none overflow-hidden text-base leading-relaxed text-gray-700 outline-none placeholder-gray-300 lg:text-sm"
 		/>
 	);
 }
@@ -188,21 +222,21 @@ function SuggestionBar({
 }) {
 	const { t } = useLocale();
 	return (
-		<div className="mt-2 flex items-start gap-2 rounded bg-yellow-50 px-2 py-1.5">
-			<span className="min-w-0 flex-1 truncate text-[11px] text-yellow-800">
+		<div className="mt-2 flex flex-wrap items-start gap-2 rounded bg-yellow-50 px-2 py-1.5">
+			<span className="min-w-0 flex-1 basis-48 text-xs text-yellow-800 [overflow-wrap:anywhere]">
 				{t("rs.suggestion.label")} {value}
 			</span>
 			<button
 				type="button"
 				onClick={onAccept}
-				className="shrink-0 rounded bg-yellow-200 px-1.5 py-0.5 text-[10px] font-bold text-yellow-900 hover:bg-yellow-300"
+				className="min-h-8 shrink-0 rounded bg-yellow-200 px-2.5 text-xs font-bold text-yellow-900 hover:bg-yellow-300 lg:min-h-6 lg:px-2"
 			>
 				{t("rs.suggestion.accept")}
 			</button>
 			<button
 				type="button"
 				onClick={onDismiss}
-				className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold text-gray-600 hover:bg-gray-200"
+				className="min-h-8 shrink-0 rounded bg-gray-100 px-2.5 text-xs font-bold text-gray-600 hover:bg-gray-200 lg:min-h-6 lg:px-2"
 			>
 				{t("rs.suggestion.dismiss")}
 			</button>

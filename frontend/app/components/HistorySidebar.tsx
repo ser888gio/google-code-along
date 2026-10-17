@@ -21,15 +21,16 @@ export default function HistorySidebar({
 	const { t } = useLocale();
 	return (
 		<div className="absolute inset-0 z-40 flex">
-			<div className="flex w-72 flex-col border-r border-gray-200 bg-white shadow-xl">
-				<div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
+			<div className="flex w-72 max-w-[85%] flex-col border-r border-gray-200 bg-white shadow-xl">
+				<div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-2">
 					<span className="text-sm font-bold text-gray-800">
 						{t("sidebar.conversations")}
 					</span>
 					<button
 						type="button"
 						onClick={onClose}
-						className="text-xs text-gray-400 hover:text-gray-600"
+						aria-label={t("btn.close")}
+						className="-mr-2 flex h-8 w-8 items-center justify-center rounded text-sm text-gray-400 hover:bg-gray-100 hover:text-gray-600"
 					>
 						✕
 					</button>
@@ -64,7 +65,7 @@ export default function HistorySidebar({
 									{s.preview ?? s.session_id}
 								</p>
 								{s.updated_at && (
-									<p className="mt-0.5 text-[10px] text-gray-400">
+									<p className="mt-0.5 text-[11px] text-gray-400">
 										{new Date(s.updated_at).toLocaleString()}
 									</p>
 								)}

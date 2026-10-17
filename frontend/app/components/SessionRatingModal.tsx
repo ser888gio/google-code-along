@@ -42,7 +42,7 @@ export default function SessionRatingModal({
 		>
 			<form
 				onSubmit={onSubmit}
-				className="w-90 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
+				className="w-[calc(100%-2rem)] max-w-90 rounded-lg border border-gray-200 bg-white p-5 shadow-xl"
 				onClick={(e) => e.stopPropagation()}
 				onKeyDown={(e) => e.stopPropagation()}
 			>
@@ -57,9 +57,10 @@ export default function SessionRatingModal({
 						type="button"
 						disabled={submitting}
 						onClick={onClose}
-						className="text-xs text-gray-400 hover:text-gray-600 disabled:opacity-50"
+						aria-label={t("btn.close")}
+						className="-mr-2 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded text-sm text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
 					>
-						x
+						✕
 					</button>
 				</div>
 				<div className="grid grid-cols-5 gap-2">
@@ -83,7 +84,7 @@ export default function SessionRatingModal({
 					onChange={(e) => onCommentChange(e.target.value)}
 					placeholder={t("feedback.optional_comment")}
 					rows={3}
-					className="mt-3 min-h-24 w-full resize-y rounded border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
+					className="mt-3 min-h-24 w-full resize-y rounded border border-gray-200 px-3 py-2 text-base text-gray-700 lg:text-sm outline-none focus:border-[#4a6659] focus:ring-1 focus:ring-[#4a6659]"
 				/>
 				<div className="mt-4 flex justify-end gap-2">
 					<button

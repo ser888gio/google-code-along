@@ -107,16 +107,13 @@ export default function RsDocumentPanel({
 	return (
 		<div className="flex h-full flex-col">
 			<div className="flex shrink-0 items-center gap-3 border-b border-gray-200 bg-white px-4">
-				<span className="mr-4 hidden whitespace-nowrap border-r border-gray-200 py-3 pr-4 text-sm font-semibold text-gray-800 2xl:inline">
-					{t("header.rs")}
-				</span>
 				<div className="flex min-w-0 flex-1 overflow-x-auto">
 					{RS_TABS.filter((tab) => !HIDDEN_TABS.has(tab)).map((tab) => (
 						<button
 							type="button"
 							key={tab}
 							onClick={() => onTabChange(tab)}
-							className={`relative whitespace-nowrap px-3 py-3 text-sm transition-colors ${
+							className={`relative whitespace-nowrap px-2.5 py-3 text-sm transition-colors sm:px-3 ${
 								activeTab === tab
 									? "border-b-2 border-[#1a3a2a] bg-[#1a3a2a] text-white"
 									: "text-gray-500 hover:text-gray-800"

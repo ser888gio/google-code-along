@@ -83,17 +83,37 @@ describe("FieldCard", () => {
 		expect(card.className).toContain("ring-green-400");
 	});
 
-	it("renders a textarea for multiline fields and an input otherwise", () => {
-		renderCard({ multiline: true });
-		expect(screen.getByRole("textbox").tagName).toBe("TEXTAREA");
+	it.each([
+		[true, 3],
+		[false, 1],
+	])("renders multiline=%s as a textarea starting at %i row(s)", (multiline, rows) => {
+		renderCard({ multiline });
+		const box = screen.getByRole("textbox");
+		expect(box.tagName).toBe("TEXTAREA");
+		expect(box).toHaveAttribute("rows", String(rows));
 	});
 
 	it("shows the placeholder only while unfilled and reports edits", () => {
 		const { onChange } = renderCard();
 		const box = screen.getByPlaceholderText("Gathering…");
-		expect(box.tagName).toBe("INPUT");
 		fireEvent.change(box, { target: { value: "Ales" } });
 		expect(onChange).toHaveBeenCalledWith("product_owner", "Ales");
+	});
+
+	it("keeps single-line fields free of line breaks", () => {
+		const { onChange } = renderCard();
+		fireEvent.change(screen.getByRole("textbox"), {
+			target: { value: "Ales\nNovak" },
+		});
+		expect(onChange).toHaveBeenCalledWith("product_owner", "Ales Novak");
+	});
+
+	it("keeps line breaks in multiline fields", () => {
+		const { onChange } = renderCard({ multiline: true });
+		fireEvent.change(screen.getByRole("textbox"), {
+			target: { value: "a\nb" },
+		});
+		expect(onChange).toHaveBeenCalledWith("product_owner", "a\nb");
 	});
 
 	it("routes accept and dismiss for a pending suggestion", () => {
