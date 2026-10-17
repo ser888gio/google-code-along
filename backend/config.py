@@ -88,6 +88,8 @@ AUDIO_REGION = os.getenv("GOOGLE_CLOUD_AUDIO_REGION", "europe-west1")
 
 # Orchestrator: strong reasoning, drives the discovery conversation
 MODEL_ORCHESTRATOR = "gemini-3.1-pro-preview"
+# The default (high) thinking adds seconds of time-to-first-token on every chat turn
+ORCHESTRATOR_THINKING_LEVEL = os.getenv("ORCHESTRATOR_THINKING_LEVEL", "low")
 
 # Finalizer: deep synthesis across multiple sources → structured JSON
 MODEL_FINALIZER = "gemini-3.1-pro-preview"

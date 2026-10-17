@@ -116,7 +116,7 @@ Important responsibilities:
 
 - Render a two-panel workspace: chat on the left, RS/document tabs on the right.
 - Stream text chat with `streamChat()` against `POST /chat/stream`.
-- Handle SSE events for `session_id`, `message_id`, streamed `text`, `active_field`, `field_update`, and `finalizing`.
+- Handle SSE events for `session_id`, `message_id`, streamed `text`, `active_field`, `choices`, `text_replace`, and `finalizing`.
 - Run post-turn extraction with `POST /context/extract` and refresh Firestore SRS data from `GET /firestore/data/{sessionId}`.
 - Preserve strict direct-input fields and suggestable direct fields while merging AI-extracted discovery state.
 - Track the active workflow field so the header can show what the agent is currently asking for.

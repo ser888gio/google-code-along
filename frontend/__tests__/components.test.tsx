@@ -600,7 +600,7 @@ describe("ChatPage — direct chat field answers", () => {
 			fields: { product_owner: "Ales Priklad" },
 		});
 
-		const secondCallDirectFields = mockStreamChat.mock.calls[1][8];
+		const secondCallDirectFields = mockStreamChat.mock.calls[1][7];
 		expect(secondCallDirectFields).toEqual(
 			expect.objectContaining({ product_owner: "Ales Priklad" }),
 		);
@@ -631,8 +631,8 @@ describe("ChatPage — direct chat field answers", () => {
 		).not.toBeInTheDocument();
 		expect(mockPatchRsFieldState).not.toHaveBeenCalled();
 
-		const secondCallDirectFields = mockStreamChat.mock.calls[1][8];
+		const secondCallDirectFields = mockStreamChat.mock.calls[1][7];
 		expect(secondCallDirectFields?.product_owner).toBeUndefined();
-		expect(mockStreamChat.mock.calls[1][9]).toEqual(["product_owner"]);
+		expect(mockStreamChat.mock.calls[1][8]).toEqual(["product_owner"]);
 	});
 });

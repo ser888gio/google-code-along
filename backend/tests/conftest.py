@@ -121,6 +121,8 @@ def _install_google_adk_stubs():
     types_mod.Blob = MagicMock()
     types_mod.SpeechConfig = MagicMock()
     types_mod.VoiceConfig = MagicMock()
+    types_mod.GenerateContentConfig = MagicMock()
+    types_mod.ThinkingConfig = MagicMock()
     sys.modules["google.genai.types"] = types_mod
     genai_mod.types = types_mod  # type: ignore[attr-defined]
 

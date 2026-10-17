@@ -20,7 +20,7 @@ Two variants:
 from functools import cached_property
 from typing import Any, cast
 
-from config import GOOGLE_API_KEY, MODEL_AUDIO, MODEL_ORCHESTRATOR
+from config import GOOGLE_API_KEY, MODEL_AUDIO, MODEL_ORCHESTRATOR, ORCHESTRATOR_THINKING_LEVEL
 from google.adk.agents import Agent
 from google.adk.models.google_llm import Gemini
 from google.genai import types as genai_types
@@ -68,6 +68,9 @@ rs_agent = Agent(
     ),
     model=MODEL_ORCHESTRATOR,
     instruction=ORCHESTRATOR_SYSTEM_PROMPT,
+    generate_content_config=genai_types.GenerateContentConfig(
+        thinking_config=genai_types.ThinkingConfig(thinking_level=ORCHESTRATOR_THINKING_LEVEL),
+    ),
     tools=cast(Any, RESEARCH_TOOLS),  # search_past_analyses, list_knowledge_base_docs, search_vertex_ai
     before_model_callback=before_model_cb,
     after_model_callback=after_model_cb,

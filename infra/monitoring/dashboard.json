@@ -347,26 +347,13 @@
         "width": 12,
         "height": 4,
         "widget": {
-          "title": "Reliability - infra & extraction error events (log-based)",
+          "title": "Reliability - infra error events (log-based)",
           "xyChart": {
             "dataSets": [
               {
                 "timeSeriesQuery": {
                   "timeSeriesFilter": {
                     "filter": "metric.type=\"logging.googleapis.com/user/firestore_unavailable_total\" resource.type=\"cloud_run_revision\"",
-                    "aggregation": {
-                      "alignmentPeriod": "60s",
-                      "perSeriesAligner": "ALIGN_DELTA",
-                      "crossSeriesReducer": "REDUCE_SUM"
-                    }
-                  }
-                },
-                "plotType": "LINE"
-              },
-              {
-                "timeSeriesQuery": {
-                  "timeSeriesFilter": {
-                    "filter": "metric.type=\"logging.googleapis.com/user/extract_timeout_total\" resource.type=\"cloud_run_revision\"",
                     "aggregation": {
                       "alignmentPeriod": "60s",
                       "perSeriesAligner": "ALIGN_DELTA",

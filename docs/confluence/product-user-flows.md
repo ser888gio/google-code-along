@@ -57,7 +57,6 @@ Start from a blank idea and gather enough information to draft a formal Requirem
    - session_id
    - message_id
    - active_field
-   - optional field_update events
    - assistant text chunks
    - [DONE]
 7. Frontend stores session_id and renders the assistant message.
@@ -97,7 +96,7 @@ Let the user see the formal RS taking shape and correct precise values without w
 
 ```text
 1. User chats normally.
-2. Frontend receives field_update events during streaming or extraction results after the turn.
+2. Frontend receives extraction results after each turn.
 3. Preview panel marks fields as filled, missing, or editable.
 4. User edits a direct-input field.
 5. Frontend calls PATCH /discovery/{session_id}/fields.

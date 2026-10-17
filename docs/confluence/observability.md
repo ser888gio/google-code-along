@@ -177,16 +177,15 @@ Current log-based metrics:
 
 | Metric | Log event | Meaning |
 |---|---|---|
-| `extract_timeout_total` | `event=extract_timeout_total` | Pre-stream discovery extraction exceeded the timeout. |
 | `firestore_unavailable_total` | `event=firestore_unavailable_total` | Backend could not read/write Firestore. |
 | `bridge_injection_failure_total` | `event=bridge_injection_failure_total` | Voice transcript injection into text ADK session failed. |
 
 Manual creation example:
 
 ```bash
-gcloud logging metrics create extract_timeout_total \
-  --description="Pre-stream discovery extraction timed out" \
-  --log-filter='resource.type="cloud_run_revision" AND textPayload:"event=extract_timeout_total"'
+gcloud logging metrics create firestore_unavailable_total \
+  --description="Firestore was unavailable to the backend" \
+  --log-filter='resource.type="cloud_run_revision" AND textPayload:"event=firestore_unavailable_total"'
 ```
 
 Log-based metrics appear under:
@@ -364,7 +363,6 @@ Recommended dashboard sections:
 - Session finalization vs abandonment.
 - Safety blocks and cost circuit trips.
 - Firestore errors.
-- Extraction timeouts.
 - Voice bridge injection failures.
 - Feedback trend and thumbs-down sessions.
 
@@ -379,25 +377,24 @@ Check:
 1. `genai.client.ttft_seconds` by model and phase.
 2. `genai.client.operation.duration_seconds` for `generate_content`.
 3. Cloud Run CPU/memory/concurrency.
-4. Logs for pre-stream extraction timeouts.
-5. Token counts for unusually large prompts.
+4. Token counts for unusually large prompts.
+5. `ORCHESTRATOR_THINKING_LEVEL` (default `low`); higher levels add time-to-first-token.
 
 Likely causes:
 
 - Large conversation context.
-- Slow model response.
-- Discovery extraction running before stream.
+- Slow model response or a high orchestrator thinking level.
+- Answer classifier call running before the orchestrator turn.
 - Cloud Run cold starts.
 
 ### Preview Panel Does Not Update
 
 Check:
 
-1. Logs for `event=extract_timeout_total`.
-2. `POST /context/extract` status in browser network tools.
-3. Firestore write/read errors.
-4. Cost circuit breaker logs.
-5. Whether the backend restarted and lost live ADK session state.
+1. `POST /context/extract` status in browser network tools.
+2. Firestore write/read errors.
+3. Cost circuit breaker logs.
+4. Whether the backend restarted and lost live ADK session state.
 
 ### Finalization Does Not Complete
 

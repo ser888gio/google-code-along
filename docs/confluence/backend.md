@@ -200,8 +200,7 @@ The orchestrator streams natural-language interview responses. It may emit inter
 
 The backend does not broadcast discovery state over a WebSocket. Instead:
 
-- `/chat/stream` may emit a pre-stream `field_update` SSE event when the active field can be updated immediately from the user's latest answer.
-- The frontend calls `/context/extract` to run/refresh extraction for a session.
+- The frontend calls `/context/extract` after each turn to run/refresh extraction for a session. `/chat/stream` does not run extraction, so it never delays the reply.
 - Firestore stores the latest merged discovery state.
 
 ### Research Tools
@@ -231,7 +230,6 @@ Research is therefore GCS-backed today, not Vertex AI Search-backed.
 
 - Initial metadata: `{"session_id": "...", "message_id": "..."}`
 - Active field update: `{"event": "active_field", "field_key": "..."}`
-- Field update: `{"event": "field_update", "fields": {...}, "completeness": 42}`
 - Text chunk: `{"text": "..."}`
 - Finalization start: `{"event": "finalizing"}`
 - Error: `{"error": "..."}`
@@ -300,7 +298,6 @@ POST /chat or /chat/stream
   |-- ensure ADK session exists
   |-- merge direct/deferred field state
   |-- classify/rate active-field answer for one-field workflow
-  |-- optionally emit field_update before the LLM response
   |
   v
 ADK orchestrator runner

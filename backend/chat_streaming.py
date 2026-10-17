@@ -1,8 +1,8 @@
 """SSE streaming pipeline for /chat/stream.
 
-Turns ADK runner events into Server-Sent Events: text chunks, field updates,
-choices, keepalives, and the [DONE] terminator. Post-turn persistence is
-delegated to chat_turn.run_turn_postprocessing.
+Turns ADK runner events into Server-Sent Events: text chunks, choices,
+keepalives, and the [DONE] terminator. Post-turn persistence is delegated to
+chat_turn.run_turn_postprocessing.
 """
 
 from __future__ import annotations
@@ -17,10 +17,8 @@ from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 import runtime
-from agent.discovery_agent import extract_discovery_fields
 from chat_turn import run_turn_postprocessing
 from config import FINALIZING_MARKER, MODEL_ORCHESTRATOR
-from firestore import get_discovery_state
 from logger import get_logger
 from observability.metrics import record_itl, record_ttft
 from observability.safety import FRIENDLY_COST_ERROR, CostCircuitBreakerTripped
@@ -59,22 +57,6 @@ def _event_text_parts(event) -> list[str]:
     return [part.text for part in event.content.parts if part.text]
 
 
-def _field_update_sse_events(prev_fields: dict, new_fields: dict) -> list[str]:
-    events: list[str] = []
-    for key, entry in new_fields.items():
-        if not entry or not entry.get("filled"):
-            continue
-        new_value = entry.get("value")
-        if new_value is None:
-            continue
-        prev_entry = prev_fields.get(key) or {}
-        prev_filled = bool(prev_entry.get("filled"))
-        prev_value = prev_entry.get("value")
-        if (not prev_filled) or (prev_value != new_value):
-            events.append(_sse_event({"field_update": {"key": key, "value": new_value}}))
-    return events
-
-
 def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
     now = time.perf_counter()
     if not state.ttft_recorded:
@@ -89,35 +71,6 @@ def _record_agent_text_chunk(text: str, state: StreamReplyState) -> str | None:
     if not clean:
         return None
     return _sse_event({"text": clean})
-
-
-async def _pre_stream_field_update_events(session_id: str, workflow_turn: dict) -> list[str]:
-    try:
-        loop = asyncio.get_running_loop()
-        prev_state = await loop.run_in_executor(None, get_discovery_state, session_id)
-        new_state = await asyncio.wait_for(
-            extract_discovery_fields(
-                workflow_turn["tail_text"],
-                session_id=session_id,
-                solution_type=workflow_turn.get("solution_type"),
-            ),
-            timeout=4.0,
-        )
-        events = _field_update_sse_events(
-            (prev_state or {}).get("fields") or {},
-            new_state.get("fields") or {},
-        )
-        logger.info(f"Pre-stream field_update: session={session_id} emitted={len(events)}")
-        return events
-    except asyncio.TimeoutError:
-        logger.warning(
-            f"Pre-stream extract timed out (>4s): event=extract_timeout_total session_id={session_id} timeout_seconds=4"
-        )
-    except CostCircuitBreakerTripped:
-        raise
-    except Exception as exc:
-        logger.warning(f"Pre-stream extract failed: session={session_id} {exc}")
-    return []
 
 
 async def _agent_stream_events(
@@ -201,18 +154,6 @@ async def chat_stream_event_generator(
     active_field = workflow_turn["workflow"].get("active_field")
     if active_field:
         yield _sse_event({"active_field": active_field})
-
-    try:
-        for update_event in await _pre_stream_field_update_events(session_id, workflow_turn):
-            yield update_event
-    except CostCircuitBreakerTripped as exc:
-        logger.warning(
-            f"Stream aborted by cost circuit during extraction: session_id={session_id} cost_usd={exc.cost_usd:.6f}"
-        )
-        reset_turn(turn_token)
-        yield _sse_event({"error": FRIENDLY_COST_ERROR})
-        yield "data: [DONE]\n\n"
-        return
 
     stream_state = StreamReplyState()
     async for stream_event in _keepalive_merged(

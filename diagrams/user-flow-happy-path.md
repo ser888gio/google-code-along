@@ -12,8 +12,8 @@ Specification, with no side-tracks. This is the minimal linear view; see
 4. **See welcome + empty RS (0%).** Left pane: a welcome bubble and a text box. Right
    pane: the live RS document at **0% completeness** with empty field cards.
 5. **Type answer, press Send.** The message posts to `POST /chat/stream` (SSE).
-6. **Assistant streams reply; RS fills live.** Tokens stream back; SSE `field_update`
-   events progressively fill the right-hand RS panel as fields are extracted.
+6. **Assistant streams reply; RS fills live.** Tokens stream back; once the reply
+   finishes, post-turn extraction (`POST /context/extract`) fills the right-hand RS panel.
 7. **Keep chatting** — the user answers the assistant's questions turn after turn until
    completeness climbs (back-edge in the diagram).
 8. **≥ 80% "ready to generate."** The completeness bar turns green; the Summary-tab
