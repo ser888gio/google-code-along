@@ -169,7 +169,8 @@ jobs:
               --time-zone "Europe/Prague" \
               --uri "https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_ID }}/jobs/rs-user-simulation:run" \
               --http-method POST \
-              --oauth-service-account-email "$sa"
+              --oauth-service-account-email "$sa" \
+              || echo "::warning::Cloud Scheduler trigger not created; the CI service account needs roles/cloudscheduler.admin"
           fi
 
       # ==========================================
