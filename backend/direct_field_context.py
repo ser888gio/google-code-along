@@ -132,6 +132,8 @@ def _render_wrap_up_context(context: Mapping[str, object], labels: Mapping[str, 
         "- Do not ask ordinary discovery questions.",
         "- Summarize what was captured in one short paragraph.",
     ]
+    if context.get("retrying_after_failure"):
+        lines.append("- The previous attempt to generate the final analysis failed. Apologize briefly first.")
     if context.get("finish_requested"):
         lines.append(
             "- The user just asked to finish now. Respect that: do not say how many questions are left "
@@ -156,6 +158,19 @@ def _render_wrap_up_context(context: Mapping[str, object], labels: Mapping[str, 
     lines.append(f"- End your reply with exactly this block if you reply in Czech: <choices>{cs_choices}</choices>")
     lines.append(f"- Or exactly this one if you reply in English: <choices>{en_choices}</choices>")
     return lines
+
+
+_FINALIZATION_PHASE_LINES = {
+    "finalizing": (
+        "- The final analysis is being generated. Do not ask discovery questions. "
+        "Answer the user's message briefly and say the analysis will appear shortly."
+    ),
+    "complete": (
+        "- The specification is finalized and the final analysis is ready. "
+        "Do not restart discovery; answer follow-up questions briefly."
+    ),
+    "failed": ("- Generating the final analysis failed. Apologize briefly and ask whether to try finalizing again."),
+}
 
 
 def _render_active_field_context(context: Mapping[str, object], labels: Mapping[str, str]) -> list[str]:
@@ -220,6 +235,9 @@ def _render_workflow_context(
 
     if phase == "wrap_up":
         lines.extend(_render_wrap_up_context(context, labels))
+        return lines
+    if phase in _FINALIZATION_PHASE_LINES:
+        lines.append(_FINALIZATION_PHASE_LINES[phase])
         return lines
 
     lines.extend(_render_active_field_context(context, labels))

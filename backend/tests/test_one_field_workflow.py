@@ -103,6 +103,31 @@ def test_workflow_context_renders_active_field_and_wrap_up():
     assert '<choices>["Finalize with open questions", "Fill in the missing details"]</choices>' in wrap_up
 
 
+def test_finalization_phases_render_their_own_instruction_only():
+    for phase, expected in [
+        ("finalizing", "being generated"),
+        ("complete", "finalized and the final analysis is ready"),
+        ("failed", "try finalizing again"),
+    ]:
+        context = build_augmented_user_message(
+            "ok", {}, [], workflow_context={"phase": phase, "active_field": None}, field_labels={}
+        )
+        assert expected in context
+        assert "Active field" not in context
+        assert "No active field" not in context
+
+
+def test_wrap_up_after_failed_finalization_asks_for_an_apology():
+    wrap_up = build_augmented_user_message(
+        "znovu",
+        {},
+        [],
+        workflow_context={"phase": "wrap_up", "deferred_fields": [], "retrying_after_failure": True},
+        field_labels={},
+    )
+    assert "previous attempt to generate the final analysis failed" in wrap_up
+
+
 def test_wrap_up_without_deferred_fields_offers_plain_finalize_choices():
     wrap_up = build_augmented_user_message(
         "ok",

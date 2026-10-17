@@ -654,46 +654,60 @@ def list_sessions() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def set_finalization_pending(session_id: str) -> None:
+def _with_workflow_state(payload: dict, workflow_state: dict | None) -> dict:
+    """Add the workflow state to a finalization-status write so phase and status change together."""
+    if workflow_state is not None:
+        payload["workflow_state_json"] = json.dumps(workflow_state, ensure_ascii=False)
+    return payload
+
+
+def set_finalization_pending(session_id: str, workflow_state: dict | None = None) -> None:
     """Mark the session as finalization in-progress.
 
-    Called by main.py immediately when [FINALIZING] is detected so the
-    frontend can show a spinner while run_finalizer() runs in the background.
+    Called when finalization starts so the frontend can show a spinner while
+    run_finalizer() runs in the background.
     """
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
     ref.set(
-        {
-            "session_id": session_id,
-            "finalization_status": "pending",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
+        _with_workflow_state(
+            {
+                "session_id": session_id,
+                "finalization_status": "pending",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            workflow_state,
+        ),
         merge=True,
     )
 
 
-def upsert_final_analysis(session_id: str, analysis: dict) -> None:
+def upsert_final_analysis(session_id: str, analysis: dict, workflow_state: dict | None = None) -> None:
     """Persist the completed final analysis to Firestore.
 
     Stores:
     - finalization_status: "complete"
     - finalized_at: ISO timestamp
     - final_analysis_json: full JSON blob (used by GET /analyses/{session_id})
+    - workflow_state_json: when given, the workflow state moved to "complete"
 
     Uses merge=True so prior conversation/SRS fields are never erased.
     """
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
     ref.set(
-        {
-            "session_id": session_id,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-            "finalization_status": "complete",
-            "finalized_at": datetime.now(timezone.utc).isoformat(),
-            # Full JSON stored as a string so sub-field types do not
-            # need a Firestore schema.
-            "final_analysis_json": json.dumps(analysis, ensure_ascii=False),
-        },
+        _with_workflow_state(
+            {
+                "session_id": session_id,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "finalization_status": "complete",
+                "finalized_at": datetime.now(timezone.utc).isoformat(),
+                # Full JSON stored as a string so sub-field types do not
+                # need a Firestore schema.
+                "final_analysis_json": json.dumps(analysis, ensure_ascii=False),
+            },
+            workflow_state,
+        ),
         merge=True,
     )
 
@@ -917,15 +931,18 @@ def get_discovery_state(session_id: str) -> dict | None:
     return state
 
 
-def set_finalization_error(session_id: str) -> None:
+def set_finalization_error(session_id: str, workflow_state: dict | None = None) -> None:
     """Mark a session finalizer run as failed so the frontend can stop polling."""
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
     ref.set(
-        {
-            "session_id": session_id,
-            "finalization_status": "error",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        },
+        _with_workflow_state(
+            {
+                "session_id": session_id,
+                "finalization_status": "error",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            workflow_state,
+        ),
         merge=True,
     )

@@ -25,7 +25,7 @@ from agent.discovery_agent import (
     pick_next_active_field,
     sync_workflow_with_discovery_state,
 )
-from agent.finalizer_agent import run_finalizer
+from agent.finalizer_agent import mark_finalizer_failed, run_finalizer
 from answer_classifier import ClassifierResult, classify_wrap_up_reply, normalize_for_match
 from chat_classification import (
     apply_proactive_updates,
@@ -42,7 +42,6 @@ from firestore import (
     get_discovery_state,
     get_workflow_state,
     remove_deferred_fields,
-    set_finalization_error,
     set_finalization_pending,
     upsert_deferred_fields,
     upsert_discovery_state,
@@ -159,6 +158,39 @@ async def _defer_unresolved_fields(
     await loop.run_in_executor(None, upsert_deferred_fields, session_id, new_deferred)
 
 
+# Phases in which the next field is picked; later phases have no active field.
+_FIELD_PHASES = (Phase.DISCOVERY, Phase.WRAP_UP)
+_FINALIZATION_OWNED_PHASES = (Phase.READY_TO_FINALIZE, Phase.FINALIZING, Phase.COMPLETE)
+
+# Event path from each phase to FINALIZING. Text turns arrive in READY_TO_FINALIZE; the voice
+# path does not advance the workflow per turn, so its [FINALIZING] marker can arrive earlier.
+_PATH_TO_FINALIZING: dict[Phase, tuple[WorkflowEvent, ...]] = {
+    Phase.DISCOVERY: (WorkflowEvent.FINISH_REQUESTED, WorkflowEvent.FINALIZE_CHOSEN, WorkflowEvent.FINALIZE_STARTED),
+    Phase.WRAP_UP: (WorkflowEvent.FINALIZE_CHOSEN, WorkflowEvent.FINALIZE_STARTED),
+    Phase.FAILED: (WorkflowEvent.FINALIZE_RETRY, WorkflowEvent.FINALIZE_CHOSEN, WorkflowEvent.FINALIZE_STARTED),
+    Phase.READY_TO_FINALIZE: (WorkflowEvent.FINALIZE_STARTED,),
+}
+
+
+def _start_finalization(session_id: str) -> bool:
+    """Move the stored workflow to FINALIZING and mark the analysis pending.
+
+    Returns False when finalization is already running or complete.
+    """
+    state = WorkflowState.from_dict(get_workflow_state(session_id))
+    path = _PATH_TO_FINALIZING.get(state.phase)
+    if path is None:
+        return False
+    previous = state.phase
+    for event in path:
+        state.transition(event)
+    set_finalization_pending(session_id, workflow_state=state.to_dict())
+    logger.info(
+        f"Workflow phase changed: event=workflow_phase_changed session_id={session_id} from={previous} to={state.phase}"
+    )
+    return True
+
+
 async def prepare_workflow_turn(
     *,
     session_id: str,
@@ -176,6 +208,9 @@ async def prepare_workflow_turn(
     state = WorkflowState.from_dict(stored_workflow)
     state = sync_workflow_with_discovery_state(state, discovery_state, direct_fields, deferred_fields)
     phase_at_start = state.phase
+    retrying_after_failure = state.phase == Phase.FAILED
+    if retrying_after_failure:
+        state.transition(WorkflowEvent.FINALIZE_RETRY)
 
     new_deferred = {
         key: {"deferred_at": datetime.now(timezone.utc).isoformat()}
@@ -241,7 +276,7 @@ async def prepare_workflow_turn(
             await _defer_unresolved_fields(session_id=session_id, state=state, deferred_fields=deferred_fields)
             state.transition(WorkflowEvent.FINISH_REQUESTED)
 
-    if state.phase != Phase.READY_TO_FINALIZE:
+    if state.phase in _FIELD_PHASES:
         next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
         if next_field is None:
             state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
@@ -259,7 +294,10 @@ async def prepare_workflow_turn(
         if status == FieldStatus.NOT_APPLICABLE and not is_not_applicable_allowed(key):
             state.field_status[key] = FieldStatus.DEFERRED
 
-    await loop.run_in_executor(None, upsert_workflow_state, session_id, state.to_dict())
+    # From ready_to_finalize on, finalization owns the phase; writing back this turn's
+    # stale copy could undo a concurrent finalizing/complete write.
+    if phase_at_start not in _FINALIZATION_OWNED_PHASES:
+        await loop.run_in_executor(None, upsert_workflow_state, session_id, state.to_dict())
 
     answered_values = _answered_field_values(discovery_state, direct_fields)
     workflow_context = state.to_agent_context(
@@ -268,6 +306,7 @@ async def prepare_workflow_turn(
         deferred_field_keys=list(deferred_fields.keys()),
         previous_active=previous_active,
         finish_requested=finish_requested,
+        retrying_after_failure=retrying_after_failure,
     )
 
     return {
@@ -297,7 +336,7 @@ def build_workflow_context_snapshot(
     state = WorkflowState.from_dict(stored_workflow)
     state = sync_workflow_with_discovery_state(state, discovery_state, direct_fields, deferred_fields)
 
-    if state.phase != Phase.READY_TO_FINALIZE:
+    if state.phase in _FIELD_PHASES:
         next_field = pick_next_active_field(state, discovery_state, direct_fields, deferred_fields)
         if next_field is None:
             state.transition(WorkflowEvent.FIELDS_EXHAUSTED)
@@ -356,8 +395,9 @@ async def run_turn_postprocessing(
     Called by both voice and text chat paths.  Executes these steps:
 
       1. Persist conversation turn to Firestore (fire-and-forget)
-      2. Launch finalizer (if [FINALIZING] detected) — includes its own
-         discovery extraction so the heavy Gemini call only happens once
+      2. Launch finalizer (if is_finalizing and finalization is not already
+         running or complete) — includes its own discovery extraction so the
+         heavy Gemini call only happens once
 
     Discovery field extraction and SRS compilation are NOT done here — the
     frontend triggers those via ``POST /context/extract`` after each turn.
@@ -392,9 +432,11 @@ async def run_turn_postprocessing(
     #    The finalizer needs discovery fields + conversation transcript,
     #    so we extract them here (only on finalization, not every turn).
     if is_finalizing:
+        if not await loop.run_in_executor(None, _start_finalization, session_id):
+            logger.info(f"Finalizer not launched: session={session_id} already finalizing or complete")
+            return
         runtime.record_session_outcome(session_id, "finalized")
         logger.info(f"[FINALIZING] detected: session={session_id} — launching finalizer")
-        loop.run_in_executor(None, set_finalization_pending, session_id)
 
         session_snap = await runtime.session_service.get_session(
             app_name=APP_NAME,
@@ -422,7 +464,7 @@ async def run_turn_postprocessing(
             loop.run_in_executor(None, upsert_discovery_state, session_id, discovery_fields)
         except CostCircuitBreakerTripped as exc:
             logger.warning(f"Finalizer skipped by cost circuit: session={session_id} cost_usd={exc.cost_usd:.6f}")
-            loop.run_in_executor(None, set_finalization_error, session_id)
+            await mark_finalizer_failed(session_id)
             return
         except Exception as exc:
             logger.warning(f"extract_discovery_fields failed: session={session_id} {exc}")

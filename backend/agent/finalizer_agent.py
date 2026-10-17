@@ -39,6 +39,7 @@ from typing import Any, cast
 
 from config import GCS_PREFIX_ANALYSES, GCS_PREFIX_SESSIONS, GOOGLE_API_KEY, MODEL_FINALIZER, TEXT_EXTENSIONS
 from firestore.writer import (
+    get_workflow_state,
     set_finalization_error,
     upsert_final_analysis,
 )
@@ -60,6 +61,7 @@ from opentelemetry import trace
 from opentelemetry.trace import SpanKind
 from prompts.agent import FINALIZER_SYSTEM_PROMPT
 from utils import format_prompt_data_lines, sanitize_gcs_segment
+from workflow_state import InvalidTransition, WorkflowEvent, WorkflowState
 
 _genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -237,16 +239,33 @@ def _add_finalizer_metadata(result: dict, session_id: str, discovery_fields: dic
     return result
 
 
+def _workflow_state_after(session_id: str, event: WorkflowEvent) -> dict | None:
+    """Return the stored workflow state advanced by *event*, or None if that move is not valid."""
+    state = WorkflowState.from_dict(get_workflow_state(session_id))
+    previous = state.phase
+    try:
+        state.transition(event)
+    except InvalidTransition:
+        logger.warning(f"Workflow phase not advanced: session_id={session_id} phase={previous} event={event}")
+        return None
+    logger.info(
+        f"Workflow phase changed: event=workflow_phase_changed session_id={session_id} from={previous} to={state.phase}"
+    )
+    return state.to_dict()
+
+
 async def _persist_finalizer_result(session_id: str, result: dict) -> None:
     """Persist the final analysis to GCS and Firestore."""
     await save_final_analysis(session_id, result)
-    await asyncio.to_thread(upsert_final_analysis, session_id, result)
+    workflow_state = await asyncio.to_thread(_workflow_state_after, session_id, WorkflowEvent.FINALIZE_COMPLETE)
+    await asyncio.to_thread(upsert_final_analysis, session_id, result, workflow_state)
 
 
-async def _mark_finalizer_failed(session_id: str) -> None:
-    """Best-effort status update after finalization fails."""
+async def mark_finalizer_failed(session_id: str) -> None:
+    """Best-effort: record a failed finalization as error status and the FAILED phase."""
     try:
-        await asyncio.to_thread(set_finalization_error, session_id)
+        workflow_state = await asyncio.to_thread(_workflow_state_after, session_id, WorkflowEvent.FINALIZE_FAILED)
+        await asyncio.to_thread(set_finalization_error, session_id, workflow_state)
     except Exception as exc:
         logger.warning(f"[Finalizer] Failed to mark session as errored: session={session_id} {exc}")
 
@@ -292,7 +311,7 @@ async def run_finalizer(
     except Exception as exc:
         record_finalization_status(status="error")
         logger.error(f"Finalizer failed: session_id={session_id} error={exc}")
-        await _mark_finalizer_failed(session_id)
+        await mark_finalizer_failed(session_id)
         return None
 
 

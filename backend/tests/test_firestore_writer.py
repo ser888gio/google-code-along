@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 from firestore.writer import (
     append_conversation_turn,
     get_final_analysis,
+    set_finalization_error,
     set_finalization_pending,
     upsert_discovery_state,
     upsert_final_analysis,
@@ -54,6 +55,20 @@ def test_upsert_final_analysis_writes_complete_status_and_json():
     stored = json.loads(payload["final_analysis_json"])
     assert stored == analysis
     assert doc_ref.set.call_args.kwargs.get("merge") is True
+    assert "workflow_state_json" not in payload
+
+
+def test_finalization_status_writes_carry_workflow_state_in_the_same_write():
+    client, doc_ref = _mock_client()
+    with patch("firestore.writer._client", return_value=client):
+        upsert_final_analysis("sess1", {"score": 1}, {"phase": "complete"})
+        set_finalization_error("sess1", workflow_state={"phase": "failed"})
+
+    complete_payload, error_payload = (call.args[0] for call in doc_ref.set.call_args_list)
+    assert complete_payload["finalization_status"] == "complete"
+    assert json.loads(complete_payload["workflow_state_json"]) == {"phase": "complete"}
+    assert error_payload["finalization_status"] == "error"
+    assert json.loads(error_payload["workflow_state_json"]) == {"phase": "failed"}
 
 
 # ---------------------------------------------------------------------------

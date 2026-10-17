@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from agent.discovery_agent import pick_next_active_field
-from chat_turn import _is_finalize_choice, prepare_workflow_turn, run_turn_postprocessing
+from chat_turn import _is_finalize_choice, _start_finalization, prepare_workflow_turn, run_turn_postprocessing
 from field_schema import FIELD_SCHEMA
 
 
@@ -398,3 +398,77 @@ def test_run_turn_postprocessing_non_finalizing_schedules_append():
     assert call_args[0] == "sess1"
     assert call_args[1] == "hello"
     assert call_args[2] == "hi there"
+
+
+# ---------------------------------------------------------------------------
+# Finalization lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_failed_finalization_retries_through_wrap_up():
+    result, _ = _run_prepare(
+        message="Zkuste to znovu.",
+        **{
+            "chat_turn.get_workflow_state": MagicMock(return_value={"phase": "failed"}),
+            "chat_turn.classify_wrap_up_reply": AsyncMock(return_value="finalize"),
+        },
+    )
+    assert result["workflow"]["phase"] == "ready_to_finalize"
+    assert result["workflow_context"]["retrying_after_failure"] is True
+
+
+@pytest.mark.parametrize("phase", ["ready_to_finalize", "finalizing", "complete"])
+def test_finalization_phases_are_not_overwritten_by_a_chat_turn(phase):
+    mock_upsert = MagicMock(return_value=None)
+    result, _ = _run_prepare(
+        message="Díky, kdy bude analýza hotová?",
+        **{
+            "chat_turn.get_workflow_state": MagicMock(return_value={"phase": phase}),
+            "chat_turn.upsert_workflow_state": mock_upsert,
+        },
+    )
+    assert result["workflow"]["phase"] == phase
+    mock_upsert.assert_not_called()
+
+
+@pytest.mark.parametrize("phase", ["discovery", "wrap_up", "failed", "ready_to_finalize"])
+def test_start_finalization_moves_any_open_phase_to_finalizing(phase):
+    mock_pending = MagicMock(return_value=None)
+    with (
+        patch("chat_turn.get_workflow_state", MagicMock(return_value={"phase": phase})),
+        patch("chat_turn.set_finalization_pending", mock_pending),
+    ):
+        assert _start_finalization("sess1") is True
+
+    assert mock_pending.call_args.kwargs["workflow_state"]["phase"] == "finalizing"
+
+
+@pytest.mark.parametrize("phase", ["finalizing", "complete"])
+def test_start_finalization_refuses_when_running_or_done(phase):
+    mock_pending = MagicMock(return_value=None)
+    with (
+        patch("chat_turn.get_workflow_state", MagicMock(return_value={"phase": phase})),
+        patch("chat_turn.set_finalization_pending", mock_pending),
+    ):
+        assert _start_finalization("sess1") is False
+
+    mock_pending.assert_not_called()
+
+
+def test_postprocessing_does_not_launch_a_second_finalizer():
+    mock_finalizer = AsyncMock()
+    with (
+        patch("chat_turn.append_conversation_turn", MagicMock()),
+        patch("chat_turn.get_workflow_state", MagicMock(return_value={"phase": "finalizing"})),
+        patch("chat_turn.run_finalizer", mock_finalizer),
+    ):
+        asyncio.run(
+            run_turn_postprocessing(
+                session_id="sess1",
+                user_id="user1",
+                user_text="ok",
+                assistant_text="[FINALIZING]",
+                is_finalizing=True,
+            )
+        )
+    mock_finalizer.assert_not_called()
