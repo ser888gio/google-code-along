@@ -129,7 +129,9 @@ with AI chatbots".
 
 RS-specific: `mean_accepted_completeness`, `goal_achieved_rate`,
 `business_focus_rate` (the assistant did not choose technology for the user),
-`error_rate`, `turn_cap_rate`.
+`error_rate`, `turn_cap_rate`. Like CSAT, `goal_achieved_rate` and
+`business_focus_rate` count only sessions with a verdict: disconnected users
+never see the rating dialog.
 
 Cost per simulated session from BigQuery:
 

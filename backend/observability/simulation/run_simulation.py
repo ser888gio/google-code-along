@@ -570,6 +570,9 @@ def summarize(results: list[dict]) -> dict:
     completed = [r for r in results if r["outcome"] == "completed"]
     finish_intent = [r for r in results if r["intended_outcome"] == "finish"]
     rated = [r["rating"] for r in results if r["rating"] is not None]
+    # Disconnected users never see the verdict dialog, so judge only sessions that got one.
+    goals = [r["goal_achieved"] for r in results if r["goal_achieved"] is not None]
+    focus = [r["stayed_business_focused"] for r in results if r["stayed_business_focused"] is not None]
     votes_up = sum(r["thumbs_up"] for r in results)
     votes = votes_up + sum(r["thumbs_down"] for r in results)
     sentiment: Counter[str] = Counter()
@@ -604,8 +607,8 @@ def summarize(results: list[dict]) -> dict:
         "sentiment_shares": {
             k: _rate(sentiment[k], sum(sentiment.values())) for k in ("positive", "neutral", "negative")
         },
-        "goal_achieved_rate": _rate(sum(bool(r["goal_achieved"]) for r in results), n),
-        "business_focus_rate": _rate(sum(bool(r["stayed_business_focused"]) for r in results), n),
+        "goal_achieved_rate": _rate(sum(goals), len(goals)),
+        "business_focus_rate": _rate(sum(focus), len(focus)),
         "mean_accepted_completeness": _mean([r["accepted_completeness"] for r in results]),
         "mean_discovery_completeness": _mean([r["discovery_completeness"] for r in results]),
         "mean_ttft_ms": _mean(all_ttft),
