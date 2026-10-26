@@ -17,6 +17,13 @@ import {
 
 // â”€â”€â”€ Completeness â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
+export function appendAttachment(existing: string, filename: string): string {
+	const names = existing.split("\n").filter((n) => n.trim());
+	return names.includes(filename)
+		? names.join("\n")
+		: [...names, filename].join("\n");
+}
+
 function computeCompleteness(fields: Record<string, RsField>): number {
 	const filled = REQUIRED_FIELD_KEYS.filter((k) => fields[k]?.filled).length;
 	return Math.round((filled / REQUIRED_FIELD_KEYS.length) * 100);
@@ -73,7 +80,30 @@ function applyPendingManualOverride(
 
 // ---- Hook â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-export function useRsState(sessionId: string | null) {
+// Every user decision is saved through here, so a failed save is reported once
+// instead of being silently dropped at each call site.
+function usePersistRsPatch(
+	applyExtraction: (partial: RsPartialData) => void,
+	onSaveError: () => void,
+) {
+	// Read through a ref so a new callback identity from the caller does not
+	// recreate every persistence callback that depends on this one.
+	const onSaveErrorRef = useRef(onSaveError);
+	useEffect(() => {
+		onSaveErrorRef.current = onSaveError;
+	});
+
+	return useCallback(
+		async (sid: string, patch: Parameters<typeof patchRsFieldState>[1]) => {
+			const merged = await patchRsFieldState(sid, patch);
+			if (merged) applyExtraction(merged);
+			else onSaveErrorRef.current();
+		},
+		[applyExtraction],
+	);
+}
+
+export function useRsState(sessionId: string | null, onSaveError: () => void) {
 	const [fields, setFields] = useState<Record<string, RsField>>({});
 	const [deferredKeys, setDeferredKeys] = useState<DirectChatFieldKey[]>([]);
 	const [recentlyChangedKeys, setRecentlyChangedKeys] = useState<Set<string>>(
@@ -135,6 +165,8 @@ export function useRsState(sessionId: string | null) {
 		}
 	}, []);
 
+	const persist = usePersistRsPatch(applyExtraction, onSaveError);
+
 	// â”€â”€ setUserField â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// Immediate optimistic update; debounced PATCH after 600ms.
 
@@ -155,7 +187,7 @@ export function useRsState(sessionId: string | null) {
 					debounceRefs.current.delete(key);
 					pendingPatchValuesRef.current.delete(key);
 					if (!sessionId) return;
-					const merged = await patchRsFieldState(
+					await persist(
 						sessionId,
 						value.trim()
 							? {
@@ -165,11 +197,10 @@ export function useRsState(sessionId: string | null) {
 								}
 							: { action: "clear", keys: [key] },
 					);
-					if (merged) applyExtraction(merged);
 				}, 600),
 			);
 		},
-		[sessionId, applyExtraction],
+		[sessionId, persist],
 	);
 
 	// â”€â”€ acceptSuggestion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -195,16 +226,14 @@ export function useRsState(sessionId: string | null) {
 			});
 			// Persist immediately (no debounce â€” explicit user action)
 			if (sessionId && accepted) {
-				void patchRsFieldState(sessionId, {
+				void persist(sessionId, {
 					action: "accept",
 					source: "user_accept_suggestion",
 					fields: { [key]: accepted },
-				}).then((merged) => {
-					if (merged) applyExtraction(merged);
 				});
 			}
 		},
-		[sessionId, applyExtraction],
+		[sessionId, persist],
 	);
 
 	// â”€â”€ dismissSuggestion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -227,15 +256,13 @@ export function useRsState(sessionId: string | null) {
 				};
 			});
 			if (sessionId && dismissedValue) {
-				void patchRsFieldState(sessionId, {
+				void persist(sessionId, {
 					action: "dismiss",
 					fields: { [key]: dismissedValue },
-				}).then((merged) => {
-					if (merged) applyExtraction(merged);
 				});
 			}
 		},
-		[sessionId, applyExtraction],
+		[sessionId, persist],
 	);
 
 	// â”€â”€ clearChangedKey / clearAllChangedKeys â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -300,12 +327,10 @@ export function useRsState(sessionId: string | null) {
 				},
 			}));
 			if (sessionId) {
-				void patchRsFieldState(sessionId, {
+				void persist(sessionId, {
 					action: "accept",
 					source: "user_direct_chat",
 					fields: { [pendingKey]: resolution.value },
-				}).then((merged) => {
-					if (merged) applyExtraction(merged);
 				});
 			}
 			return {
@@ -313,36 +338,38 @@ export function useRsState(sessionId: string | null) {
 				deferredForRequest: resolution.nextDeferred,
 			};
 		},
-		[fields, deferredKeys, sessionId, applyExtraction],
+		[fields, deferredKeys, sessionId, persist],
 	);
 
 	// â”€â”€ applyUploadAttachments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 	const applyUploadAttachments = useCallback(
-		(filenames: string) => {
-			const now = Date.now();
+		(filename: string) => {
+			const value = appendAttachment(
+				latestFieldsRef.current.attachments?.value ?? "",
+				filename,
+			);
 			setFields((prev) => ({
 				...prev,
 				attachments: {
-					value: filenames,
-					filled: filenames.trim() !== "",
+					value,
+					filled: true,
 					source: "user_upload" as FieldSource,
-					updatedAt: now,
+					updatedAt: Date.now(),
 					pendingSuggestion: undefined,
 					dismissedSuggestions: prev.attachments?.dismissedSuggestions,
 				},
 			}));
+			setRecentlyChangedKeys((prev) => new Set(prev).add("attachments"));
 			if (sessionId) {
-				void patchRsFieldState(sessionId, {
+				void persist(sessionId, {
 					action: "accept",
 					source: "user_upload",
-					fields: { attachments: filenames },
-				}).then((merged) => {
-					if (merged) applyExtraction(merged);
+					fields: { attachments: value },
 				});
 			}
 		},
-		[sessionId, applyExtraction],
+		[sessionId, persist],
 	);
 
 	// â”€â”€ hydrateFromSession â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -380,22 +407,17 @@ export function useRsState(sessionId: string | null) {
 		const clearKeys = Object.entries(patch)
 			.filter(([, value]) => !String(value).trim())
 			.map(([key]) => key);
-		let merged: RsPartialData | null = null;
 		if (Object.keys(acceptFields).length) {
-			merged = await patchRsFieldState(sessionId, {
+			await persist(sessionId, {
 				action: "accept",
 				source: "user_manual",
 				fields: acceptFields,
 			});
 		}
 		if (clearKeys.length) {
-			merged = await patchRsFieldState(sessionId, {
-				action: "clear",
-				keys: clearKeys,
-			});
+			await persist(sessionId, { action: "clear", keys: clearKeys });
 		}
-		if (merged) applyExtraction(merged);
-	}, [sessionId, applyExtraction]);
+	}, [sessionId, persist]);
 
 	// â”€â”€ reset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
