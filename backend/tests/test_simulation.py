@@ -45,9 +45,37 @@ def test_parse_intent_mix():
 
 def test_summarize_computes_satisfaction_and_completion_metrics():
     results = [
-        _result("completed", 5, 10, thumbs_up=3, duration_s=600, analysis_status="complete", converted=True),
-        _result("completed", 4, 20, thumbs_down=1, duration_s=1200, analysis_status="error", user_id="sim-u02"),
-        _result("abandoned", 2, 4, intended_outcome="early_exit", user_id="sim-u03"),
+        _result(
+            "completed",
+            5,
+            10,
+            thumbs_up=3,
+            duration_s=600,
+            analysis_status="complete",
+            converted=True,
+            goal_achieved=True,
+            stayed_business_focused=True,
+        ),
+        _result(
+            "completed",
+            4,
+            20,
+            thumbs_down=1,
+            duration_s=1200,
+            analysis_status="error",
+            user_id="sim-u02",
+            goal_achieved=True,
+            stayed_business_focused=False,
+        ),
+        _result(
+            "abandoned",
+            2,
+            4,
+            intended_outcome="early_exit",
+            user_id="sim-u03",
+            goal_achieved=False,
+            stayed_business_focused=True,
+        ),
         _result("disconnected", None, 1, intended_outcome="disconnect", user_id="sim-u03"),
     ]
 
@@ -66,6 +94,9 @@ def test_summarize_computes_satisfaction_and_completion_metrics():
     assert summary["sessions_per_user"] == 1.333
     assert summary["retention_rate"] == 0.333
     assert summary["intent_shares"] == {"finish": 0.5, "early_exit": 0.25, "disconnect": 0.25}
+    # The disconnected session has no verdict and is left out of these denominators.
+    assert summary["goal_achieved_rate"] == 0.667
+    assert summary["business_focus_rate"] == 0.667
 
 
 def test_user_pool_is_stable_and_churned_users_do_not_return():
