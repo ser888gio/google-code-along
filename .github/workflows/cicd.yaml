@@ -16,6 +16,9 @@ env:
   PROJECT_ID: vw-skda-fskoda-sandbox-jzf
   GAR_LOCATION: europe-west4
   REPOSITORY: business-persona-ai-repo
+  # Dedicated runtime identities; the shared default compute account is not used.
+  BACKEND_SA: persona-ai-backend-runtime@vw-skda-fskoda-sandbox-jzf.iam.gserviceaccount.com
+  FRONTEND_SA: persona-ai-frontend-runtime@vw-skda-fskoda-sandbox-jzf.iam.gserviceaccount.com
 
 jobs:
   build-and-deploy:
@@ -112,17 +115,14 @@ jobs:
           context: ./backend
           push: true
           tags: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+          # One manifest per push (no attestation index) keeps the registry cleanup policy predictable.
+          provenance: false
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
-      - name: Remove GOOGLE_API_KEY plain env var from backend service
-        if: steps.changes.outputs.backend == 'true'
-        run: |-
-          gcloud run services update business-persona-ai-backend \
-            --region europe-west4 \
-            --remove-env-vars GOOGLE_API_KEY \
-            --quiet || true
-
+      # Env vars and secrets are overwritten, not merged, so this workflow is the
+      # single source of truth and hand-added values (e.g. plaintext keys) are dropped.
+      # max-instances=1: ADK sessions are in memory, so all requests must hit one instance.
       - name: Deploy Backend to Cloud Run
         if: steps.changes.outputs.backend == 'true'
         id: deploy-backend
@@ -131,10 +131,14 @@ jobs:
           service: business-persona-ai-backend
           region: europe-west4
           image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }}
+          flags: --service-account=${{ env.BACKEND_SA }} --max-instances=1 --memory=1Gi
+          env_vars_update_strategy: overwrite
           env_vars: |
             GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }}
             APP_ENV=production
             BIGQUERY_DATASET=observability
+            ALLOWED_ORIGINS=https://business-persona-ai-frontend-4nbdz3xjxa-ez.a.run.app\,https://business-persona-ai-frontend-184082972607.europe-west4.run.app
+          secrets_update_strategy: overwrite
           secrets: |
             GOOGLE_API_KEY=GOOGLE_API_KEY:latest
             GCS_BUCKET_NAME=GCS_BUCKET_NAME:latest
@@ -146,8 +150,7 @@ jobs:
         run: |-
           region=europe-west4
           backend_url="${{ steps.deploy-backend.outputs.url }}"
-          sa="$(gcloud run services describe business-persona-ai-backend --region "$region" \
-            --format='value(spec.template.spec.serviceAccountName)')"
+          sa="${{ env.BACKEND_SA }}"
 
           gcloud run jobs deploy rs-user-simulation \
             --region "$region" \
@@ -168,6 +171,35 @@ jobs:
               --schedule "0 8-16 * * 1-5" \
               --time-zone "Europe/Prague" \
               --uri "https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_ID }}/jobs/rs-user-simulation:run" \
+              --http-method POST \
+              --oauth-service-account-email "$sa" \
+              || echo "::warning::Cloud Scheduler trigger not created; the CI service account needs roles/cloudscheduler.admin"
+          fi
+
+      - name: Deploy Safety Anomaly Metrics Job and Schedule
+        if: steps.changes.outputs.backend == 'true'
+        run: |-
+          region=europe-west4
+          sa="${{ env.BACKEND_SA }}"
+
+          # Reads the rows written by the anomalous_sessions scheduled query (02:00) and emits metrics.
+          gcloud run jobs deploy rs-safety-anomaly-metrics \
+            --region "$region" \
+            --image ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/backend:${{ github.sha }} \
+            --service-account "$sa" \
+            --command python --args=-m,observability.safety_anomalies \
+            --set-env-vars "APP_ENV=production,GOOGLE_CLOUD_PROJECT=${{ env.PROJECT_ID }},BIGQUERY_DATASET=observability,SAFETY_ANOMALIES_LOOKBACK_HOURS=36" \
+            --task-timeout 10m --max-retries 1 --quiet
+
+          gcloud run jobs add-iam-policy-binding rs-safety-anomaly-metrics --region "$region" \
+            --member "serviceAccount:${sa}" --role roles/run.invoker --quiet
+
+          if ! gcloud scheduler jobs describe rs-safety-anomaly-metrics --location "$region" >/dev/null 2>&1; then
+            gcloud scheduler jobs create http rs-safety-anomaly-metrics \
+              --location "$region" \
+              --schedule "30 2 * * *" \
+              --time-zone "Europe/Prague" \
+              --uri "https://${region}-run.googleapis.com/apis/run.googleapis.com/v1/namespaces/${{ env.PROJECT_ID }}/jobs/rs-safety-anomaly-metrics:run" \
               --http-method POST \
               --oauth-service-account-email "$sa" \
               || echo "::warning::Cloud Scheduler trigger not created; the CI service account needs roles/cloudscheduler.admin"
@@ -200,6 +232,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_API_URL=${{ steps.backend-url.outputs.url }}
             NEXT_PUBLIC_WS_URL=${{ steps.backend-url.outputs.ws_url }}
+          provenance: false
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 
@@ -210,3 +243,4 @@ jobs:
           service: business-persona-ai-frontend
           region: europe-west4
           image: ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ github.sha }}
+          flags: --service-account=${{ env.FRONTEND_SA }}
