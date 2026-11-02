@@ -142,8 +142,10 @@ async function consumeSseStream(
  *   onFinalizing  — fires when the backend detects ≥ 90% completeness and starts
  *                   the finalizer pipeline; the UI should show a "finalizing" state
  *   onDone        — stream ended normally
- *   onError       — network or server error
+ *   onError       — network or server error; a dropped connection reports CHAT_NETWORK_ERROR
  */
+export const CHAT_NETWORK_ERROR = "network_error";
+
 export async function streamChat(
 	message: string,
 	sessionId: string | null,
@@ -159,22 +161,6 @@ export async function streamChat(
 	onChoices?: (choices: string[]) => void,
 	onTextReplace?: (text: string) => void,
 ): Promise<void> {
-	const res = await fetch(`${API_URL}/chat/stream`, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: buildChatRequestBody(
-			message,
-			sessionId,
-			directFields,
-			deferredFields,
-		),
-	});
-
-	if (!res.ok || !res.body) {
-		onError(`Server error: ${res.status}`);
-		return;
-	}
-
 	const callbacks: StreamChatCallbacks = {
 		onChunk,
 		onSessionId,
@@ -187,7 +173,29 @@ export async function streamChat(
 		onTextReplace,
 	};
 
-	await consumeSseStream(res.body, callbacks);
+	// fetch() and reader.read() reject on network failure; without this the
+	// caller never hears back and the chat stays locked on "Thinking…".
+	try {
+		const res = await fetch(`${API_URL}/chat/stream`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: buildChatRequestBody(
+				message,
+				sessionId,
+				directFields,
+				deferredFields,
+			),
+		});
+
+		if (!res.ok || !res.body) {
+			onError(`Server error: ${res.status}`);
+			return;
+		}
+
+		await consumeSseStream(res.body, callbacks);
+	} catch {
+		onError(CHAT_NETWORK_ERROR);
+	}
 }
 
 export async function submitFeedback(

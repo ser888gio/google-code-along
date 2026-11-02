@@ -17,6 +17,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type React from "react";
@@ -24,6 +25,7 @@ import "@testing-library/jest-dom";
 
 // Mock the api module before importing the page
 jest.mock("../lib/api", () => ({
+	CHAT_NETWORK_ERROR: "network_error",
 	streamChat: jest.fn(),
 	extractContext: jest.fn().mockResolvedValue(null),
 	getDiscoveryState: jest.fn().mockResolvedValue(null),
@@ -377,12 +379,38 @@ describe("ChatPage — error state", () => {
 			expect(screen.getByText("Dismiss me")).toBeInTheDocument();
 		});
 
-		const dismissBtn = screen.getByRole("button", { name: "✕" });
+		const dismissBtn = within(screen.getByRole("alert")).getByRole("button", {
+			name: "Close",
+		});
 		await act(async () => {
 			fireEvent.click(dismissBtn);
 		});
 
 		expect(screen.queryByText("Dismiss me")).not.toBeInTheDocument();
+	});
+
+	it("explains an unreachable server and gives the message back for retry", async () => {
+		rejectStream("network_error");
+		renderPage();
+
+		const textarea = screen.getByPlaceholderText(/Describe your project/i);
+		await userEvent.type(textarea, "Lost message");
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+		});
+
+		await waitFor(() => {
+			expect(screen.getByRole("alert")).toHaveTextContent(
+				/Could not reach the server/,
+			);
+		});
+		expect(textarea).toHaveValue("Lost message");
+		expect(textarea).not.toBeDisabled();
+		// Only the welcome bubble remains: the unanswered turn moves back to the input.
+		expect(screen.getAllByText("Discovery Agent")).toHaveLength(1);
+		expect(
+			screen.queryByText("Lost message", { ignore: "textarea" }),
+		).toBeNull();
 	});
 });
 

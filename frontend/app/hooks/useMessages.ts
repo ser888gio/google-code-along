@@ -62,6 +62,10 @@ export function useMessages(initialText: string) {
 		);
 	}
 
+	function removeMessage(id: string) {
+		setMessages((prev) => prev.filter((m) => m.id !== id));
+	}
+
 	function setMessageBackendId(id: string, messageId: string) {
 		setMessages((prev) =>
 			updateMessageById(prev, id, (m) => ({ ...m, messageId })),
@@ -195,6 +199,7 @@ export function useMessages(initialText: string) {
 		appendToMessage,
 		replaceMessageText,
 		finalizeMessage,
+		removeMessage,
 		setMessageBackendId,
 		setMessageChoices,
 		clearMessageChoices,

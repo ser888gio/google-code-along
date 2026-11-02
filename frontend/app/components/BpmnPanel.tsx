@@ -141,10 +141,15 @@ function InsufficientDataModal({
 
 // ─── BPMN Panel ───────────────────────────────────────────────────────────────
 
-export default function BpmnPanel({ sessionId }: { sessionId: string | null }) {
+export default function BpmnPanel({
+	sessionId,
+	onError,
+}: {
+	sessionId: string | null;
+	onError: (message: string) => void;
+}) {
 	const [mermaidChart, setMermaidChart] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
-	const [apiError, setApiError] = useState<string | null>(null);
 	const [gateModal, setGateModal] = useState<{
 		score: number;
 		missing: string[];
@@ -152,12 +157,11 @@ export default function BpmnPanel({ sessionId }: { sessionId: string | null }) {
 
 	async function handleGenerate() {
 		if (!sessionId) {
-			setApiError("Start a conversation first to generate a diagram.");
+			onError("Start a conversation first to generate a diagram.");
 			return;
 		}
 
 		setLoading(true);
-		setApiError(null);
 
 		try {
 			const result = await generateBpmn(sessionId);
@@ -174,7 +178,7 @@ export default function BpmnPanel({ sessionId }: { sessionId: string | null }) {
 				setMermaidChart(result.mermaid);
 			}
 		} catch (err) {
-			setApiError(
+			onError(
 				err instanceof Error ? err.message : "Failed to generate diagram",
 			);
 		} finally {
@@ -273,76 +277,65 @@ export default function BpmnPanel({ sessionId }: { sessionId: string | null }) {
 
 			{/* Content */}
 			<div className="flex-1 overflow-auto bg-gray-50 p-3 sm:p-5">
-				{apiError && (
-					<div className="mb-4 rounded border border-red-200 bg-[#fff5f5] px-4 py-3 text-sm text-red-700">
-						{apiError}
-					</div>
-				)}
-
 				{mermaidChart ? (
 					<div className="rounded border border-gray-200 bg-white p-2 shadow-sm sm:p-4">
 						<MermaidDiagram chart={mermaidChart} idPrefix="mermaid-bpmn" />
 					</div>
 				) : (
-					!apiError && (
-						<div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-							<div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-dashed border-gray-300">
-								<svg
-									aria-hidden="true"
-									width="20"
-									height="20"
-									viewBox="0 0 20 20"
-									fill="none"
-									className="text-gray-400"
-								>
-									<rect
-										x="1"
-										y="6"
-										width="5"
-										height="4"
-										rx="1"
-										stroke="currentColor"
-										strokeWidth="1.4"
-									/>
-									<rect
-										x="14"
-										y="2"
-										width="5"
-										height="4"
-										rx="1"
-										stroke="currentColor"
-										strokeWidth="1.4"
-									/>
-									<rect
-										x="14"
-										y="12"
-										width="5"
-										height="4"
-										rx="1"
-										stroke="currentColor"
-										strokeWidth="1.4"
-									/>
-									<path
-										d="M6 8h4.5V4H14M6 8h4.5v6H14"
-										stroke="currentColor"
-										strokeWidth="1.4"
-										strokeLinecap="round"
-									/>
-								</svg>
-							</div>
-							<p className="text-sm font-medium text-gray-500">
-								No diagram yet
-							</p>
-							<p className="max-w-xs text-xs text-gray-400">
-								Complete at least 90% of the requirements conversation, then
-								click{" "}
-								<span className="font-medium text-gray-500">
-									Generate Diagram
-								</span>
-								.
-							</p>
+					<div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+						<div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-dashed border-gray-300">
+							<svg
+								aria-hidden="true"
+								width="20"
+								height="20"
+								viewBox="0 0 20 20"
+								fill="none"
+								className="text-gray-400"
+							>
+								<rect
+									x="1"
+									y="6"
+									width="5"
+									height="4"
+									rx="1"
+									stroke="currentColor"
+									strokeWidth="1.4"
+								/>
+								<rect
+									x="14"
+									y="2"
+									width="5"
+									height="4"
+									rx="1"
+									stroke="currentColor"
+									strokeWidth="1.4"
+								/>
+								<rect
+									x="14"
+									y="12"
+									width="5"
+									height="4"
+									rx="1"
+									stroke="currentColor"
+									strokeWidth="1.4"
+								/>
+								<path
+									d="M6 8h4.5V4H14M6 8h4.5v6H14"
+									stroke="currentColor"
+									strokeWidth="1.4"
+									strokeLinecap="round"
+								/>
+							</svg>
 						</div>
-					)
+						<p className="text-sm font-medium text-gray-500">No diagram yet</p>
+						<p className="max-w-xs text-xs text-gray-400">
+							Complete at least 90% of the requirements conversation, then click{" "}
+							<span className="font-medium text-gray-500">
+								Generate Diagram
+							</span>
+							.
+						</p>
+					</div>
 				)}
 			</div>
 

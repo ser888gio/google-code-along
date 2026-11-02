@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+	CHAT_NETWORK_ERROR,
 	type UploadedFile,
 	downloadRsTemplateDocx,
 	streamChat,
@@ -9,11 +10,11 @@ import {
 import ChatHeader from "./components/ChatHeader";
 import ChatInput from "./components/ChatInput";
 import ChatTranscript from "./components/ChatTranscript";
-import ErrorToast from "./components/ErrorToast";
 import FileUpload from "./components/FileUpload";
 import HistorySidebar from "./components/HistorySidebar";
 import RsDocumentPanel, { type RsTab } from "./components/RsDocumentPanel";
 import SessionRatingModal from "./components/SessionRatingModal";
+import Toast, { type ToastTone } from "./components/Toast";
 import { useChatSession } from "./hooks/useChatSession";
 import { useMessages } from "./hooks/useMessages";
 import { useRsExtraction } from "./hooks/useRsExtraction";
@@ -28,7 +29,16 @@ import {
 
 export default function ChatPage() {
 	const { locale, t } = useLocale();
-	const [error, setError] = useState<string | null>(null);
+	const [toast, setToast] = useState<{
+		tone: ToastTone;
+		message: string;
+	} | null>(null);
+	const setError = useCallback(
+		(message: string | null) =>
+			setToast(message ? { tone: "error", message } : null),
+		[],
+	);
+	const dismissToast = useCallback(() => setToast(null), []);
 	const [isDownloadingRs, setIsDownloadingRs] = useState(false);
 	const [activeTab, setActiveTab] = useState<RsTab>("Preview");
 	const [input, setInput] = useState("");
@@ -45,7 +55,9 @@ export default function ChatPage() {
 
 	const msgs = useMessages(t("welcome_message"));
 	const session = useChatSession(setError);
-	const rsState = useRsState(session.sessionId);
+	const rsState = useRsState(session.sessionId, () =>
+		setError(t("error.save_field")),
+	);
 	const rs = useRsExtraction(rsState.applyExtraction);
 	const voice = useVoiceMode({
 		addMessage: msgs.addMessage,
@@ -115,7 +127,7 @@ export default function ChatPage() {
 				currentValues,
 			);
 
-		msgs.addMessage("user", text);
+		const userId = msgs.addMessage("user", text);
 		setIsStreaming(true);
 		const assistantId = msgs.addMessage("assistant", "", true);
 		let assistantText = "";
@@ -148,7 +160,14 @@ export default function ChatPage() {
 			},
 			(err) => {
 				msgs.finalizeMessage(assistantId);
-				setError(err);
+				if (!assistantText) {
+					// The text goes back into the input, so keeping the unanswered
+					// bubble would show it twice once the user retries.
+					msgs.removeMessage(userId);
+					msgs.removeMessage(assistantId);
+					setInput(text);
+				}
+				setError(err === CHAT_NETWORK_ERROR ? t("error.network") : err);
 				setIsStreaming(false);
 				rs.setIsExtracting(false);
 			},
@@ -181,6 +200,7 @@ export default function ChatPage() {
 		try {
 			await rsState.flushPendingPatches();
 			await downloadRsTemplateDocx(session.sessionId);
+			setToast({ tone: "success", message: t("download.started") });
 		} catch (err) {
 			setError(
 				err instanceof Error ? err.message : "Failed to generate document",
@@ -220,10 +240,8 @@ export default function ChatPage() {
 		const sid = file.sessionId ?? session.sessionId;
 		if (sid) {
 			if (!session.sessionId) session.setSessionId(sid);
-			const filenames = [file].map((f) => f.filename).join("\n");
-			rsState.applyUploadAttachments(filenames);
+			rsState.applyUploadAttachments(file.filename);
 		}
-		setUploadOpen(false);
 	}
 
 	return (
@@ -359,6 +377,7 @@ export default function ChatPage() {
 							<FileUpload
 								sessionId={session.sessionId}
 								onUploaded={handleFileUploaded}
+								onError={setError}
 								onEnsureSession={session.ensureSession}
 							/>
 						</div>
@@ -404,10 +423,17 @@ export default function ChatPage() {
 					clearChangedKey={rsState.clearChangedKey}
 					clearAllChangedKeys={rsState.clearAllChangedKeys}
 					onNewConversation={newConversation}
+					onError={setError}
 				/>
 			</div>
 
-			{error && <ErrorToast message={error} onDismiss={() => setError(null)} />}
+			{toast && (
+				<Toast
+					tone={toast.tone}
+					message={toast.message}
+					onDismiss={dismissToast}
+				/>
+			)}
 		</div>
 	);
 }

@@ -46,6 +46,8 @@ function fieldBorderClass(
 	return "border-dashed border-gray-200";
 }
 
+const HIGHLIGHT_VISIBLE_MS = 2500;
+
 interface FieldCardProps {
 	label: string;
 	fieldKey: string;
@@ -92,17 +94,25 @@ const FieldCard = forwardRef<HTMLDivElement, FieldCardProps>(function FieldCard(
 		if (!isRecentlyChanged || !onViewed) return;
 		const el = internalRef.current;
 		if (!el) return;
+		// Clearing on first sight removed the ring before anyone could notice it on
+		// fields already on screen, so it must stay visible for a moment first.
+		let timer: ReturnType<typeof setTimeout> | undefined;
 		const observer = new IntersectionObserver(
 			([entry]) => {
-				if (entry.isIntersecting) {
+				clearTimeout(timer);
+				if (!entry.isIntersecting) return;
+				timer = setTimeout(() => {
 					onViewed();
 					observer.disconnect();
-				}
+				}, HIGHLIGHT_VISIBLE_MS);
 			},
 			{ threshold: 0.5 },
 		);
 		observer.observe(el);
-		return () => observer.disconnect();
+		return () => {
+			clearTimeout(timer);
+			observer.disconnect();
+		};
 	}, [isRecentlyChanged, onViewed]);
 	const { value, filled, source, suggestion } = readField(field);
 
@@ -156,6 +166,7 @@ function useAutoGrow(
 	ref: React.RefObject<HTMLTextAreaElement | null>,
 	value: string,
 ) {
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional — `value` re-triggers the fit when the text changes
 	useLayoutEffect(() => {
 		const el = ref.current;
 		if (!el) return;

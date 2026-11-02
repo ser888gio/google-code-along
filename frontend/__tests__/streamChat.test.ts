@@ -1,4 +1,4 @@
-import { streamChat } from "../lib/api";
+import { CHAT_NETWORK_ERROR, streamChat } from "../lib/api";
 
 function sseResponse(chunks: string[], ok = true, status = 200) {
 	const encoder = new TextEncoder();
@@ -32,7 +32,11 @@ function callbacks() {
 }
 
 async function run(chunks: string[], ok = true, status = 200) {
-	global.fetch = jest.fn().mockResolvedValue(sseResponse(chunks, ok, status));
+	return runWith(jest.fn().mockResolvedValue(sseResponse(chunks, ok, status)));
+}
+
+async function runWith(fetchMock: jest.Mock) {
+	global.fetch = fetchMock;
 	const cb = callbacks();
 	await streamChat(
 		"hi",
@@ -111,5 +115,31 @@ describe("streamChat SSE dispatch", () => {
 
 	it("reports a server error without reading the body", async () => {
 		expect(await run([], false, 503)).toEqual(['error:["Server error: 503"]']);
+	});
+
+	it("reports an unreachable server instead of rejecting", async () => {
+		const calls = await runWith(
+			jest.fn().mockRejectedValue(new TypeError("Failed to fetch")),
+		);
+		expect(calls).toEqual([`error:["${CHAT_NETWORK_ERROR}"]`]);
+	});
+
+	it("reports a connection dropped mid-stream and skips done", async () => {
+		const encoder = new TextEncoder();
+		let sent = false;
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (sent) return controller.error(new TypeError("network error"));
+				sent = true;
+				controller.enqueue(encoder.encode('data: {"text":"partial"}\n'));
+			},
+		});
+		const calls = await runWith(
+			jest.fn().mockResolvedValue({ ok: true, status: 200, body }),
+		);
+		expect(calls).toEqual([
+			'chunk:["partial"]',
+			`error:["${CHAT_NETWORK_ERROR}"]`,
+		]);
 	});
 });

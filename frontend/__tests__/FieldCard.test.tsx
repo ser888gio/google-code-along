@@ -83,15 +83,47 @@ describe("FieldCard", () => {
 		expect(card.className).toContain("ring-green-400");
 	});
 
+	it("keeps the ring until the field has been visible for a moment", () => {
+		jest.useFakeTimers();
+		let report: IntersectionObserverCallback = () => {};
+		global.IntersectionObserver = jest.fn(
+			(cb: IntersectionObserverCallback) => {
+				report = cb;
+				return { observe: jest.fn(), disconnect: jest.fn() };
+			},
+		) as unknown as typeof IntersectionObserver;
+		const seen = (isIntersecting: boolean) =>
+			report(
+				[{ isIntersecting } as IntersectionObserverEntry],
+				{} as IntersectionObserver,
+			);
+		const onViewed = jest.fn();
+		renderCard({ isRecentlyChanged: true, onViewed });
+
+		seen(true);
+		jest.advanceTimersByTime(1000);
+		seen(false);
+		jest.advanceTimersByTime(5000);
+		expect(onViewed).not.toHaveBeenCalled();
+
+		seen(true);
+		jest.advanceTimersByTime(2500);
+		expect(onViewed).toHaveBeenCalledTimes(1);
+		jest.useRealTimers();
+	});
+
 	it.each([
 		[true, 3],
 		[false, 1],
-	])("renders multiline=%s as a textarea starting at %i row(s)", (multiline, rows) => {
-		renderCard({ multiline });
-		const box = screen.getByRole("textbox");
-		expect(box.tagName).toBe("TEXTAREA");
-		expect(box).toHaveAttribute("rows", String(rows));
-	});
+	])(
+		"renders multiline=%s as a textarea starting at %i row(s)",
+		(multiline, rows) => {
+			renderCard({ multiline });
+			const box = screen.getByRole("textbox");
+			expect(box.tagName).toBe("TEXTAREA");
+			expect(box).toHaveAttribute("rows", String(rows));
+		},
+	);
 
 	it("shows the placeholder only while unfilled and reports edits", () => {
 		const { onChange } = renderCard();

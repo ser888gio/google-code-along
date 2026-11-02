@@ -42,6 +42,7 @@ export default function RsDocumentPanel({
 	clearChangedKey,
 	clearAllChangedKeys,
 	onNewConversation,
+	onError,
 }: {
 	activeTab: RsTab;
 	onTabChange: (t: RsTab) => void;
@@ -61,6 +62,7 @@ export default function RsDocumentPanel({
 	clearChangedKey: (key: string) => void;
 	clearAllChangedKeys: () => void;
 	onNewConversation: () => void;
+	onError: (message: string) => void;
 }) {
 	const { t } = useLocale();
 	const TAB_LABELS: Record<string, string> = {
@@ -86,8 +88,8 @@ export default function RsDocumentPanel({
 				clearAllChangedKeys={clearAllChangedKeys}
 			/>
 		),
-		BPMN: <BpmnPanel sessionId={sessionId} />,
-		Data: <DataflowPanel sessionId={sessionId} />,
+		BPMN: <BpmnPanel sessionId={sessionId} onError={onError} />,
+		Data: <DataflowPanel sessionId={sessionId} onError={onError} />,
 		Database: <FirestoreSrsPanel data={srsData} />,
 		Analysis: (
 			<AnalysisTabContent
@@ -132,7 +134,9 @@ export default function RsDocumentPanel({
 						className="flex items-center gap-1.5 whitespace-nowrap rounded border border-[#4caf50] bg-[#4caf50] px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
 					>
 						<span className="xl:hidden">+</span>
-						<span className="hidden xl:inline">{t("btn.new_conversation")}</span>
+						<span className="hidden xl:inline">
+							{t("btn.new_conversation")}
+						</span>
 					</button>
 					<LanguageSwitcher />
 				</div>
