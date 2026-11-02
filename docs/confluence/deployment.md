@@ -29,8 +29,16 @@ Current checked-in CI values:
 | Artifact Registry repository | `business-persona-ai-repo` |
 | Backend Cloud Run service | `business-persona-ai-backend` |
 | Frontend Cloud Run service | `business-persona-ai-frontend` |
+| Backend runtime service account | `persona-ai-backend-runtime@vw-skda-fskoda-sandbox-jzf.iam.gserviceaccount.com` |
+| Frontend runtime service account | `persona-ai-frontend-runtime@vw-skda-fskoda-sandbox-jzf.iam.gserviceaccount.com` |
+| CI deploy service account | `github-actions-deployer@vw-skda-fskoda-sandbox-jzf.iam.gserviceaccount.com` |
+| Firestore database | `ai-business-person-firestore` (`europe-west4`, PITR and delete protection on) |
+| Firestore session collection | `ai-business-person-collection` |
+| GCS bucket | `ai-business-person-bucket` (EU multi-region) |
 
-`deploy.sh` currently uses a different hardcoded project ID: `vw-skda-fhackton-156`. Align this before using the script for the same environment as CI.
+`vw-skda-fskoda-sandbox-jzf` is a shared sandbox project used by many teams. Do not use the default compute service account for this app, and filter by these names when inspecting resources.
+
+The Gemini API key in the `GOOGLE_API_KEY` secret is a key from the `vw-skda-fhackton-156` project (display name `BusinessPersonaAI-2026-11`), so Gemini usage is billed there.
 
 ---
 
@@ -47,11 +55,13 @@ Every push to the `develop` branch triggers the full CI/CD pipeline defined in `
 2. Authenticate to GCP with Workload Identity Federation
 3. Configure Docker for Artifact Registry
 4. Build and push backend image
-5. Remove any stale plaintext GOOGLE_API_KEY env var from the backend service
-6. Deploy backend to Cloud Run with runtime env vars and Secret Manager secrets
+5. Deploy backend to Cloud Run (env vars and secrets overwritten from the workflow)
+6. Deploy the rs-user-simulation job and rs-safety-anomaly-metrics job
 7. Build and push frontend image with backend URL build args
 8. Deploy frontend to Cloud Run
 ```
+
+The backend deploy uses `env_vars_update_strategy: overwrite` and `secrets_update_strategy: overwrite`. The workflow is the single source of truth: any env var or secret added by hand in the console is removed on the next deploy. Add new runtime configuration to `.github/workflows/cicd.yaml` (and `deploy.sh`), never only in the console.
 
 ### GCP Authentication
 
@@ -89,19 +99,13 @@ The frontend browser client calls the backend URL directly through `NEXT_PUBLIC_
 http://localhost:3000
 ```
 
-For production, set backend `ALLOWED_ORIGINS` to the deployed frontend origin, for example:
+CI sets `ALLOWED_ORIGINS` to both URLs of the deployed frontend:
 
 ```text
-ALLOWED_ORIGINS=https://business-persona-ai-frontend-xxxxx-ew.a.run.app
+ALLOWED_ORIGINS=https://business-persona-ai-frontend-4nbdz3xjxa-ez.a.run.app,https://business-persona-ai-frontend-184082972607.europe-west4.run.app
 ```
 
-If multiple origins are needed, use a comma-separated list:
-
-```text
-ALLOWED_ORIGINS=https://frontend.example.com,https://www.frontend.example.com
-```
-
-Without this setting, browser requests from the deployed frontend to the deployed backend can fail CORS checks.
+In the workflow's `env_vars` block the comma must be escaped as `\,`; in `deploy.sh` the list uses the `^|^` delimiter prefix. Without this setting, browser requests from the deployed frontend to the deployed backend fail CORS checks.
 
 ### Image Tags
 
@@ -112,12 +116,14 @@ europe-west4-docker.pkg.dev/{PROJECT_ID}/{REPOSITORY}/backend:{GITHUB_SHA}
 europe-west4-docker.pkg.dev/{PROJECT_ID}/{REPOSITORY}/frontend:{GITHUB_SHA}
 ```
 
-Manual `deploy.sh` images are tagged as `latest` under service-specific image names:
+Manual `deploy.sh` images go to the same packages with a `manual-<timestamp>` tag:
 
 ```text
-europe-west4-docker.pkg.dev/{PROJECT_ID}/{SERVICE_NAME}-repo/{SERVICE_NAME}-backend:latest
-europe-west4-docker.pkg.dev/{PROJECT_ID}/{SERVICE_NAME}-repo/{SERVICE_NAME}-frontend:latest
+europe-west4-docker.pkg.dev/{PROJECT_ID}/{REPOSITORY}/backend:manual-20261102160000
+europe-west4-docker.pkg.dev/{PROJECT_ID}/{REPOSITORY}/frontend:manual-20261102160000
 ```
+
+CI pushes with `provenance: false`, so each push is one image manifest. The repository has a cleanup policy that keeps the 30 newest versions per package and deletes the rest (older pushes stored three versions each, so this keeps at least the 10 newest images). Roll back only to images inside that window.
 
 ---
 
@@ -150,24 +156,13 @@ It does **not** build locally with `docker build`; the local Docker daemon is no
 
 ### Manual Deployment Caveats
 
-The checked-in `deploy.sh` backend deployment currently sets:
+`deploy.sh` mirrors the CI configuration: same project, repository, runtime service accounts, Secret Manager secrets, `ALLOWED_ORIGINS`, and one backend instance with 1 GiB. Keep the two in sync when either changes. `deploy.sh` does not deploy the simulation or anomaly jobs.
 
-```text
-GCS_BUCKET_NAME=<PROJECT_ID>-bucket
-GOOGLE_CLOUD_PROJECT=<PROJECT_ID>
-APP_ENV=production
-BIGQUERY_DATASET=observability
+Behind the corporate Zscaler proxy, `gcloud` fails with `CERTIFICATE_VERIFY_FAILED` because its bundled Python does not trust the Zscaler root CA. Export `Zscaler Root CA` from the Windows certificate store, append it to a copy of `google-cloud-sdk/lib/third_party/certifi/cacert.pem`, and point gcloud at it:
+
+```bash
+gcloud config set core/custom_ca_certs_file <path-to-combined-bundle.pem>
 ```
-
-Production startup also requires:
-
-```text
-GOOGLE_API_KEY
-FIRESTORE_COLLECTION
-FIRESTORE_DATABASE
-```
-
-Add these to the script, pass them with `--set-secrets`, or configure them on the Cloud Run service before relying on manual deploys.
 
 ---
 
@@ -209,9 +204,7 @@ CMD ["node", "server.js"]
 - Base image: `node:22-alpine`
 - `NEXT_PUBLIC_*` values are build args baked into the Next.js client bundle during `next build`.
 - Output is a Next.js standalone runtime image.
-- The container listens on port `3000`.
-
-Important Cloud Run note: Cloud Run sends requests to the configured container port and injects the `PORT` environment variable. The default service port is `8080` unless configured otherwise. Because this frontend image listens on `3000`, deploy the frontend Cloud Run service with container port `3000` or update the runtime to honor Cloud Run's `PORT`.
+- The image defaults to port `3000` for local runs. On Cloud Run the service uses container port `8080`; Cloud Run injects `PORT=8080`, which overrides the image's `ENV PORT=3000`, and the Next.js standalone server listens on `PORT`.
 
 ---
 
@@ -286,20 +279,18 @@ Both services are deployed as Cloud Run services.
 
 | Setting | Backend | Frontend |
 |---|---|---|
-| Container port | `8080` | `3000` |
+| Container port | `8080` | `8080` (via injected `PORT`) |
 | Region | `europe-west4` | `europe-west4` |
-| Min instances | `0` by default | `0` by default |
-| Max instances | Should be set deliberately | Should be set deliberately |
-| Memory | Size for ADK/Gemini workload | `512 MiB` default unless changed |
-| CPU | `1` default unless changed | `1` default unless changed |
-| Allow unauthenticated | Yes for the public app | Yes for the public app |
+| Min instances | `0` | `0` |
+| Max instances | `1` | `100` |
+| Memory | `1 GiB` | `512 MiB` |
+| CPU | `1` | `1` |
+| Concurrency | `80` | `80` |
+| Request timeout | `300s` | `300s` |
+| Service account | `persona-ai-backend-runtime` | `persona-ai-frontend-runtime` |
+| Allow unauthenticated | Yes | Yes |
 
-Recommended backend operational settings:
-
-- Set `ALLOWED_ORIGINS` to the frontend origin.
-- Set a request timeout long enough for SSE streaming and finalization-triggering turns.
-- Keep backend scaling conservative until ADK sessions are persistent. The backend currently uses in-memory ADK sessions; a restart or routing related requests to a different instance can lose live agent context.
-- Consider `max-instances=1` for demos that depend on uninterrupted live sessions, or implement persistent ADK sessions before scaling horizontally.
+The backend is capped at one instance because ADK sessions are in memory: a request routed to another instance would lose live agent context. Raise this only after ADK sessions are persisted. A restart (including every deploy) still drops in-flight sessions.
 
 Backend runtime configuration:
 
@@ -365,6 +356,12 @@ gcloud firestore databases create \
 
 The app stores session documents in the configured `FIRESTORE_COLLECTION` and feedback in a top-level `feedback` collection.
 
+Enable point-in-time recovery and delete protection on the database (both are on for `ai-business-person-firestore`):
+
+```bash
+gcloud firestore databases update --database={FIRESTORE_DATABASE} --enable-pitr --delete-protection
+```
+
 ### Cloud Storage
 
 ```bash
@@ -426,31 +423,40 @@ gcloud iam service-accounts add-iam-policy-binding {SA_EMAIL} \
 
 ### Service Account Permissions
 
-Use separate service accounts for CI/CD and runtime if possible.
+The app uses two dedicated runtime service accounts. Never switch it back to the shared default compute account (`184082972607-compute@developer.gserviceaccount.com`), which many teams use and which holds broad admin roles.
 
-Runtime Cloud Run service account:
+`persona-ai-backend-runtime` runs the backend service, the `rs-user-simulation` and `rs-safety-anomaly-metrics` jobs, and calls their Cloud Scheduler triggers:
+
+| Role | Scope | Reason |
+|---|---|---|
+| `roles/datastore.user` | Project | Firestore read/write |
+| `roles/storage.objectAdmin` | Bucket `ai-business-person-bucket` | Uploads, generated docs, analyses, simulation results |
+| `roles/secretmanager.secretAccessor` | Secrets `GOOGLE_API_KEY`, `GCS_BUCKET_NAME`, `FIRESTORE_COLLECTION`, `FIRESTORE_DATABASE` | Runtime secrets |
+| `roles/bigquery.jobUser` | Project | Observability and safety queries |
+| `roles/logging.logWriter` | Project | Cloud Logging |
+| `roles/cloudtrace.agent` | Project | Export traces to Cloud Trace |
+| `roles/monitoring.metricWriter` | Project | Export custom metrics |
+| `roles/run.invoker` | Jobs `rs-user-simulation`, `rs-safety-anomaly-metrics` | Cloud Scheduler starts the jobs as this account (granted by CI) |
+
+A temporary project-level `roles/run.invoker` binding exists for this account because job-level IAM can only be set by `run.admin`. Remove it after the first CI run has granted the job-level bindings:
+
+```bash
+gcloud projects remove-iam-policy-binding vw-skda-fskoda-sandbox-jzf \
+  --member="serviceAccount:persona-ai-backend-runtime@vw-skda-fskoda-sandbox-jzf.iam.gserviceaccount.com" \
+  --role="roles/run.invoker" --condition=None
+```
+
+`persona-ai-frontend-runtime` runs the frontend and has no roles: the Next.js server needs no Google Cloud access.
+
+CI/CD deploy service account (`github-actions-deployer`):
 
 | Role | Reason |
 |---|---|
-| `roles/datastore.user` | Firestore read/write |
-| `roles/storage.objectAdmin` | GCS uploads, generated docs, final analysis JSON |
-| `roles/secretmanager.secretAccessor` | Secret Manager runtime secrets |
-| `roles/bigquery.jobUser` | Run BigQuery observability and safety queries |
-| BigQuery dataset-level data viewer/editor as appropriate | Read observability views and write anomaly outputs if used |
-| `roles/logging.logWriter` | Cloud Logging, usually covered by default service identity behavior |
-| `roles/cloudtrace.agent` | Export traces to Cloud Trace |
-| `roles/monitoring.metricWriter` | Export custom metrics to Cloud Monitoring |
-
-CI/CD deploy service account:
-
-| Role | Reason |
-|---|---|
-| `roles/run.developer` | Deploy Cloud Run services |
-| `roles/iam.serviceAccountUser` | Deploy revisions as the runtime service account |
+| `roles/run.admin` | Deploy services and jobs, set job-level invoker bindings |
+| `roles/iam.serviceAccountUser` | Deploy revisions as the runtime service accounts |
 | `roles/artifactregistry.writer` | Push images |
-| `roles/secretmanager.secretAccessor` | Attach Secret Manager secrets during deploy |
 | `roles/monitoring.dashboardEditor` | Create and update the checked-in Cloud Monitoring dashboard |
-| `roles/cloudbuild.builds.editor` | Needed if using `deploy.sh` / Cloud Build |
+| `roles/cloudscheduler.admin` | Optional: only needed to create missing scheduler triggers (CI warns without it) |
 
 Grant the dashboard role to the GitHub Actions deploy service account before
 changing `infra/monitoring/dashboard.json`:
@@ -483,14 +489,40 @@ gcloud alpha monitoring policies create \
   --policy-from-file=infra/monitoring/alert-policies.yaml
 ```
 
-Create log-based metrics following `infra/monitoring/README.md`. The current metrics are:
+Create log-based metrics following `infra/monitoring/README.md`. Both exist in the project:
 
 ```text
 firestore_unavailable_total
 bridge_injection_failure_total
 ```
 
+The alert policy in `infra/monitoring/alert-policies.yaml` is not applied yet; it needs a notification channel ID first.
+
 ### BigQuery Observability Views
+
+**Status: blocked by an organization policy.** The `observability` dataset exists (`europe-west4`, empty), but the `firestore-bigquery-export` extension cannot be installed in `vw-skda-fskoda-sandbox-jzf`. The extension creates a Cloud Tasks queue, and Cloud Tasks rejects the VW organization's `constraints/gcp.resourceLocations` policy:
+
+```text
+Invalid Cloud Tasks location constraint org policy. Either both the locations 'us-central1' and
+'us-central2' should be included in the policy, or both locations should be excluded from the policy.
+```
+
+The GCP platform team has to add `us-central2` to the policy, or remove `us-central1` from it. Until then the `rs-safety-anomaly-metrics` scheduler trigger is paused, because its source table does not exist. Once the policy is fixed, install the extensions with these settings:
+
+| Parameter | Sessions instance | Feedback instance |
+|---|---|---|
+| Instance ID | `firestore-bq-sessions` | `firestore-bq-feedback` |
+| `DATABASE` / `DATABASE_REGION` | `ai-business-person-firestore` / `europe-west4` | same |
+| `COLLECTION_PATH` | `ai-business-person-collection` | `feedback` |
+| `DATASET_ID` / `DATASET_LOCATION` | `firestore_export` / `europe-west4` | same |
+| `TABLE_ID` | `srs_sessions` (matches the view SQL) | `feedback` |
+| Function location | `europe-west1` (`europe-west4` is not offered) | same |
+
+Version 0.3.x has no built-in backfill. Import existing documents with the `fs-bq-import-collection` script after installing. Then grant `persona-ai-backend-runtime` `roles/bigquery.dataViewer` on `firestore_export` and `roles/bigquery.dataEditor` on `observability`, create the views below, create the anomaly scheduled query (02:00 Europe/Prague, running as `persona-ai-backend-runtime`), and resume the trigger:
+
+```bash
+gcloud scheduler jobs resume rs-safety-anomaly-metrics --location=europe-west4
+```
 
 Observability and safety analysis use these views by default:
 
@@ -610,9 +642,9 @@ Set them through Secret Manager and Cloud Run env vars before deploying with `AP
 
 Set backend `ALLOWED_ORIGINS` to the deployed frontend origin. The default is only `http://localhost:3000`.
 
-### Frontend Cloud Run Revision Does Not Become Ready
+### Cloud Run Rejects A Revision: Permission Denied On Secret
 
-The frontend image listens on port `3000`. Configure the Cloud Run frontend service to send traffic to container port `3000`, or update the frontend runtime to listen on the injected `PORT`.
+The revision's service account cannot read a secret it references. Grant `roles/secretmanager.secretAccessor` on that secret to the runtime account, or remove the stale reference from the workflow. A failed update still writes the new spec to the service; traffic stays on the last ready revision.
 
 ### Frontend Shows Blank Page Or Calls The Wrong Backend
 
