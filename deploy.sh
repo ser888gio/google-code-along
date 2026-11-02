@@ -4,9 +4,14 @@
 set -e
 
 # --- Configuration ---
-export PROJECT_ID=vw-skda-fhackton-156
+# Keep in sync with .github/workflows/cicd.yaml (same project, repo, accounts and runtime settings).
+export PROJECT_ID=vw-skda-fskoda-sandbox-jzf
 export REGION=europe-west4
 export SERVICE_NAME=business-persona-ai
+export BACKEND_SA=persona-ai-backend-runtime@$PROJECT_ID.iam.gserviceaccount.com
+export FRONTEND_SA=persona-ai-frontend-runtime@$PROJECT_ID.iam.gserviceaccount.com
+export ALLOWED_ORIGINS=https://business-persona-ai-frontend-4nbdz3xjxa-ez.a.run.app,https://business-persona-ai-frontend-184082972607.europe-west4.run.app
+IMAGE_TAG="manual-$(date +%Y%m%d%H%M%S)"
 
 # --- Argument Parsing ---
 FRONTEND_ONLY=false
@@ -22,19 +27,26 @@ done
 deploy_backend() {
     echo "--- Backend Deployment ---"
     BACKEND_SERVICE_NAME="$SERVICE_NAME-backend"
-    BACKEND_IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$BACKEND_SERVICE_NAME:latest"
+    BACKEND_IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/backend:$IMAGE_TAG"
 
     echo "Building and pushing the backend Docker image..."
     gcloud builds submit backend --tag $BACKEND_IMAGE_TAG --default-buckets-behavior=regional-user-owned-bucket
 
     echo "Deploying the backend to Cloud Run..."
-    BACKEND_ENV_VARS="GCS_BUCKET_NAME=$PROJECT_ID-bucket,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,APP_ENV=production,BIGQUERY_DATASET=observability"
+    # ^|^ switches the list delimiter so ALLOWED_ORIGINS can contain commas.
+    BACKEND_ENV_VARS="^|^GOOGLE_CLOUD_PROJECT=$PROJECT_ID|APP_ENV=production|BIGQUERY_DATASET=observability|ALLOWED_ORIGINS=$ALLOWED_ORIGINS"
+    BACKEND_SECRETS="GOOGLE_API_KEY=GOOGLE_API_KEY:latest,GCS_BUCKET_NAME=GCS_BUCKET_NAME:latest,FIRESTORE_COLLECTION=FIRESTORE_COLLECTION:latest,FIRESTORE_DATABASE=FIRESTORE_DATABASE:latest"
 
+    # max-instances=1: ADK sessions are in memory, so all requests must hit one instance.
     gcloud run deploy $BACKEND_SERVICE_NAME \
         --image $BACKEND_IMAGE_TAG \
         --platform managed \
         --allow-unauthenticated \
-        --set-env-vars="$BACKEND_ENV_VARS"
+        --service-account="$BACKEND_SA" \
+        --max-instances=1 \
+        --memory=1Gi \
+        --set-env-vars="$BACKEND_ENV_VARS" \
+        --set-secrets="$BACKEND_SECRETS"
 
     # Get the backend URL
     BACKEND_URL=$(gcloud run services describe $BACKEND_SERVICE_NAME --platform managed --format 'value(status.url)')
@@ -49,7 +61,7 @@ deploy_frontend() {
         return 1
     fi
     FRONTEND_SERVICE_NAME="$SERVICE_NAME-frontend"
-    FRONTEND_IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/$FRONTEND_SERVICE_NAME:latest"
+    FRONTEND_IMAGE_TAG="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO_NAME/frontend:$IMAGE_TAG"
 
     echo "Building and pushing the frontend Docker image..."
     FRONTEND_BUILD_CONFIG="$(mktemp)"
@@ -81,7 +93,8 @@ EOL
     gcloud run deploy $FRONTEND_SERVICE_NAME \
         --image $FRONTEND_IMAGE_TAG \
         --platform managed \
-        --allow-unauthenticated
+        --allow-unauthenticated \
+        --service-account="$FRONTEND_SA"
 
     # Get the frontend URL
     FRONTEND_URL=$(gcloud run services describe $FRONTEND_SERVICE_NAME --platform managed --format 'value(status.url)')
@@ -131,5 +144,3 @@ if [ "$FRONTEND_ONLY" = "false" ]; then
     echo "Backend URL: $BACKEND_URL"
 fi
 echo "Frontend URL: $FRONTEND_URL"
-echo ""
-echo "Note: You may need to configure a GCS bucket named '$PROJECT_ID-bucket' and grant the backend service account access to it."
