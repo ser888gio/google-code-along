@@ -438,13 +438,7 @@ The app uses two dedicated runtime service accounts. Never switch it back to the
 | `roles/monitoring.metricWriter` | Project | Export custom metrics |
 | `roles/run.invoker` | Jobs `rs-user-simulation`, `rs-safety-anomaly-metrics` | Cloud Scheduler starts the jobs as this account (granted by CI) |
 
-A temporary project-level `roles/run.invoker` binding exists for this account because job-level IAM can only be set by `run.admin`. Remove it after the first CI run has granted the job-level bindings:
-
-```bash
-gcloud projects remove-iam-policy-binding vw-skda-fskoda-sandbox-jzf \
-  --member="serviceAccount:persona-ai-backend-runtime@vw-skda-fskoda-sandbox-jzf.iam.gserviceaccount.com" \
-  --role="roles/run.invoker" --condition=None
-```
+Job-level IAM can only be set with `run.admin`, so the job invoker bindings are granted by CI (`github-actions-deployer`), not by hand.
 
 `persona-ai-frontend-runtime` runs the frontend and has no roles: the Next.js server needs no Google Cloud access.
 
