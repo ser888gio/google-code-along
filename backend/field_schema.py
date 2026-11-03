@@ -7,13 +7,21 @@ all derive from the same source.
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, Required, TypedDict
+from typing import Any, Literal, NotRequired, Required, TypedDict
+
+SectionKind = Literal["ai", "simple"]
+InputFormat = Literal["name", "number", "text"]
 
 
 class FieldDef(TypedDict):
     label: Required[str]
     required: Required[bool]
     section: Required[int]
+    # "simple" fields are plain names/codes/figures: never sent to the LLM, validated deterministically.
+    kind: NotRequired[SectionKind]
+    input_format: NotRequired[InputFormat]
+    # Committing any field listed here marks this field stale.
+    depends_on: NotRequired[list[str]]
     direct_input: NotRequired[bool]
     ai_extractable: NotRequired[bool]
     multiline: NotRequired[bool]
@@ -64,6 +72,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Customer Department",
         "required": True,
         "section": 1,
+        "kind": "simple",
+        "input_format": "name",
         "direct_input": True,
         "ai_extractable": True,
         "direct_chat": True,
@@ -87,6 +97,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Requester",
         "required": True,
         "section": 1,
+        "kind": "simple",
+        "input_format": "name",
         "direct_input": True,
         "ai_extractable": True,
         "direct_chat": True,
@@ -109,6 +121,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Product Owner",
         "required": True,
         "section": 1,
+        "kind": "simple",
+        "input_format": "name",
         "direct_input": True,
         "ai_extractable": True,
         "direct_chat": True,
@@ -255,6 +269,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Saved Time (hours/year)",
         "required": False,
         "section": 3,
+        "kind": "simple",
+        "input_format": "number",
         "direct_input": True,
         "ai_extractable": False,
         "match_terms": ["saved time", "uspora casu", "hours"],
@@ -271,6 +287,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Cost Saving",
         "required": False,
         "section": 3,
+        "kind": "simple",
+        "input_format": "text",
         "direct_input": True,
         "ai_extractable": False,
         "match_terms": ["cost saving", "naklady", "uspora nakladu"],
@@ -287,6 +305,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Revenue Increase",
         "required": False,
         "section": 3,
+        "kind": "simple",
+        "input_format": "text",
         "direct_input": True,
         "ai_extractable": False,
         "match_terms": ["revenue", "vynos", "trzby"],
@@ -459,6 +479,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Comments",
         "required": False,
         "section": 6,
+        "kind": "simple",
+        "input_format": "text",
         "direct_input": True,
         "ai_extractable": False,
         "multiline": True,
@@ -475,6 +497,8 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "label": "Attachments (GCS paths)",
         "required": False,
         "section": 6,
+        "kind": "simple",
+        "input_format": "text",
         "direct_input": True,
         "ai_extractable": False,
         "multiline": True,

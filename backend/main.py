@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from api import chat, diagrams, discovery, documents, feedback, sessions
+from api import chat, diagrams, discovery, documents, feedback, sessions, spec
 from config import validate_config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,3 +65,4 @@ app.include_router(discovery.router)
 app.include_router(documents.router)
 app.include_router(feedback.router)
 app.include_router(sessions.router)
+app.include_router(spec.router)
