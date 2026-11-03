@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// Section state machine (backend/spec_machine). Merge these blocks into the project's live rules;
+// do not deploy this file on its own, it would replace any rules managed elsewhere.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only the backend commit transaction may set status 'filled' or 'tbd'. The backend uses the
+    // Admin SDK, which bypasses rules, so every client-SDK write to these paths is denied.
+    match /{sessions}/{sessionId}/sections/{fieldKey} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    // Append-only decision log, also backend-only.
+    match /{sessions}/{sessionId}/section_events/{eventId} {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}

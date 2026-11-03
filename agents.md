@@ -101,6 +101,7 @@ pre-commit run --all-files
 - `backend/agent/finalizer_agent.py`: final analysis pipeline.
 - `backend/agent/research_agent.py`: GCS-backed research tools and Vertex stub.
 - `backend/field_schema.py`: canonical RS fields.
+- `backend/spec_machine/`: per-field section state machine (see its `README.md`); routes in `backend/api/spec.py`.
 - `backend/firestore/writer.py`: persistence helpers.
 - `backend/gcs/connector.py`: storage helpers.
 - `backend/observability/`: tracing, metrics, callbacks, cost, and safety.

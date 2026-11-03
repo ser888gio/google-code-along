@@ -27,6 +27,7 @@ from field_schema import FIELD_SCHEMA, REQUIRED_FIELDS
 from google.cloud import firestore
 from google.cloud.firestore_v1.base_document import DocumentSnapshot
 from privacy import hash_text, redact_text
+from spec_machine.legacy_mirror import mirror_accepted, mirror_cleared, mirror_dismissed
 
 logger = logging.getLogger(__name__)
 
@@ -465,6 +466,7 @@ def accept_rs_fields(session_id: str, fields: dict[str, str], source: str) -> di
             "accepted_at": now,
         }
     _write_rs_field_state(session_id, state)
+    mirror_accepted(_client(), session_id, values, source)
     return state
 
 
@@ -485,6 +487,7 @@ def dismiss_rs_field_suggestions(session_id: str, fields: dict[str, str]) -> dic
         if _normalize_suggestion(value) not in normalized_existing:
             dismissed.append(value)
     _write_rs_field_state(session_id, state)
+    mirror_dismissed(_client(), session_id, values)
     return state
 
 
@@ -498,6 +501,7 @@ def clear_accepted_rs_fields(session_id: str, field_keys: list[str]) -> dict[str
         if isinstance(entry, dict):
             entry.pop("accepted", None)
     _write_rs_field_state(session_id, state)
+    mirror_cleared(_client(), session_id, field_keys)
     return state
 
 

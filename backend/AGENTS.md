@@ -23,6 +23,9 @@ All LLM components in the backend. Model constants are defined in `config.py` an
 | BPMN generator | — | `bpmn/generator.py` | `MODEL_BPMN` | `main.py` → `generate_bpmn_diagram()` | Generates BPMN XML diagram of the as-is/to-be process |
 | Dataflow generator | — | `dataflow/generator.py` | `MODEL_DATAFLOW` | `main.py` → `generate_dataflow_diagram()` | Generates dataflow diagram (DFD) of the solution |
 | SRS compiler | — | `generation/srs_compiler.py` | `MODEL_SRS_COMPILER` | Word/PDF export endpoints | Compiles the RS document from conversation history for Word/PDF export |
+| Section generator | — | `spec_machine/services.py` | `MODEL_SECTION_GENERATOR` | `/spec` endpoints, only while an AI field is in `generating` | Proposes one field value or asks one question; never chooses state transitions |
+| Dependent reviewer | — | `spec_machine/services.py` | `MODEL_SECTION_GENERATOR` | Background, after a commit, for TBD/skipped dependents | Proposes a value if the newly confirmed field makes a dependent answerable (queued as a badge) |
+| Intent classifier | — | `spec_machine/services.py` | `MODEL_INTENT_CLASSIFIER` | `/spec/{id}/utterance`, only for ambiguous simple-field replies | Maps a reply to submit / don't know / skip / TBD; low confidence → read-back |
 
 ---
 

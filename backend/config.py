@@ -112,6 +112,18 @@ MODEL_DATAFLOW = "gemini-3.1-flash-lite"
 # SRS document compiler (legacy Word export pipeline)
 MODEL_SRS_COMPILER = "gemini-3.1-flash-lite"
 
+# Section state machine: per-field proposal generation and intent fallback classification
+MODEL_SECTION_GENERATOR = os.getenv("MODEL_SECTION_GENERATOR", "gemini-3.1-flash-lite")
+MODEL_INTENT_CLASSIFIER = "gemini-3.1-flash-lite"
+SECTION_GENERATION_TIMEOUT_S = float(os.getenv("SECTION_GENERATION_TIMEOUT_S", "45.0"))
+# Sessions are allowed to finalize with required fields marked TBD (rendered as open items).
+SECTION_ALLOW_TBD_ON_FINALIZE = os.getenv("SECTION_ALLOW_TBD_ON_FINALIZE", "1") == "1"
+# Optional JSON file {"name": ["Jana Nováková", ...]} used for the deterministic "I don't know" lookup.
+SECTION_DIRECTORY_PATH: str = os.getenv("SECTION_DIRECTORY_PATH", "")
+SPEC_SCHEMA_VERSION = 2
+FIRESTORE_SECTIONS_SUBCOLLECTION = "sections"
+FIRESTORE_SECTION_EVENTS_SUBCOLLECTION = "section_events"
+
 # ADK runner app name — used in InMemorySessionService calls
 APP_NAME = "rs_generator"
 
