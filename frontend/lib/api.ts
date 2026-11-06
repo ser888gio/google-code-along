@@ -683,7 +683,14 @@ export interface FinalAnalysis {
 	_meta: FinalAnalysisMeta;
 }
 
-type AnalysisStatus = "not_found" | "pending" | "complete";
+// "unreachable" is client-side only: the backend could not be asked, so the
+// answer is unknown, unlike "not_found" where the backend said there is none yet.
+type AnalysisStatus =
+	| "not_found"
+	| "pending"
+	| "complete"
+	| "error"
+	| "unreachable";
 
 interface AnalysisResponse {
 	status: AnalysisStatus;
@@ -702,9 +709,9 @@ export async function getAnalysis(
 		const res = await fetch(
 			`${API_URL}/analyses/${encodeURIComponent(sessionId)}`,
 		);
-		if (!res.ok) return { status: "not_found" };
+		if (!res.ok) return { status: "unreachable" };
 		return res.json();
 	} catch {
-		return { status: "not_found" };
+		return { status: "unreachable" };
 	}
 }

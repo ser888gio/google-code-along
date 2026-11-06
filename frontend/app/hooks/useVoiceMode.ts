@@ -9,7 +9,11 @@ import {
 } from "../../lib/api";
 import { useAudioPlayer } from "../../lib/useAudioPlayer";
 import { useAudioRecorder } from "../../lib/useAudioRecorder";
-import { type WsServerMessage, useWebSocket } from "../../lib/useWebSocket";
+import {
+	type ConnectionState,
+	type WsServerMessage,
+	useWebSocket,
+} from "../../lib/useWebSocket";
 import { useLocale } from "../i18n/LocaleContext";
 import type { FinalizingStatus } from "./useChatSession";
 
@@ -36,7 +40,7 @@ interface VoiceModeHandlers {
 
 export function useVoiceMode(handlers: VoiceModeHandlers) {
 	const [chatMode, setChatMode] = useState<ChatMode>("text");
-	const { locale } = useLocale();
+	const { locale, t } = useLocale();
 
 	const audioPlayer = useAudioPlayer();
 
@@ -49,6 +53,9 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 
 	const voiceTranscriptIdRef = useRef<string | null>(null);
 	const voiceUserTranscriptIdRef = useRef<string | null>(null);
+	// The final user transcript can arrive after the turn already closed the live
+	// caption; it then corrects that message instead of being dropped or repeated.
+	const userAwaitingFinalIdRef = useRef<string | null>(null);
 
 	const handlersRef = useRef(handlers);
 	useLayoutEffect(() => {
@@ -72,24 +79,33 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 				sessionId,
 			} = handlersRef.current;
 
+			const closeUserCaption = () => {
+				if (!voiceUserTranscriptIdRef.current) return;
+				finalizeMessage(voiceUserTranscriptIdRef.current);
+				userAwaitingFinalIdRef.current = voiceUserTranscriptIdRef.current;
+				voiceUserTranscriptIdRef.current = null;
+			};
+
 			if (msg.type === "user_transcript_partial") {
 				if (voiceUserTranscriptIdRef.current) {
 					appendToMessage(voiceUserTranscriptIdRef.current, msg.text);
 				} else {
+					userAwaitingFinalIdRef.current = null;
 					voiceUserTranscriptIdRef.current = addMessage("user", msg.text, true);
 				}
 			} else if (msg.type === "user_transcript") {
-				if (voiceUserTranscriptIdRef.current) {
-					replaceMessageText(voiceUserTranscriptIdRef.current, msg.text);
-					finalizeMessage(voiceUserTranscriptIdRef.current);
-					voiceUserTranscriptIdRef.current = null;
+				const id =
+					voiceUserTranscriptIdRef.current ?? userAwaitingFinalIdRef.current;
+				if (id) {
+					replaceMessageText(id, msg.text);
+					finalizeMessage(id);
+				} else {
+					addMessage("user", msg.text);
 				}
-				// If ref is null, turn_complete already finalized the message — do nothing
+				voiceUserTranscriptIdRef.current = null;
+				userAwaitingFinalIdRef.current = null;
 			} else if (msg.type === "text") {
-				if (voiceUserTranscriptIdRef.current) {
-					finalizeMessage(voiceUserTranscriptIdRef.current);
-					voiceUserTranscriptIdRef.current = null;
-				}
+				closeUserCaption();
 				if (voiceTranscriptIdRef.current) {
 					appendToMessage(voiceTranscriptIdRef.current, msg.text);
 				} else {
@@ -100,10 +116,7 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 					);
 				}
 			} else if (msg.type === "turn_complete") {
-				if (voiceUserTranscriptIdRef.current) {
-					finalizeMessage(voiceUserTranscriptIdRef.current);
-					voiceUserTranscriptIdRef.current = null;
-				}
+				closeUserCaption();
 				if (voiceTranscriptIdRef.current) {
 					finalizeMessage(voiceTranscriptIdRef.current);
 					voiceTranscriptIdRef.current = null;
@@ -137,9 +150,18 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 		[audioPlayer],
 	);
 
+	// The recorder is created below the socket, so the connection callback reaches it through a ref.
+	const stopAudioRef = useRef(() => {});
+	const handleConnectionChange = useCallback((state: ConnectionState) => {
+		if (state === "error" || state === "disconnected") stopAudioRef.current();
+		// "error" keeps voice mode so its connection-failed hint stays visible.
+		if (state === "disconnected") setChatMode("text");
+	}, []);
+
 	const ws = useWebSocket({
 		onAudioData: handleWsAudio,
 		onMessage: handleWsMessage,
+		onConnectionChange: handleConnectionChange,
 	});
 
 	const handleAudioChunk = useCallback(
@@ -148,23 +170,29 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 	);
 
 	const audioRecorder = useAudioRecorder(handleAudioChunk);
+	useLayoutEffect(() => {
+		stopAudioRef.current = () => {
+			audioRecorder.stopRecording();
+			audioPlayer.stop();
+		};
+	});
 
 	async function handleToggleVoice(
 		sessionId: string | null,
 		setSessionId: (id: string) => void,
 	) {
 		if (chatMode === "voice") {
-			audioRecorder.stopRecording();
-			audioPlayer.stop();
-			ws.disconnect();
-			setChatMode("text");
+			stopVoice();
 			return;
 		}
 
+		if (!(await audioPlayer.init())) {
+			handlersRef.current.setError(t("voice.audio_init_failed"));
+			return;
+		}
 		setChatMode("voice");
 		const sid = sessionId ?? crypto.randomUUID();
 		if (!sessionId) setSessionId(sid);
-		await audioPlayer.init();
 		ws.connect("default_user", sid, locale);
 	}
 
@@ -175,6 +203,7 @@ export function useVoiceMode(handlers: VoiceModeHandlers) {
 			audioPlayer.stop();
 			voiceTranscriptIdRef.current = null;
 			voiceUserTranscriptIdRef.current = null;
+			userAwaitingFinalIdRef.current = null;
 			await audioRecorder.startRecording();
 		}
 	}

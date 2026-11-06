@@ -4,7 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8080";
 
-type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
+export type ConnectionState =
+	| "disconnected"
+	| "connecting"
+	| "connected"
+	| "error";
 
 interface WsTextMessage {
 	type: "text";
@@ -108,17 +112,24 @@ export function useWebSocket(options: {
 			ws.binaryType = "arraybuffer";
 			wsRef.current = ws;
 
+			let failed = false;
+			// Events from a socket we already replaced or closed arrive late; ignore them.
+			const isCurrent = () => wsRef.current === ws;
+
 			ws.onopen = () => {
-				updateState("connected");
+				if (isCurrent()) updateState("connected");
 			};
 
 			ws.onclose = () => {
+				if (!isCurrent()) return;
 				wsRef.current = null;
-				updateState("disconnected");
+				updateState(failed ? "error" : "disconnected");
 			};
 
 			ws.onerror = (event) => {
+				if (!isCurrent()) return;
 				console.error("[useWebSocket] Error:", event);
+				failed = true;
 				updateState("error");
 			};
 

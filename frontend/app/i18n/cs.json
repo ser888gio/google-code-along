@@ -39,6 +39,7 @@
 	"voice.connecting": "Připojuji...",
 	"voice.chat_ended": "Chat ukončen",
 	"voice.conn_failed": "Připojení selhalo. Zkuste přepnout hlasový režim.",
+	"voice.audio_init_failed": "Hlasový režim nemohl v tomto prohlížeči spustit přehrávání zvuku.",
 	"modal.attach_file": "Připojit soubor",
 	"modal.rate_session": "Ohodnoťte tuto relaci",
 	"modal.rate_desc": "Vaše hodnocení ukončí chat a pomůže zlepšit konzultanta.",
@@ -130,5 +131,6 @@
 	"analysis.form_fields": "Shromážděná pole",
 	"analysis.finalizing": "Dokončuji vaši analýzu…",
 	"analysis.finalizing_desc": "AI shrnuje všechny shromážděné informace, prohledává minulé případy a klasifikuje nejlepší přístup. To trvá přibližně 30–60 sekund.",
+	"analysis.failed": "Analýzu se nepodařilo vytvořit. Pro nový pokus pošlete zprávu do chatu.",
 	"analysis.use_case": "Analýza případu použití"
 }

@@ -27,7 +27,6 @@ class FieldDef(TypedDict):
     multiline: NotRequired[bool]
     direct_chat: NotRequired[bool]
     match_terms: NotRequired[list[str]]
-    direct_chat_patterns: NotRequired[list[str]]
     validation_mode: NotRequired[str]
     acceptance_mode: NotRequired[str]
     expected_shape: NotRequired[str]
@@ -53,11 +52,6 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "ai_extractable": True,
         "direct_chat": True,
         "match_terms": ["use case title", "nazev", "title"],
-        "direct_chat_patterns": [
-            r"\buse\s+case\s+title\b",
-            r"\bnazev\b.*\buse\s+case\b",
-            r"\bnazev\b.*\bpripad\b",
-        ],
         "validation_mode": "soft",
         "acceptance_mode": "direct_answer",
         "expected_shape": ("Short English noun phrase naming the deliverable (2-6 words)."),
@@ -78,12 +72,6 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "ai_extractable": True,
         "direct_chat": True,
         "match_terms": ["department", "oddeleni", "utvar", "business unit"],
-        "direct_chat_patterns": [
-            r"\bdepartment\b",
-            r"\boddeleni\b",
-            r"\butvar\b",
-            r"\bbusiness\s+unit\b",
-        ],
         "validation_mode": "strict",
         "acceptance_mode": "direct_answer",
         "expected_shape": "Specific department / business unit name or code.",
@@ -103,11 +91,6 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
         "ai_extractable": True,
         "direct_chat": True,
         "match_terms": ["requester", "zadatel", "zadavatel"],
-        "direct_chat_patterns": [
-            r"\brequestor\b",
-            r"\bzadatel\b",
-            r"\bzadavatel\b",
-        ],
         "validation_mode": "strict",
         "acceptance_mode": "direct_answer",
         "expected_shape": ("Name, email, or department-code of the person making the request."),
@@ -131,11 +114,6 @@ FIELD_SCHEMA: dict[str, FieldDef] = {
             "produktovy vlastnik",
             "vlastnik produktu",
             "owner",
-        ],
-        "direct_chat_patterns": [
-            r"\bproduct\s+owner\b",
-            r"\bproduktov(?:y|eho)\s+vlastnik\b",
-            r"\bvlastnik\s+produktu\b",
         ],
         "validation_mode": "strict",
         "acceptance_mode": "direct_answer",

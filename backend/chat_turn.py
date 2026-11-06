@@ -37,12 +37,12 @@ from direct_field_context import build_augmented_user_message, clean_direct_fiel
 from field_schema import FIELD_LABELS, FIELD_SCHEMA
 from firestore import (
     append_conversation_turn,
+    claim_finalization,
     get_accepted_rs_fields,
     get_deferred_fields,
     get_discovery_state,
     get_workflow_state,
     remove_deferred_fields,
-    set_finalization_pending,
     upsert_deferred_fields,
     upsert_discovery_state,
     upsert_workflow_state,
@@ -177,16 +177,24 @@ def _start_finalization(session_id: str) -> bool:
 
     Returns False when finalization is already running or complete.
     """
-    state = WorkflowState.from_dict(get_workflow_state(session_id))
-    path = _PATH_TO_FINALIZING.get(state.phase)
-    if path is None:
+    previous: Phase | None = None
+
+    def advance(stored: dict | None) -> dict | None:
+        nonlocal previous
+        state = WorkflowState.from_dict(stored)
+        path = _PATH_TO_FINALIZING.get(state.phase)
+        if path is None:
+            return None
+        previous = state.phase
+        for event in path:
+            state.transition(event)
+        return state.to_dict()
+
+    if not claim_finalization(session_id, advance):
         return False
-    previous = state.phase
-    for event in path:
-        state.transition(event)
-    set_finalization_pending(session_id, workflow_state=state.to_dict())
     logger.info(
-        f"Workflow phase changed: event=workflow_phase_changed session_id={session_id} from={previous} to={state.phase}"
+        f"Workflow phase changed: event=workflow_phase_changed session_id={session_id} "
+        f"from={previous} to={Phase.FINALIZING}"
     )
     return True
 
