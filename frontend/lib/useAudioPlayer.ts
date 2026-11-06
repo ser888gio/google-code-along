@@ -5,8 +5,8 @@ import { useCallback, useRef, useState } from "react";
 interface UseAudioPlayerReturn {
 	/** Whether audio is currently being played */
 	isPlaying: boolean;
-	/** Initialize the player (must be called after user gesture) */
-	init: () => Promise<void>;
+	/** Initialize the player (must be called after user gesture); false if it failed */
+	init: () => Promise<boolean>;
 	/** Enqueue a chunk of PCM audio (Int16, 24 kHz mono) for playback */
 	enqueue: (pcmData: ArrayBuffer) => void;
 	/** Signal that no more audio chunks will arrive — play until buffer drains */
@@ -35,7 +35,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 	const initializedRef = useRef(false);
 
 	const init = useCallback(async () => {
-		if (initializedRef.current) return;
+		if (initializedRef.current) return true;
 
 		try {
 			setError(null);
@@ -63,11 +63,16 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 			workletNode.connect(audioContext.destination);
 
 			initializedRef.current = true;
+			return true;
 		} catch (err) {
+			audioContextRef.current?.close();
+			audioContextRef.current = null;
+			workletNodeRef.current = null;
 			const message =
 				err instanceof Error ? err.message : "Failed to init audio player";
 			setError(message);
 			console.error("[useAudioPlayer] init failed:", err);
+			return false;
 		}
 	}, []);
 

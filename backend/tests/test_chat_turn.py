@@ -5,6 +5,9 @@ import pytest
 from agent.discovery_agent import pick_next_active_field
 from chat_turn import _is_finalize_choice, _start_finalization, prepare_workflow_turn, run_turn_postprocessing
 from field_schema import FIELD_SCHEMA
+from firestore.writer import get_final_analysis, get_workflow_state, upsert_workflow_state
+
+from tests.fake_firestore import FakeFirestore, fake_transactional
 
 
 def _std_patches(**overrides):
@@ -431,35 +434,52 @@ def test_finalization_phases_are_not_overwritten_by_a_chat_turn(phase):
     mock_upsert.assert_not_called()
 
 
-@pytest.mark.parametrize("phase", ["discovery", "wrap_up", "failed", "ready_to_finalize"])
-def test_start_finalization_moves_any_open_phase_to_finalizing(phase):
-    mock_pending = MagicMock(return_value=None)
-    with (
-        patch("chat_turn.get_workflow_state", MagicMock(return_value={"phase": phase})),
-        patch("chat_turn.set_finalization_pending", mock_pending),
-    ):
-        assert _start_finalization("sess1") is True
+@pytest.fixture
+def stored_session(monkeypatch):
+    """A real (fake-backed) Firestore session document, written through the writer's own transactions."""
+    db = FakeFirestore()
+    monkeypatch.setattr("firestore.writer._client", lambda: db)
+    monkeypatch.setattr("firestore.writer.firestore.transactional", fake_transactional, raising=False)
 
-    assert mock_pending.call_args.kwargs["workflow_state"]["phase"] == "finalizing"
+    def store(phase: str) -> None:
+        upsert_workflow_state("sess1", {"phase": phase})
+
+    return store
+
+
+@pytest.mark.parametrize("phase", ["discovery", "wrap_up", "failed", "ready_to_finalize"])
+def test_start_finalization_moves_any_open_phase_to_finalizing(stored_session, phase):
+    stored_session(phase)
+
+    assert _start_finalization("sess1") is True
+
+    assert get_workflow_state("sess1")["phase"] == "finalizing"
+    assert get_final_analysis("sess1") == {"finalization_status": "pending"}
 
 
 @pytest.mark.parametrize("phase", ["finalizing", "complete"])
-def test_start_finalization_refuses_when_running_or_done(phase):
-    mock_pending = MagicMock(return_value=None)
-    with (
-        patch("chat_turn.get_workflow_state", MagicMock(return_value={"phase": phase})),
-        patch("chat_turn.set_finalization_pending", mock_pending),
-    ):
-        assert _start_finalization("sess1") is False
+def test_start_finalization_refuses_when_running_or_done(stored_session, phase):
+    stored_session(phase)
 
-    mock_pending.assert_not_called()
+    assert _start_finalization("sess1") is False
+
+    assert get_workflow_state("sess1")["phase"] == phase
+    assert get_final_analysis("sess1") is None
 
 
-def test_postprocessing_does_not_launch_a_second_finalizer():
+def test_a_second_finalization_start_is_refused(stored_session):
+    stored_session("wrap_up")
+
+    results = [_start_finalization("sess1"), _start_finalization("sess1")]
+
+    assert results == [True, False]
+
+
+def test_postprocessing_does_not_launch_a_second_finalizer(stored_session):
+    stored_session("finalizing")
     mock_finalizer = AsyncMock()
     with (
         patch("chat_turn.append_conversation_turn", MagicMock()),
-        patch("chat_turn.get_workflow_state", MagicMock(return_value={"phase": "finalizing"})),
         patch("chat_turn.run_finalizer", mock_finalizer),
     ):
         asyncio.run(

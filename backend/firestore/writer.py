@@ -14,6 +14,7 @@ have a value — previously filled fields are never erased.
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, TypedDict, Unpack, cast
 
@@ -665,25 +666,36 @@ def _with_workflow_state(payload: dict, workflow_state: dict | None) -> dict:
     return payload
 
 
-def set_finalization_pending(session_id: str, workflow_state: dict | None = None) -> None:
-    """Mark the session as finalization in-progress.
+def claim_finalization(session_id: str, advance: Callable[[dict | None], dict | None]) -> bool:
+    """Move the stored workflow state into finalization and mark the analysis pending, atomically.
 
-    Called when finalization starts so the frontend can show a spinner while
-    run_finalizer() runs in the background.
+    `advance` receives the stored workflow state and returns the new one, or None to refuse.
+    The read and the write share one transaction, so two turns that finish at the same time
+    cannot both start the finalizer.
     """
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
-    ref.set(
-        _with_workflow_state(
-            {
-                "session_id": session_id,
-                "finalization_status": "pending",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-            workflow_state,
-        ),
-        merge=True,
-    )
+
+    def _claim(transaction: Any) -> bool:
+        snap = cast(DocumentSnapshot, ref.get(transaction=transaction))
+        new_state = advance(_parse_workflow_state(snap.to_dict() if snap.exists else None))
+        if new_state is None:
+            return False
+        transaction.set(
+            ref,
+            _with_workflow_state(
+                {
+                    "session_id": session_id,
+                    "finalization_status": "pending",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                new_state,
+            ),
+            merge=True,
+        )
+        return True
+
+    return cast(bool, firestore.transactional(_claim)(client.transaction()))
 
 
 def upsert_final_analysis(session_id: str, analysis: dict, workflow_state: dict | None = None) -> None:
@@ -879,9 +891,11 @@ def get_workflow_state(session_id: str) -> dict | None:
     client = _client()
     ref = client.collection(_COLLECTION).document(session_id)
     snap = _snap(ref)
-    if not snap.exists:
-        return None
-    json_str = (snap.to_dict() or {}).get("workflow_state_json")
+    return _parse_workflow_state(snap.to_dict() if snap.exists else None)
+
+
+def _parse_workflow_state(doc: dict | None) -> dict | None:
+    json_str = (doc or {}).get("workflow_state_json")
     if not json_str:
         return None
     try:

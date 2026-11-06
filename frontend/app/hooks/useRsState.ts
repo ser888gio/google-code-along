@@ -165,7 +165,17 @@ export function useRsState(sessionId: string | null, onSaveError: () => void) {
 		}
 	}, []);
 
-	const persist = usePersistRsPatch(applyExtraction, onSaveError);
+	const persistNow = usePersistRsPatch(applyExtraction, onSaveError);
+	const inFlightSavesRef = useRef<Set<Promise<void>>>(new Set());
+	const persist = useCallback(
+		(sid: string, patch: Parameters<typeof persistNow>[1]) => {
+			const save = persistNow(sid, patch);
+			inFlightSavesRef.current.add(save);
+			void save.finally(() => inFlightSavesRef.current.delete(save));
+			return save;
+		},
+		[persistNow],
+	);
 
 	// â”€â”€ setUserField â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 	// Immediate optimistic update; debounced PATCH after 600ms.
@@ -386,12 +396,16 @@ export function useRsState(sessionId: string | null, onSaveError: () => void) {
 	}, []);
 
 	// â”€â”€ flushPendingPatches â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-	// Cancels all pending debounce timers and immediately PATCHes their values.
+	// Cancels all pending debounce timers, immediately PATCHes their values and
+	// waits for saves already in flight.
 	// Call before any action that reads the backend state (e.g. document download).
 
 	const flushPendingPatches = useCallback(async () => {
 		const pending = [...pendingPatchValuesRef.current.entries()];
-		if (!pending.length || !sessionId) return;
+		if (!pending.length || !sessionId) {
+			await Promise.all(inFlightSavesRef.current);
+			return;
+		}
 		for (const [key] of pending) {
 			const timer = debounceRefs.current.get(key);
 			if (timer) {
@@ -417,6 +431,7 @@ export function useRsState(sessionId: string | null, onSaveError: () => void) {
 		if (clearKeys.length) {
 			await persist(sessionId, { action: "clear", keys: clearKeys });
 		}
+		await Promise.all(inFlightSavesRef.current);
 	}, [sessionId, persist]);
 
 	// â”€â”€ reset â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

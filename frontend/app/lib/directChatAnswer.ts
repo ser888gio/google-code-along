@@ -6,7 +6,7 @@
 
 import {
 	DEFERRED_DIRECT_ANSWER_PATTERNS,
-	DIRECT_CHAT_FIELD_PATTERNS,
+	DIRECT_CHAT_FIELD_KEYS,
 	type DirectChatFieldKey,
 } from "../generated/rsSchema";
 
@@ -24,15 +24,10 @@ function normalizeForMatch(value: string): string {
 	);
 }
 
-export function inferDirectChatFieldFromAssistant(
-	text: string,
-): DirectChatFieldKey | null {
-	const normalized = normalizeForMatch(text);
-	for (const field of DIRECT_CHAT_FIELD_PATTERNS) {
-		if (field.patterns.some((p) => new RegExp(p).test(normalized)))
-			return field.key;
-	}
-	return null;
+export function asDirectChatFieldKey(key: string): DirectChatFieldKey | null {
+	return (DIRECT_CHAT_FIELD_KEYS as readonly string[]).includes(key)
+		? (key as DirectChatFieldKey)
+		: null;
 }
 
 function isDeferredDirectAnswer(text: string): boolean {

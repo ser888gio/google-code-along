@@ -5,7 +5,6 @@ from firestore.writer import (
     append_conversation_turn,
     get_final_analysis,
     set_finalization_error,
-    set_finalization_pending,
     upsert_discovery_state,
     upsert_final_analysis,
 )
@@ -17,23 +16,6 @@ def _mock_client():
     client = MagicMock()
     client.collection.return_value.document.return_value = doc_ref
     return client, doc_ref
-
-
-# ---------------------------------------------------------------------------
-# set_finalization_pending
-# ---------------------------------------------------------------------------
-
-
-def test_set_finalization_pending_writes_pending_status_with_merge():
-    client, doc_ref = _mock_client()
-    with patch("firestore.writer._client", return_value=client):
-        set_finalization_pending("sess1")
-
-    doc_ref.set.assert_called_once()
-    payload = doc_ref.set.call_args.args[0]
-    assert payload["finalization_status"] == "pending"
-    assert payload["session_id"] == "sess1"
-    assert doc_ref.set.call_args.kwargs.get("merge") is True
 
 
 # ---------------------------------------------------------------------------
