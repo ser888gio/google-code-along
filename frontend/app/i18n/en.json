@@ -39,6 +39,7 @@
 	"voice.connecting": "Connecting...",
 	"voice.chat_ended": "Chat ended",
 	"voice.conn_failed": "Connection failed. Try toggling voice mode.",
+	"voice.audio_init_failed": "Voice mode could not start audio playback in this browser.",
 	"modal.attach_file": "Attach a file",
 	"modal.rate_session": "Rate this session",
 	"modal.rate_desc": "Your rating closes the chat and helps improve the consultant.",
@@ -130,5 +131,6 @@
 	"analysis.form_fields": "Collected Form Fields",
 	"analysis.finalizing": "Finalizing your analysis…",
 	"analysis.finalizing_desc": "The AI is synthesising all collected information, searching past cases, and classifying the best approach. This takes about 30–60 seconds.",
+	"analysis.failed": "The analysis could not be generated. Send a message in the chat to try again.",
 	"analysis.use_case": "Use Case Analysis"
 }

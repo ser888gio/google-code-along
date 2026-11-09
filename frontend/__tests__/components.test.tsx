@@ -569,7 +569,11 @@ describe("ChatPage — direct chat field answers", () => {
 		mockPatchRsFieldState.mockResolvedValue(null);
 	});
 
-	function resolveTwoTurns(firstReply: string, secondReply = "Dekuji.") {
+	function resolveTwoTurns(
+		firstReply: string,
+		activeField: string | null,
+		secondReply = "Dekuji.",
+	) {
 		mockStreamChat
 			.mockImplementationOnce(
 				async (
@@ -578,8 +582,14 @@ describe("ChatPage — direct chat field answers", () => {
 					onChunk: (text: string) => void,
 					onSessionId: (id: string) => void,
 					onDone: () => Promise<void>,
+					_onError: unknown,
+					_onFinalizing: unknown,
+					_values: unknown,
+					_deferred: unknown,
+					onActiveField: (key: string) => void,
 				) => {
 					onSessionId("test-session");
+					if (activeField) onActiveField(activeField);
 					onChunk(firstReply);
 					await onDone();
 				},
@@ -600,7 +610,7 @@ describe("ChatPage — direct chat field answers", () => {
 	}
 
 	it("fills Product Owner immediately when the user answers the direct question", async () => {
-		resolveTwoTurns("Kdo je Product Owner?");
+		resolveTwoTurns("Kdo je Product Owner?", "product_owner");
 		renderPage();
 
 		const textarea = screen.getByPlaceholderText(/Describe your project/i);
@@ -634,8 +644,35 @@ describe("ChatPage — direct chat field answers", () => {
 		);
 	});
 
+	it("does not fill a field the wrap-up question merely mentions", async () => {
+		resolveTwoTurns(
+			"Chybi nam jeste oddeleni. Chcete analyzu finalizovat?",
+			null,
+		);
+		renderPage();
+
+		const textarea = screen.getByPlaceholderText(/Describe your project/i);
+		await userEvent.type(textarea, "To je vse.");
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+		});
+		await waitFor(() => {
+			expect(
+				screen.getByText(/Chcete analyzu finalizovat/),
+			).toBeInTheDocument();
+		});
+
+		await userEvent.type(textarea, "Finalizovat");
+		await act(async () => {
+			fireEvent.click(screen.getByRole("button", { name: /Send/i }));
+		});
+
+		expect(mockPatchRsFieldState).not.toHaveBeenCalled();
+		expect(mockStreamChat.mock.calls[1][7]?.department).toBeUndefined();
+	});
+
 	it("does not fill Product Owner when the user defers the answer", async () => {
-		resolveTwoTurns("Kdo je Product Owner?");
+		resolveTwoTurns("Kdo je Product Owner?", "product_owner");
 		renderPage();
 
 		const textarea = screen.getByPlaceholderText(/Describe your project/i);

@@ -18,7 +18,13 @@ import {
 
 import type { Role } from "./useMessages";
 
-export type FinalizingStatus = "idle" | "finalizing" | "complete";
+export type FinalizingStatus = "idle" | "finalizing" | "complete" | "failed";
+
+const STATUS_FROM_ANALYSIS: Record<string, FinalizingStatus> = {
+	pending: "finalizing",
+	complete: "complete",
+	error: "failed",
+};
 
 interface LoadedSession {
 	messages: Array<{ role: Role; text: string; message_id?: string }>;
@@ -85,8 +91,7 @@ export function useChatSession(setError: (msg: string) => void) {
 				analysisResult.status === "complete"
 					? analysisResult.analysis ?? null
 					: null,
-			finalizingStatus:
-				analysisResult.status === "complete" ? "complete" : "idle",
+			finalizingStatus: STATUS_FROM_ANALYSIS[analysisResult.status] ?? "idle",
 		};
 	}
 

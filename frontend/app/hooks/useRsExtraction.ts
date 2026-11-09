@@ -11,6 +11,11 @@ import {
 } from "../../lib/api";
 import type { FinalizingStatus } from "./useChatSession";
 
+const POLL_INTERVAL_MS = 5000;
+// ponytail: a fixed count, not backoff; three misses (~15 s) rides out a blip
+// without leaving the user on the finalizing screen indefinitely.
+const MAX_UNREACHABLE_POLLS = 3;
+
 export function useRsExtraction(
 	applyExtraction: (partial: RsPartialData) => void,
 ) {
@@ -23,24 +28,42 @@ export function useRsExtraction(
 	);
 
 	const extractNonceRef = useRef(0);
-	const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+	const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+	function stopPolling() {
+		if (pollingRef.current) clearTimeout(pollingRef.current);
+		pollingRef.current = null;
+	}
+
+	// The next poll is scheduled only after the previous answer arrives, so a
+	// slow backend never has requests piling up.
 	function startPolling(sessionId: string) {
-		if (pollingRef.current) clearInterval(pollingRef.current);
-		pollingRef.current = setInterval(async () => {
+		stopPolling();
+		let unreachableInARow = 0;
+		const poll = async () => {
 			const result = await getAnalysis(sessionId);
-			if (result.status === "complete" && result.analysis) {
-				if (pollingRef.current) {
-					clearInterval(pollingRef.current);
-					pollingRef.current = null;
-				}
-				setFinalAnalysis(result.analysis);
+			if (pollingRef.current !== timer) return;
+			const done = result.status === "complete" && result.analysis;
+			unreachableInARow =
+				result.status === "unreachable" ? unreachableInARow + 1 : 0;
+			if (done) {
+				pollingRef.current = null;
+				setFinalAnalysis(done);
 				setFinalizingStatus("complete");
+			} else if (
+				result.status === "error" ||
+				unreachableInARow >= MAX_UNREACHABLE_POLLS
+			) {
+				pollingRef.current = null;
+				setFinalizingStatus("failed");
+			} else {
+				timer = setTimeout(poll, POLL_INTERVAL_MS);
+				pollingRef.current = timer;
 			}
-		}, 5000);
-		return () => {
-			if (pollingRef.current) clearInterval(pollingRef.current);
 		};
+		let timer = setTimeout(poll, POLL_INTERVAL_MS);
+		pollingRef.current = timer;
+		return stopPolling;
 	}
 
 	function beginExtraction(): number {
@@ -64,10 +87,7 @@ export function useRsExtraction(
 		setFinalizingStatus("idle");
 		setFinalAnalysis(null);
 		setIsExtracting(false);
-		if (pollingRef.current) {
-			clearInterval(pollingRef.current);
-			pollingRef.current = null;
-		}
+		stopPolling();
 	}
 
 	return {

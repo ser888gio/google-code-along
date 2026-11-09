@@ -1,0 +1,7 @@
+[default.extend-words]
+# Czech words and regex stems used in keyword matching and test conversations.
+generat = "generat"
+nam = "nam"
+tak = "tak"
+# Deliberately misheard speech in voice-transcript tests.
+helo = "helo"

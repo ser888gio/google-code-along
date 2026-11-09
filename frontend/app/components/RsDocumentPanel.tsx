@@ -164,6 +164,15 @@ function AnalysisTabContent({
 	if (finalizingStatus === "complete" && finalAnalysis)
 		return <AnalysisPanel analysis={finalAnalysis} />;
 	if (finalizingStatus === "finalizing") return <FinalizingOverlay />;
+	if (finalizingStatus === "failed")
+		return (
+			<div
+				role="alert"
+				className="flex h-full items-center justify-center px-6 text-center text-sm text-red-600"
+			>
+				{t("analysis.failed")}
+			</div>
+		);
 	return (
 		<div className="flex h-full items-center justify-center text-sm text-gray-400">
 			{t("analysis.pending")}

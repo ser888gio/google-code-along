@@ -24,7 +24,7 @@ import LanguageSwitcher from "./i18n/LanguageSwitcher";
 import { useLocale } from "./i18n/LocaleContext";
 import {
 	type DirectChatFieldKey,
-	inferDirectChatFieldFromAssistant,
+	asDirectChatFieldKey,
 } from "./lib/directChatAnswer";
 
 export default function ChatPage() {
@@ -127,6 +127,8 @@ export default function ChatPage() {
 				currentValues,
 			);
 
+		// The backend names the field it asks about next; a turn without one asks about none.
+		pendingDirectChatFieldRef.current = null;
 		const userId = msgs.addMessage("user", text);
 		setIsStreaming(true);
 		const assistantId = msgs.addMessage("assistant", "", true);
@@ -147,8 +149,6 @@ export default function ChatPage() {
 			async () => {
 				msgs.finalizeMessage(assistantId);
 				setIsStreaming(false);
-				pendingDirectChatFieldRef.current =
-					inferDirectChatFieldFromAssistant(assistantText);
 
 				if (capturedSessionId) {
 					rs.setIsExtracting(true);
@@ -177,7 +177,10 @@ export default function ChatPage() {
 			},
 			valuesForRequest,
 			deferredForRequest,
-			(key) => setActiveWorkflowField(key),
+			(key) => {
+				setActiveWorkflowField(key);
+				pendingDirectChatFieldRef.current = asDirectChatFieldKey(key);
+			},
 			(messageId) => msgs.setMessageBackendId(assistantId, messageId),
 			(choices) => msgs.setMessageChoices(assistantId, choices),
 			(cleanText) => msgs.replaceMessageText(assistantId, cleanText),

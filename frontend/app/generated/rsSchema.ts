@@ -505,46 +505,13 @@ export const REQUIRED_FIELD_KEYS = [
   "data_security_classification",
   "solution_type"
 ] as const;
-export type DirectChatFieldKey = "use_case_title" | "department" | "requester" | "product_owner";
-
-export const DIRECT_CHAT_FIELD_PATTERNS: Array<{
-  key: DirectChatFieldKey;
-  patterns: string[];
-}> = [
-  {
-    "key": "use_case_title",
-    "patterns": [
-      "\\buse\\s+case\\s+title\\b",
-      "\\bnazev\\b.*\\buse\\s+case\\b",
-      "\\bnazev\\b.*\\bpripad\\b"
-    ]
-  },
-  {
-    "key": "department",
-    "patterns": [
-      "\\bdepartment\\b",
-      "\\boddeleni\\b",
-      "\\butvar\\b",
-      "\\bbusiness\\s+unit\\b"
-    ]
-  },
-  {
-    "key": "requester",
-    "patterns": [
-      "\\brequestor\\b",
-      "\\bzadatel\\b",
-      "\\bzadavatel\\b"
-    ]
-  },
-  {
-    "key": "product_owner",
-    "patterns": [
-      "\\bproduct\\s+owner\\b",
-      "\\bproduktov(?:y|eho)\\s+vlastnik\\b",
-      "\\bvlastnik\\s+produktu\\b"
-    ]
-  }
-];
+export const DIRECT_CHAT_FIELD_KEYS = [
+  "use_case_title",
+  "department",
+  "requester",
+  "product_owner"
+] as const;
+export type DirectChatFieldKey = (typeof DIRECT_CHAT_FIELD_KEYS)[number];
 
 export const DEFERRED_DIRECT_ANSWER_PATTERNS = [
   "\\bnevim\\b",
