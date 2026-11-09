@@ -1,0 +1,23 @@
+{
+  "name": "google-code-along",
+  "version": "1.0.0",
+  "description": "Monorepo for the AI-Assisted Requirement Specification Generator.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ser888gio/google-code-along.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ser888gio/google-code-along/issues"
+  },
+  "homepage": "https://github.com/ser888gio/google-code-along#readme"
+}
